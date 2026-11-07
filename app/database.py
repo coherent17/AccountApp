@@ -10,7 +10,7 @@
     轉帳 transfer : 轉出帳戶 -amount，轉入帳戶 +to_amount
     調整 adjust   : 帳戶 +amount（市值或餘額校正，對方科目為未實現評價損益）
     分錄 journal  : 多行借貸分錄（txn_lines），借貸以本位幣表示，帳戶行另存原幣 orig；
-                    投資科目行可連結投資標的（security_id、shares），由投資明細帳自動評價
+                    投資科目行可連結投資標的（security_id、shares），計入投資明細帳
 * 所有計算都透過三個檢視表（view）取得「過帳」資料，作廢的傳票一律排除：
     v_acc_post     帳戶過帳（原幣帶號增減）
     v_cat_post     收入／支出科目過帳（本位幣，收入或費用方向為正）
@@ -28,7 +28,7 @@ import shutil
 import sqlite3
 from typing import Iterable
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 ASSET_CATEGORIES = [
     "現金", "銀行存款", "定期存款", "外幣存款", "短期投資", "股票", "基金", "債券",
@@ -137,6 +137,7 @@ DEFAULT_SETTINGS = {
     "allocation_targets": "",
     "retire_params": "",
     "online_updates": "0",
+    "journal_templates": "",
 }
 
 _TABLES = """
@@ -357,6 +358,7 @@ class Database:
         self.path = path
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         self.conn: sqlite3.Connection | None = None
+        self._restating = False
         self._open()
 
     # ================================================================== 連線與升級
@@ -375,7 +377,9 @@ class Database:
             self._migrate_v2_to_v3()
         self.conn.executescript(_TABLES)
         self.conn.executescript(_VIEWS)
-        self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        # 投資分錄重編完成才標記為第 4 版，中途失敗時下次開啟會重做
+        restate = bool(has_tables) and version < 4
+        self.conn.execute(f"PRAGMA user_version = {3 if restate else SCHEMA_VERSION}")
         for key, value in DEFAULT_SETTINGS.items():
             self.conn.execute(
                 "INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, value))
@@ -384,6 +388,10 @@ class Database:
         self._ensure_codes()
         self.conn.commit()
         self.conn.execute("PRAGMA foreign_keys = ON")
+        if restate:
+            self._migrate_v3_to_v4()
+            self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            self.conn.commit()
 
     def _backup_before_upgrade(self, version: int) -> None:
         """升級資料庫結構前，先在同一資料夾留一份原始檔（只做一次）。"""
@@ -398,6 +406,48 @@ class Database:
             bak.close()
         except (OSError, sqlite3.Error):
             pass
+
+    def _migrate_v3_to_v4(self) -> None:
+        """買賣不再自動評價：依新規則重編所有投資系統分錄（含已結帳期間，以維持帳與明細一致）。
+        重編前的資料已留在升級前備份；銀行對帳勾選與憑證附件會接回重編後的傳票。"""
+        from .investments import Investments
+        inv = Investments(self)
+        self._restating = True
+        try:
+            for sec in self._q("SELECT id, name FROM securities"):
+                src = f"inv:{sec['id']}"
+                old = self._q("SELECT id, date, note FROM transactions WHERE source = ? ORDER BY id",
+                              (src,))
+                if not old:
+                    continue
+                ids = ",".join(str(t["id"]) for t in old)
+                recon = self._q(f"SELECT * FROM recon_items WHERE txn_id IN ({ids})")
+                try:
+                    inv.rebuild(sec["id"], min(t["date"] for t in old))
+                except ValueError as e:
+                    self._log("升級失敗", None, f"{sec['name']} 投資分錄重編失敗：{e}")
+                    continue
+                new: dict[tuple, list[int]] = {}
+                for t in self._q("SELECT id, date, note FROM transactions WHERE source = ?"
+                                 " ORDER BY id", (src,)):
+                    new.setdefault((t["date"], t["note"]), []).append(t["id"])
+                for t in old:
+                    same = new.get((t["date"], t["note"]))
+                    if not same:
+                        continue
+                    nid = same.pop(0)
+                    self.conn.execute("UPDATE attachments SET txn_id = ? WHERE txn_id = ?", (nid, t["id"]))
+                    for r in recon:
+                        if r["txn_id"] == t["id"] and self._q1(
+                                "SELECT 1 FROM txn_lines WHERE txn_id = ? AND account_id = ?",
+                                (nid, r["account_id"])):
+                            self.conn.execute(
+                                "INSERT OR IGNORE INTO recon_items(recon_id, txn_id, account_id)"
+                                " VALUES (?, ?, ?)", (r["recon_id"], nid, r["account_id"]))
+            self._log("系統升級", None, "投資買賣不再自動評價，已重編投資系統分錄；只保留手動輸入市價的評價")
+            self.conn.commit()
+        finally:
+            self._restating = False
 
     def _migrate_v1_to_v2(self) -> None:
         """第 1 版資料庫升級：新增欄位、重建交易表（放寬類型限制）。"""
@@ -501,7 +551,7 @@ class Database:
 
     def _check_open(self, date: str) -> None:
         c = self.closed_until
-        if c and date <= c:
+        if c and date <= c and not self._restating:
             raise ValueError(f"{date.replace('-', '/')} 屬於已結帳期間（結帳至 {c.replace('-', '/')}），"
                              "無法新增、修改或作廢。如需更正，請使用「迴轉」在未結帳期間產生反向傳票，"
                              "或先到「設定」解除結帳。")
@@ -901,7 +951,7 @@ class Database:
             (txn_id,))}
 
     def _sync_securities(self, sids: set[int], from_date: str) -> None:
-        """分錄連結投資標的時，重算持股並自該日起重新產生評價分錄。
+        """分錄連結投資標的時，重算持股並自該日起重新產生系統分錄。
         持股計算失敗（例如賣出超過持股）時復原本次變更並回報錯誤。"""
         if not sids:
             return

@@ -173,7 +173,7 @@ d.save()
 j = db.query_transactions(keyword="好市多分攤")[0]
 assert j["type"] == "journal" and j["amount"] == 1000 and j["exp"] == 1000, j
 
-# 投資：買進、更新股價
+# 投資：買進、市價評價
 inv = Investments(db)
 sec = inv.holdings()[0]
 t = TradeDialog(ctx, "buy", sec["id"], parent=win)
@@ -297,4 +297,104 @@ assert vouchers and all(any("中華電" in (r["summary"] + r["name"]) for r in r
 win.go("investments", animate=False)
 ip.refresh()
 assert any(e.get("txn_id") for e in ip.ev.model_.rows)
+
+# Q1 日期可直接輸入（西元、民國、無分隔、只打月日）
+from PySide6.QtCore import QDate, Qt as _Qt  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
+from app.dialogs_invest import PriceDialog  # noqa: E402
+from app.dialogs_more import (JournalDialog, TemplateEditDialog, TemplateManagerDialog,  # noqa: E402
+                              load_templates, save_templates)
+from app.widgets import make_date_edit, parse_date_text  # noqa: E402
+
+y = QDate.currentDate().year()
+for text, want in (("2026/11/5", (2026, 11, 5)), ("115/11/5", (2026, 11, 5)), ("20261105", (2026, 11, 5)),
+                   ("1151105", (2026, 11, 5)), ("2026-1-31", (2026, 1, 31)), ("2026.11.05", (2026, 11, 5)),
+                   ("１１５／１１／５", (2026, 11, 5)), ("2026/11/05（週四）", (2026, 11, 5)),
+                   ("11/5", (y, 11, 5)), ("1105", (y, 11, 5))):
+    assert parse_date_text(text) == QDate(*want), text
+for text in ("", "abc", "2026/13/1", "2026/2/30", "12345"):
+    assert parse_date_text(text) is None, text
+de = make_date_edit("2026-11-07")
+seen = []
+de.dateChanged.connect(seen.append)
+de.show()
+le = de.lineEdit()
+le.selectAll()
+QTest.keyClicks(le, "115/10/5")
+QTest.keyClick(le, _Qt.Key.Key_Return)
+assert de.date() == QDate(2026, 10, 5) and seen == [QDate(2026, 10, 5)], (de.date(), seen)
+le.setText("2026/9/9")       # 尚未離開欄位時按儲存也要取得新日期
+assert de.date() == QDate(2026, 9, 9)
+le.setText("不是日期")
+assert de.date() == QDate(2026, 9, 9) and "2026/09/09" in le.text()
+de.showPopup()
+de.calendarWidget().clicked.emit(QDate(2026, 3, 1))
+assert de.date() == QDate(2026, 3, 1) and not de.calendarWidget().isVisible()
+de.close()
+j = JournalDialog(ctx, parent=win)
+j.date.lineEdit().setText("115/1/2")
+assert j.date.date() == QDate(2026, 1, 2)
+j.close()
+
+# Q2 資產負債表依科目代號排序並顯示代號
+rp = win.pages["reports"]
+rp.refresh_bs("2000-01-01", "2099-12-31")
+bs = db.balance_sheet("2099-12-31")
+want = [c for k in ("流動資產", "非流動資產", "流動負債", "非流動負債")
+        for c in sorted(a["code"] for a in bs["groups"][k])]
+tree = rp.bs
+shown = [tree.topLevelItem(i).text(0).strip().split("　")[0] for i in range(tree.topLevelItemCount())]
+assert [t for t in shown if t.isdigit()] == want, (shown, want)
+
+# Q3 新增、修改、刪除範本，重新開啟仍在
+cash_key = "account:%d" % db.list_accounts()[0]["id"]
+exp_key = "category:%d" % db.list_categories("expense")[0]["id"]
+n0 = len(load_templates(db))
+ed = TemplateEditDialog(ctx, "每月固定費用", [("debit", exp_key, "固定", 500), ("credit", cash_key, "", None)], parent=win)
+ed.save()
+assert ed.template and ed.template[1][0][3] == 500, ed.msg.text()
+save_templates(db, load_templates(db) + [ed.template])
+j = JournalDialog(ctx, parent=win)
+idx = j.template.findText("每月固定費用")
+assert idx > 0 and j.template.count() == n0 + 2
+j.apply_template(idx)
+assert j.table.cellWidget(0, 1).value() == 500 and j.table.cellWidget(0, 0).currentData() == exp_key
+assert j.table.cellWidget(1, 0).currentData() == cash_key
+assert j.table.cellWidget(1, 2).placeholderText() == "請輸入"
+j.table.cellWidget(1, 2).setValue(500)
+assert j.collect() and j.note.text() == "每月固定費用"
+j.close()
+m = TemplateManagerDialog(ctx, win)
+m.list.setCurrentRow(len(m.items) - 1)
+m.move(-1)
+assert load_templates(db)[-2][0] == "每月固定費用"
+m.list.setCurrentRow(len(m.items) - 2)
+m.delete()
+assert len(load_templates(db)) == n0
+dup = TemplateEditDialog(ctx, load_templates(db)[0][0], [("debit", exp_key, "", None), ("credit", cash_key, "", None)], parent=win)
+dup.save()
+assert dup.template is None
+# 內建範本的科目尚未建立時，修改不可遺失該行
+miss = [("debit", "liability:不存在的類別", "本金", None), ("credit", cash_key, "", None)]
+ed = TemplateEditDialog(ctx, "保留", miss, parent=win)
+ed.save()
+assert ed.template[1][0][1] == "liability:不存在的類別", ed.template
+
+# Q4 評價日可自選，列出當時持股，輸入市價才產生分錄
+pd = PriceDialog(ctx, win)
+pd.date.setDate(QDate(1999, 1, 1))
+assert not pd.holdings and not pd.edits
+pd.date.setDate(QDate.currentDate())
+assert pd.holdings and len(pd.edits) == len(pd.holdings)
+n1 = db.conn.execute("SELECT COUNT(*) FROM sec_events WHERE kind = 'price'").fetchone()[0]
+pd.save()
+assert db.conn.execute("SELECT COUNT(*) FROM sec_events WHERE kind = 'price'").fetchone()[0] == n1
+pd.edits[0].setValue(pd.holdings[0]["avg_cost"] * 1.1)
+pd.save()
+hp = next(h for h in inv.holdings() if h["id"] == pd.holdings[0]["id"])
+assert hp["price_date"] == QDate.currentDate().toString("yyyy-MM-dd")
+ip = win.pages["investments"]
+ip.refresh()
+assert any(r["kind"] == "price" for r in ip.ev.model_.rows)
+
 print("CHART / JOURNAL-INVEST GUI TESTS PASSED")

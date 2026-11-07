@@ -17,7 +17,7 @@ from .theme import C, fmt_num, icon
 from .widgets import AmountEdit, Column, DataTable, button, info, iso, make_date_edit
 
 INVEST_HINT = ("投資科目（短期投資、長期投資等）可在複式分錄中連結投資標的與股數，"
-               "系統會依股價自動評價，差額列「未實現評價損益」。")
+               "評價請到「投資管理 → 市價評價」選日期並輸入市價，差額列「未實現評價損益」。")
 
 
 class SubjectDialog(BaseDialog):

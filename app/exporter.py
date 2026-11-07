@@ -806,7 +806,7 @@ def _investment_sheet(db: Database, ws, start: str, end: str, sub: str, bfmt: st
     inv = Investments(db)
     s = _Sheet(ws)
     r = s.title("投資明細表", sub.replace("期間", "基準日：" + end.replace("-", "/") + "　｜　交易期間"), 10)
-    s.header(r, ["代號", "名稱", "投資帳戶", "持股", "平均成本", "總成本", "現價", "市值", "未實現損益", "報酬率"])
+    s.header(r, ["代號", "名稱", "投資帳戶", "持股", "平均成本", "總成本", "最近評價市價", "帳面價值", "未實現損益", "報酬率"])
     hdr = r
     g1 = r + 1
     for i, h in enumerate(inv.holdings(end)):
@@ -818,8 +818,8 @@ def _investment_sheet(db: Database, ws, start: str, end: str, sub: str, bfmt: st
         s.cell(r, 4, h["shares"], "#,##0", fill=fill)
         s.cell(r, 5, f"=IFERROR(F{r}/D{r},0)", "#,##0.00", fill=fill)
         s.cell(r, 6, round(h["cost"], 2), bfmt, fill=fill)
-        s.cell(r, 7, h["price"], "#,##0.00", fill=fill)
-        s.cell(r, 8, f"=ROUND(D{r}*G{r},0)", bfmt, fill=fill, bold=True)
+        s.cell(r, 7, h["price"] or None, "#,##0.00", fill=fill)
+        s.cell(r, 8, h["market_value"], bfmt, fill=fill, bold=True)
         s.cell(r, 9, f"=H{r}-F{r}", bfmt, fill=fill)
         s.cell(r, 10, f"=IFERROR(I{r}/F{r},0)", PCT, fill=fill)
     g2 = r

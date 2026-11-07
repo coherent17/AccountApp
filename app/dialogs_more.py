@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import os
 
 from PySide6.QtCore import Qt
@@ -30,6 +31,59 @@ def _parse_key(s: str) -> dict:
     if kind == "category":
         return {"category_id": int(val)}
     return {"special": val}
+
+
+def load_templates(db) -> list[tuple]:
+    """常用分錄範本：[(名稱, [(借貸, 科目, 行備註, 金額), ...])]，未自訂時使用內建範本。"""
+    try:
+        saved = json.loads(db.get_setting("journal_templates") or "null")
+    except ValueError:
+        saved = None
+    rows = saved if isinstance(saved, list) else JournalDialog.TEMPLATES[1:]
+    return [(name, [(*ln, None)[:4] for ln in lines]) for name, lines in rows]
+
+
+def save_templates(db, templates: list[tuple]) -> None:
+    db.set_setting("journal_templates", json.dumps(templates, ensure_ascii=False))
+
+
+def resolve_template_key(db, chart_by_key: dict, spec: str):
+    """範本科目轉為會計科目：自訂範本存科目 id，內建範本依類別或名稱尋找。"""
+    if spec in chart_by_key:
+        return chart_by_key[spec]["key"]
+    kind, _, rest = spec.partition(":")
+    if kind == "special":
+        return ("special", rest)
+    if kind == "category":
+        k, _, name = rest.partition(":")
+        c = db.find_category(k, name)
+        return ("category", c["id"]) if c else None
+    accs = db.list_accounts()
+    for a in accs:
+        if a["kind"] == kind and (not rest or a["category"] == rest):
+            return ("account", a["id"])
+    if rest in INVESTMENT_CATEGORIES:
+        for a in accs:
+            if a["kind"] == "asset" and a["category"] in INVESTMENT_CATEGORIES:
+                return ("account", a["id"])
+    return None
+
+
+def subject_combo(chart: list[dict], key: tuple | None) -> QComboBox:
+    cb = QComboBox()
+    cb.setEditable(True)
+    cb.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+    cb.addItem("", "")
+    for a in chart:
+        cb.addItem(f"{a['code']}　{a['name']}（{a['group']}）", _key_str(a["key"]))
+    comp = cb.completer()
+    comp.setFilterMode(Qt.MatchFlag.MatchContains)
+    comp.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+    if key:
+        i = cb.findData(_key_str(key))
+        cb.setCurrentIndex(max(0, i))
+    cb.lineEdit().setPlaceholderText("輸入代號或名稱搜尋…")
+    return cb
 
 
 # ====================================================================== 複式分錄
@@ -77,21 +131,26 @@ class JournalDialog(BaseDialog):
         self.note = QLineEdit(txn["note"] if txn else note)
         self.note.setPlaceholderText("摘要，例如：房貸繳款 10 月")
         self.template = QComboBox()
-        for name, _ in self.TEMPLATES:
-            self.template.addItem(name)
         self.template.activated.connect(self.apply_template)
+        self._reload_templates()
+        self.tmpl_save = button("存成範本", tooltip="把目前的科目與金額存成常用範本")
+        self.tmpl_save.clicked.connect(self.save_as_template)
+        self.tmpl_manage = button("管理範本", tooltip="新增、修改、刪除或排序常用範本")
+        self.tmpl_manage.clicked.connect(self.manage_templates)
         top.addWidget(self.field_label("日期"), 0, 0)
         top.addWidget(self.date, 0, 1)
         top.addWidget(self.field_label("範本"), 0, 2)
         top.addWidget(self.template, 0, 3)
+        top.addWidget(self.tmpl_save, 0, 4)
+        top.addWidget(self.tmpl_manage, 0, 5)
         top.addWidget(self.field_label("摘要"), 1, 0)
-        top.addWidget(self.note, 1, 1, 1, 3)
+        top.addWidget(self.note, 1, 1, 1, 5)
         top.setColumnStretch(1, 1)
         top.setColumnStretch(3, 1)
         if txn:
             v = QLabel(f"傳票號碼：{voucher_no(txn['id'])}")
             v.setObjectName("Hint")
-            top.addWidget(v, 2, 0, 1, 4)
+            top.addWidget(v, 2, 0, 1, 6)
         self.root.addLayout(top)
 
         self.table = QTableWidget(0, 5)
@@ -134,7 +193,8 @@ class JournalDialog(BaseDialog):
         self.root.addWidget(self.inv_info)
         hint = QLabel("借方：資產增加、費用發生、負債減少；貸方：資產減少、收入發生、負債增加。"
                       "外幣帳戶請以新台幣（本位幣）金額輸入，系統會依匯率換算。"
-                      "投資科目（短期投資、長期投資等）請選擇投資標的並填股數，系統會依股價自動評價。")
+                      "投資科目（短期投資、長期投資等）請選擇投資標的並填股數；"
+                      "評價請到「投資管理 → 市價評價」選日期並輸入市價。")
         hint.setObjectName("Hint")
         hint.setWordWrap(True)
         self.root.addWidget(hint)
@@ -169,7 +229,7 @@ class JournalDialog(BaseDialog):
             self.add_row()
         if self.readonly:
             self.table.setEnabled(False)
-            for w in (self.date, self.note, self.template):
+            for w in (self.date, self.note, self.template, self.tmpl_save, self.tmpl_manage):
                 w.setEnabled(False)
             why = "此傳票已作廢。" if txn["void"] else "此傳票由「投資管理」自動產生，請到投資管理修改交易。"
             self.show_error(why)
@@ -190,27 +250,11 @@ class JournalDialog(BaseDialog):
         cb.lineEdit().setCursorPosition(0)
         cb.blockSignals(False)
 
-    def _combo(self, key: tuple | None) -> QComboBox:
-        cb = QComboBox()
-        cb.setEditable(True)
-        cb.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        cb.addItem("", "")
-        for a in self.chart:
-            cb.addItem(f"{a['code']}　{a['name']}（{a['group']}）", _key_str(a["key"]))
-        comp = cb.completer()
-        comp.setFilterMode(Qt.MatchFlag.MatchContains)
-        comp.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
-        if key:
-            i = cb.findData(_key_str(key))
-            cb.setCurrentIndex(max(0, i))
-        cb.lineEdit().setPlaceholderText("輸入代號或名稱搜尋…")
-        return cb
-
     def add_row(self, key=None, debit=None, credit=None, memo: str = "", security_id=None,
                 shares=None) -> None:
         r = self.table.rowCount()
         self.table.insertRow(r)
-        cb = self._combo(key)
+        cb = subject_combo(self.chart, key)
         self.table.setCellWidget(r, 0, cb)
         for col, val in ((1, debit), (2, credit)):
             ed = AmountEdit()
@@ -342,34 +386,48 @@ class JournalDialog(BaseDialog):
             self.table.removeRow(r)
         self.update_totals()
 
-    def _resolve_template_key(self, spec: str):
-        kind, _, rest = spec.partition(":")
-        if kind == "special":
-            return ("special", rest)
-        if kind == "category":
-            k, _, name = rest.partition(":")
-            c = self.db.find_category(k, name)
-            return ("category", c["id"]) if c else None
-        accs = self.db.list_accounts()
-        for a in accs:
-            if a["kind"] == kind and (not rest or a["category"] == rest):
-                return ("account", a["id"])
-        if rest in INVESTMENT_CATEGORIES:
-            for a in accs:
-                if a["kind"] == "asset" and a["category"] in INVESTMENT_CATEGORIES:
-                    return ("account", a["id"])
-        return None
+    def _reload_templates(self) -> None:
+        self.templates = [self.TEMPLATES[0]] + load_templates(self.db)
+        self.template.clear()
+        for name, _ in self.templates:
+            self.template.addItem(name)
 
     def apply_template(self, idx: int) -> None:
-        _, spec = self.TEMPLATES[idx]
+        name, spec = self.templates[idx]
         if not spec:
             return
         self.table.setRowCount(0)
-        for side, key, memo in spec:
-            self.add_row(self._resolve_template_key(key), memo=memo)
+        for side, key, memo, amount in spec:
+            debit = side == "debit"
+            self.add_row(resolve_template_key(self.db, self.chart_by_key, key),
+                         amount if debit else None, None if debit else amount, memo)
+            r = self.table.rowCount() - 1
+            self.table.cellWidget(r, 1 if debit else 2).setPlaceholderText("請輸入")
         if not self.note.text():
-            self.note.setText(self.TEMPLATES[idx][0].split("（")[0])
+            self.note.setText(name.split("（")[0])
         self.update_totals()
+
+    def save_as_template(self) -> None:
+        lines = []
+        for r in range(self.table.rowCount()):
+            key = self.table.cellWidget(r, 0).currentData()
+            d = self.table.cellWidget(r, 1).value() or 0
+            c = self.table.cellWidget(r, 2).value() or 0
+            if key:
+                lines.append(("credit" if c and not d else "debit", key,
+                              self.table.cellWidget(r, 4).text(), (d or c) or None))
+        if not lines:
+            self.show_error("請先選擇會計科目，再存成範本")
+            return
+        dlg = TemplateEditDialog(self.ctx, self.note.text().strip(), lines, parent=self)
+        if dlg.exec():
+            save_templates(self.db, load_templates(self.db) + [dlg.template])
+            self._reload_templates()
+            self.ctx.toast.emit(f"已存成範本「{dlg.template[0]}」")
+
+    def manage_templates(self) -> None:
+        TemplateManagerDialog(self.ctx, parent=self).exec()
+        self._reload_templates()
 
     def collect(self) -> list[dict]:
         lines = []
@@ -395,7 +453,7 @@ class JournalDialog(BaseDialog):
         return lines
 
     def _unlinked_investment_rows(self, lines: list[dict]) -> list[str]:
-        """投資科目已有標的、但這一行沒有連結標的（金額將不會自動評價）。"""
+        """投資科目已有標的、但這一行沒有連結標的（金額將不會計入持股）。"""
         names = []
         for ln in lines:
             aid = ln.get("account_id")
@@ -438,7 +496,7 @@ class JournalDialog(BaseDialog):
             lines = self.collect()
             loose = self._unlinked_investment_rows(lines)
             if loose and not ask(self, f"「{'、'.join(dict.fromkeys(loose))}」已有投資標的，"
-                                       "但這張分錄沒有選擇標的與股數，金額將不會計入持股、也不會自動評價。\n\n"
+                                       "但這張分錄沒有選擇標的與股數，金額將不會計入持股與成本。\n\n"
                                        "確定要這樣儲存嗎？", yes="仍要儲存", no="回去選擇標的"):
                 return
             if self.txn:
@@ -465,6 +523,186 @@ class JournalDialog(BaseDialog):
         self.ctx.changed()
         self.ctx.toast.emit("傳票已作廢")
         self.accept()
+
+
+# ====================================================================== 分錄範本
+class TemplateEditDialog(BaseDialog):
+    """新增或修改一個常用分錄範本。金額可留空，套用時再輸入。"""
+
+    def __init__(self, ctx: AppContext, name: str = "", lines: list[tuple] | None = None,
+                 taken: set[str] | None = None, parent=None):
+        super().__init__("編輯分錄範本", parent, width=860)
+        self.db = ctx.db
+        self.taken = taken if taken is not None else {n for n, _ in load_templates(ctx.db)}
+        self.template: tuple | None = None
+        self.chart = self.db.chart_of_accounts()
+        self.chart_by_key = {_key_str(a["key"]): a for a in self.chart}
+        f = QFormLayout()
+        self.name = QLineEdit(name)
+        self.name.setPlaceholderText("例如：每月房租收入")
+        f.addRow("範本名稱", self.name)
+        self.root.addLayout(f)
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["借／貸", "會計科目", "金額（可留空）", "行備註"])
+        self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(50)
+        h = self.table.horizontalHeader()
+        h.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        for i, w in ((0, 100), (2, 150), (3, 190)):
+            h.setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
+            self.table.setColumnWidth(i, w)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setMinimumHeight(260)
+        self.root.addWidget(self.table)
+        tools = QHBoxLayout()
+        add = button("新增一行", icon=icon("plus"))
+        add.clicked.connect(lambda: self.add_row())
+        rem = button("刪除選取行", icon=icon("trash"))
+        rem.clicked.connect(self.remove_row)
+        tools.addWidget(add)
+        tools.addWidget(rem)
+        tools.addStretch()
+        self.root.addLayout(tools)
+        self.root.addWidget(self.msg)
+        bar = QHBoxLayout()
+        bar.addStretch()
+        cancel = button("取消")
+        cancel.clicked.connect(self.reject)
+        ok = button("儲存", "Primary")
+        ok.setDefault(True)
+        ok.clicked.connect(self.save)
+        bar.addWidget(cancel)
+        bar.addWidget(ok)
+        self.root.addLayout(bar)
+        for ln in lines or []:
+            self.add_row(*ln)
+        while self.table.rowCount() < 2:
+            self.add_row()
+
+    def add_row(self, side: str = "debit", spec: str = "", memo: str = "", amount=None) -> None:
+        r = self.table.rowCount()
+        self.table.insertRow(r)
+        sd = QComboBox()
+        sd.addItem("借方", "debit")
+        sd.addItem("貸方", "credit")
+        sd.setCurrentIndex(max(0, sd.findData(side)))
+        self.table.setCellWidget(r, 0, sd)
+        key = resolve_template_key(self.db, self.chart_by_key, spec) if spec else None
+        cb = subject_combo(self.chart, key)
+        if spec and not cb.currentData():
+            # 內建範本的科目尚未建立：保留原設定，建立科目後範本即可使用
+            cb.setProperty("spec", spec)
+            cb.lineEdit().setPlaceholderText(f"尚無此科目（{spec.rpartition(':')[2]}），可另選科目")
+        self.table.setCellWidget(r, 1, cb)
+        ed = AmountEdit()
+        ed.setStyleSheet("font-size: inherit; font-weight: 400;")
+        ed.setObjectName("")
+        if amount:
+            ed.setValue(amount)
+        self.table.setCellWidget(r, 2, ed)
+        self.table.setCellWidget(r, 3, QLineEdit(memo or ""))
+
+    def remove_row(self) -> None:
+        rows = sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True)
+        if not rows and self.table.rowCount():
+            rows = [self.table.rowCount() - 1]
+        for r in rows:
+            self.table.removeRow(r)
+
+    def save(self) -> None:
+        name = self.name.text().strip()
+        if not name:
+            self.show_error("請輸入範本名稱")
+            return
+        if name in self.taken:
+            self.show_error(f"已有名為「{name}」的範本，請換一個名稱")
+            return
+        lines = []
+        for r in range(self.table.rowCount()):
+            cb = self.table.cellWidget(r, 1)
+            spec = cb.currentData() or cb.property("spec")
+            if spec:
+                lines.append((self.table.cellWidget(r, 0).currentData(), spec,
+                              self.table.cellWidget(r, 3).text().strip(),
+                              self.table.cellWidget(r, 2).value() or None))
+        if len(lines) < 2:
+            self.show_error("範本至少需要兩行會計科目")
+            return
+        self.template = (name, lines)
+        self.accept()
+
+
+class TemplateManagerDialog(BaseDialog):
+    """管理常用分錄範本：新增、修改、刪除、調整順序。"""
+
+    def __init__(self, ctx: AppContext, parent=None):
+        super().__init__("管理分錄範本", parent, width=620)
+        self.ctx = ctx
+        self.db = ctx.db
+        self.items = load_templates(self.db)
+        self.list = QListWidget()
+        self.list.setMinimumHeight(320)
+        self.list.itemDoubleClicked.connect(lambda _: self.edit())
+        self.root.addWidget(self.list)
+        tools = QHBoxLayout()
+        for text, fn, ic in (("新增", self.add, "plus"), ("修改", self.edit, None),
+                             ("刪除", self.delete, "trash"), ("上移", lambda: self.move(-1), None),
+                             ("下移", lambda: self.move(1), None)):
+            b = button(text, icon=icon(ic)) if ic else button(text)
+            b.clicked.connect(fn)
+            tools.addWidget(b)
+        tools.addStretch()
+        self.root.addLayout(tools)
+        hint = QLabel("修改後，開啟中的複式分錄會立即使用新範本；已入帳的傳票不受影響。")
+        hint.setObjectName("Hint")
+        hint.setWordWrap(True)
+        self.root.addWidget(hint)
+        self.root.addWidget(self.msg)
+        bar = QHBoxLayout()
+        bar.addStretch()
+        close = button("關閉", "Primary")
+        close.clicked.connect(self.accept)
+        bar.addWidget(close)
+        self.root.addLayout(bar)
+        self.reload()
+
+    def reload(self, row: int = 0) -> None:
+        self.list.clear()
+        self.list.addItems([n for n, _ in self.items])
+        self.list.setCurrentRow(min(row, len(self.items) - 1))
+
+    def _commit(self, row: int) -> None:
+        save_templates(self.db, self.items)
+        self.reload(row)
+
+    def add(self) -> None:
+        dlg = TemplateEditDialog(self.ctx, taken={n for n, _ in self.items}, parent=self)
+        if dlg.exec():
+            self.items.append(dlg.template)
+            self._commit(len(self.items) - 1)
+
+    def edit(self) -> None:
+        r = self.list.currentRow()
+        if r < 0:
+            return
+        name, lines = self.items[r]
+        dlg = TemplateEditDialog(self.ctx, name, lines,
+                                 taken={n for n, _ in self.items} - {name}, parent=self)
+        if dlg.exec():
+            self.items[r] = dlg.template
+            self._commit(r)
+
+    def delete(self) -> None:
+        r = self.list.currentRow()
+        if r >= 0 and ask(self, f"確定要刪除範本「{self.items[r][0]}」嗎？", yes="刪除", danger=True):
+            del self.items[r]
+            self._commit(r)
+
+    def move(self, step: int) -> None:
+        r = self.list.currentRow()
+        if r >= 0 and 0 <= r + step < len(self.items):
+            self.items[r], self.items[r + step] = self.items[r + step], self.items[r]
+            self._commit(r + step)
 
 
 # ====================================================================== 作廢

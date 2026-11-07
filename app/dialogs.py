@@ -706,8 +706,8 @@ class AdjustDialog(BaseDialog):
             self.show_error("請輸入實際最新金額")
             return
         if self.db._q1("SELECT 1 FROM securities WHERE account_id = ? AND archived = 0", (acc["id"],)):
-            self.show_error("此帳戶的持股由「投資管理」維護，請到投資管理使用「更新股價」，"
-                            "系統會自動計算市值與未實現損益。")
+            self.show_error("此帳戶的持股由「投資管理」維護，請到投資管理使用「市價評價」，"
+                            "選擇日期並輸入市價後產生評價分錄。")
             return
         delta_display = v - self._current_display()
         if abs(delta_display) < 0.005:

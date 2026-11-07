@@ -572,13 +572,13 @@ rec.hold(1.2)
 rec.click(find_button(jd, "儲存"), jd.save)
 rec.dialog = None
 nav("investments", "投資管理")
-rec.say("更新股價後，系統自動評價：借 短期投資，貸 未實現評價損益")
+rec.say("買賣不會自動評價。需要評價時，選日期並輸入市價：借 短期投資，貸 未實現評價損益")
 pd = PriceDialog(ctx, win)
-rec.click(find_button(ip, "更新股價"), lambda: rec.open_dialog(pd))
+rec.click(find_button(ip, "市價評價"), lambda: rec.open_dialog(pd))
 _pi = next(i for i, h in enumerate(pd.holdings) if h["code"] == "0050")
 rec.type(pd.edits[_pi], f"{pd.holdings[_pi]['price'] * 1.03:.2f}", 0.14)
 rec.hold(0.8)
-rec.click(find_button(pd, "儲存"), pd.save)
+rec.click(find_button(pd, "產生評價分錄"), pd.save)
 rec.dialog = None
 rec.hold(1.4)
 
@@ -611,7 +611,7 @@ open_tab("日記帳", "日記帳：每張傳票的科目代號、借方與貸方
 rec.type(rp.jnl_kw, "元大台灣50", 0.14)
 rec.hold(0.3)
 rec.scroll(rp.jnl, rp.jnl.verticalScrollBar().maximum(), 1.6)
-rec.say("剛才買進的分錄，以及系統自動產生的評價分錄都在這裡", sec=1.5)
+rec.say("剛才買進的分錄，以及手動評價產生的分錄都在這裡", sec=1.5)
 rec.wait_voice()
 rec.hold(0.6)
 rp.jnl_kw.clear()
@@ -686,7 +686,7 @@ if EXCEL_SHOTS and os.path.isdir(EXCEL_SHOTS):
         "06": "月度收支：含儲蓄率、累計結餘與圖表",
         "08": "日記簿：每張傳票的借貸分錄",
         "09": "試算表：借貸合計 ✓ 平衡",
-        "11": "投資明細：持股、成本、市值與未實現損益",
+        "11": "投資明細：持股、成本、帳面價值與未實現損益",
         "12": "報稅彙總：所得與扣除項目，報稅參考",
     }
     for name in sorted(os.listdir(EXCEL_SHOTS)):

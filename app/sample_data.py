@@ -122,7 +122,7 @@ def load_sample_data(db: Database) -> None:
                           price=prices[s2330], fee=fee, tax=tax, cash_account_id=bank2,
                           note="部分獲利了結")
         if i == 9:
-            # 以複式分錄直接買進（借 短期投資／貸 銀行存款），系統依股價自動評價
+            # 以複式分錄直接買進（借 短期投資／貸 銀行存款），不產生評價分錄
             fee, _ = inv.suggest_fees("buy", 1000, prices[s0056])
             cost = round(1000 * prices[s0056]) + fee
             db.add_journal(dt.date(y, m, 12).isoformat(), "加碼買進 元大高股息 1,000 股", [

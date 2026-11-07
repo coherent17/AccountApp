@@ -234,7 +234,7 @@ class ReportsPage(Page):
         self.jnl.rowActivated.connect(self._ledger_open)
         lay.addWidget(self.jnl, 1)
         hint = QLabel("依日期列出每張傳票的借貸分錄（以本位幣表示，貸方科目內縮）。"
-                      "按兩下可開啟傳票；系統自動產生的投資評價分錄也會列在這裡。")
+                      "按兩下可開啟傳票；系統自動產生的投資分錄也會列在這裡。")
         hint.setObjectName("Hint")
         hint.setWordWrap(True)
         lay.addWidget(hint)
@@ -399,10 +399,10 @@ class ReportsPage(Page):
         def group(name: str, sign: int):
             accs = bs["groups"][name]
             t.row([name, "", "", ""], 1, "subtotal")
-            for a in sorted(accs, key=lambda a: -abs(a["base_value"])):
+            for a in sorted(accs, key=lambda a: a["code"]):
                 v = a["base_value"] * sign
                 orig = fmt_money(a["balance"], a["currency"]) if a["currency"] != base else ""
-                t.row([f"{a['name']}（{a['category']}）", orig, fmt_num(v, base),
+                t.row([f"{a['code']}　{a['name']}（{a['category']}）", orig, fmt_num(v, base),
                        pct(v / total)], 2)
             v = bs["totals"][name]
             t.row([f"{name}合計", "", fmt_num(v, base), pct(v / total)], 1, "subtotal")

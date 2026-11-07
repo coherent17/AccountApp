@@ -5,7 +5,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.analytics import cash_flow, retirement_projection, tax_summary  # noqa: E402
-from app.database import Database, month_keys  # noqa: E402
+from app.database import SCHEMA_VERSION, Database, month_keys  # noqa: E402
 from app.investments import Investments  # noqa: E402
 from app.sample_data import load_sample_data  # noqa: E402
 
@@ -125,7 +125,7 @@ def test_journal_linked_investment():
         {"account_id": bank, "credit": 10000}])
     h = inv.holdings()[0]
     assert h["shares"] == 100 and h["cost"] == 10000 and h["unrealized"] == 0
-    # 更新股價 → 自動評價：借 短期投資／貸 未實現評價損益
+    # 手動輸入市價 → 評價：借 短期投資／貸 未實現評價損益
     inv.set_prices([(sid, 120)], "2026-03-31")
     h = inv.holdings()[0]
     assert h["market_value"] == 12000 and h["unrealized"] == 2000
@@ -183,6 +183,106 @@ def test_journal_linked_investment():
         pass
 
 
+def adjust_vouchers(db):
+    return db._q("SELECT DISTINCT t.id, t.date, t.note FROM transactions t JOIN txn_lines l ON l.txn_id = t.id"
+                 " WHERE t.void = 0 AND l.special = 'adjust'")
+
+
+def test_trades_never_auto_value():
+    db, inv, bank, st, sid = _plain_ledger()
+    # 買賣價差很大也不產生評價分錄（回報案例：分錄買進後重新評價）
+    inv.add_event(sid, "buy", "2026-02-01", shares=100, price=100, fee=20, cash_account_id=bank)
+    db.add_journal("2026-02-05", "分錄買進", [
+        {"account_id": st, "debit": 15000, "security_id": sid, "shares": 100},
+        {"account_id": bank, "credit": 15000}])
+    inv.add_event(sid, "stock_div", "2026-02-10", shares=20)
+    inv.add_event(sid, "sell", "2026-02-20", shares=50, price=200, fee=20, tax=30, cash_account_id=bank)
+    assert not adjust_vouchers(db), adjust_vouchers(db)
+    h = inv.holdings()[0]
+    assert h["price"] == 0 and h["unrealized"] == 0 and abs(h["market_value"] - h["cost"]) < 0.01
+    assert investment_accounts_match(db)
+    assert balanced(db.trial_balance("2026-01-01", "2026-12-31"))
+
+
+def test_manual_valuation_on_chosen_date():
+    db, inv, bank, st, sid = _plain_ledger()
+    inv.add_event(sid, "buy", "2026-02-01", shares=100, price=100, cash_account_id=bank)
+    inv.add_event(sid, "buy", "2026-05-01", shares=100, price=150, cash_account_id=bank)
+    # 選擇過去的日期評價：以當時持股 100 股計算
+    inv.set_prices([(sid, 130)], "2026-03-31")
+    v = adjust_vouchers(db)
+    assert [x["date"] for x in v] == ["2026-03-31"], v
+    assert abs(db.adjust_totals("2026-01-01", "2026-12-31") - 3000) < 0.01
+    h = inv.holdings()[0]
+    assert h["price"] == 130 and abs(h["market_value"] - 28000) < 0.01 and h["unrealized"] == 3000
+    assert inv.holdings("2026-03-31")[0]["shares"] == 100
+    assert investment_accounts_match(db)
+    # 同一天重新評價取代先前市價
+    inv.set_prices([(sid, 120)], "2026-03-31")
+    assert abs(db.adjust_totals("2026-01-01", "2026-12-31") - 2000) < 0.01
+    # 賣出迴轉所售股份的評價，剩餘持股不重新評價
+    inv.add_event(sid, "sell", "2026-06-01", shares=100, price=200, cash_account_id=bank)
+    assert abs(inv.holdings()[0]["unrealized"] - 1000) < 0.01
+    assert investment_accounts_match(db)
+    # 刪除評價後，分錄一併消失
+    e = next(x for x in inv.events(sid) if x["kind"] == "price")
+    inv.delete_event(e["id"])
+    assert not adjust_vouchers(db) and investment_accounts_match(db)
+    assert balanced(db.trial_balance("2026-01-01", "2026-12-31"))
+
+
+def test_migration_v3_removes_auto_valuation():
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "v3.db")
+    db = Database(path)
+    bank = db.add_account("銀行", "asset", "銀行存款", opening_balance=100000, opening_date="2026-01-01")
+    st = db.add_account("短期投資", "asset", "短期投資", opening_date="2026-01-01")
+    inv = Investments(db)
+    sid = inv.add_security(st, "0050", "元大台灣50")
+    inv.add_event(sid, "buy", "2026-02-01", shares=100, price=100, cash_account_id=bank)
+    inv.add_event(sid, "buy", "2026-02-01", shares=100, price=100, cash_account_id=bank)
+    inv.set_prices([(sid, 120)], "2026-03-31")
+    # 舊版自動產生的評價傳票（已結帳期間）
+    db.add_journal("2026-02-10", "元大台灣50 分錄買進後重新評價", [
+        {"account_id": st, "credit": 1000}, {"special": "adjust", "debit": 1000}], source=f"inv:{sid}")
+    buys = db._q("SELECT id FROM transactions WHERE source = ? AND date = '2026-02-01' ORDER BY id",
+                 (f"inv:{sid}",))
+    c = db.conn
+    rid = c.execute("INSERT INTO reconciliations(account_id, statement_date, statement_balance, created_at)"
+                    " VALUES (?, '2026-02-28', 0, '2026-03-01')", (bank,)).lastrowid
+    c.execute("INSERT INTO recon_items VALUES (?, ?, ?)", (rid, buys[1]["id"], bank))
+    c.execute("INSERT INTO attachments(txn_id, name, path, added_at) VALUES (?, 'a', 'a', 'x')",
+              (buys[1]["id"],))
+    db.set_setting("closed_until", "2026-02-28")
+    tx = c.execute("SELECT COUNT(*) FROM transactions WHERE source = ''").fetchone()[0]
+    cash = db.signed_balances()[bank]
+    c.execute("PRAGMA user_version = 3")
+    c.commit()
+    db.close()
+    db = Database(path)
+    assert db.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    assert os.path.exists(os.path.join(d, "v3_升級前備份_v3.db"))
+    assert [x["date"] for x in adjust_vouchers(db)] == ["2026-03-31"]
+    assert abs(db.adjust_totals("2026-01-01", "2026-12-31") - 4000) < 0.01
+    assert investment_accounts_match(db)
+    # 現金、一般傳票、結帳日、對帳勾選與附件都保留
+    assert db.signed_balances()[bank] == cash
+    assert db.conn.execute("SELECT COUNT(*) FROM transactions WHERE source = ''").fetchone()[0] == tx
+    assert db.closed_until == "2026-02-28"
+    ids = [r["id"] for r in db._q("SELECT id FROM transactions WHERE source = ? AND date = '2026-02-01'"
+                                  " ORDER BY id", (f"inv:{sid}",))]
+    assert len(ids) == 2
+    assert [r["txn_id"] for r in db._q("SELECT txn_id FROM recon_items")] == [ids[1]]
+    assert [r["txn_id"] for r in db._q("SELECT txn_id FROM attachments")] == [ids[1]]
+    try:
+        db.add_journal("2026-02-15", "x", [{"account_id": bank, "debit": 1}, {"account_id": st, "credit": 1}])
+        raise AssertionError("closed")
+    except ValueError as e:
+        assert "已結帳" in str(e)
+    db.close()
+    assert Database(path).conn.execute("SELECT COUNT(*) FROM audit_log WHERE action = '系統升級'").fetchone()[0] == 1
+
+
 def test_journal_linked_void_and_reverse():
     db, inv, bank, st, sid = _plain_ledger()
     j = db.add_journal("2026-02-01", "買進", [
@@ -220,7 +320,7 @@ def test_migration_v2_codes():
     db = Database(path)
     assert db.account_codes() == {a1: "1101", a2: "2201"}
     assert db.find_category("expense", "餐飲")["code"] == "5101"
-    assert db.conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert db.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     bak = os.path.join(d, "v2_升級前備份_v2.db")
     assert os.path.exists(bak) and Database.is_valid_ledger(bak)
 

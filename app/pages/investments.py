@@ -42,7 +42,7 @@ class InvestmentsPage(Page):
             else:
                 btn.clicked.connect(lambda _=False, k=key: self.trade(k))
             hl.addWidget(btn)
-        price = button("更新股價", "Primary", icon("refresh", "#FFFFFF"))
+        price = button("市價評價", "Primary", icon("refresh", "#FFFFFF"))
         price.setMinimumHeight(44)
         price.clicked.connect(self.prices)
         add = button("新增標的", icon=icon("plus"))
@@ -54,7 +54,7 @@ class InvestmentsPage(Page):
 
         cards = QHBoxLayout()
         cards.setSpacing(16)
-        self.c_mv = StatCard("投資市值", C.primary)
+        self.c_mv = StatCard("投資帳面價值", C.primary)
         self.c_cost = StatCard("投資成本", C.muted)
         self.c_unr = StatCard("未實現損益", C.adjust)
         self.c_real = StatCard("今年已實現損益", C.income)
@@ -77,10 +77,11 @@ class InvestmentsPage(Page):
             Column("名稱", lambda r: r["name"], width=170, bold=True),
             Column("持股", lambda r: f"{r['shares']:,.0f}", align="right", sort=lambda r: r["shares"], width=80),
             Column("平均成本", lambda r: f"{r['avg_cost']:,.2f}", align="right", width=95),
-            Column("現價", lambda r: f"{r['price']:,.2f}", align="right", width=90),
+            Column("最近評價市價", lambda r: f"{r['price']:,.2f}" if r["price"] else "尚未評價", align="right",
+                   width=135),
             Column("成本", lambda r: fmt_num(r["cost"], r["currency"]), align="right",
                    sort=lambda r: r["cost"], width=105),
-            Column("市值", lambda r: fmt_num(r["market_value"], r["currency"]), align="right",
+            Column("帳面價值", lambda r: fmt_num(r["market_value"], r["currency"]), align="right",
                    sort=lambda r: r["market_value"], width=105, bold=True),
             Column("未實現損益", lambda r: fmt_num(r["unrealized"], r["currency"]), align="right",
                    sort=lambda r: r["unrealized"], width=105,
@@ -94,7 +95,7 @@ class InvestmentsPage(Page):
         self.hold.customContextMenuRequested.connect(self.hold_menu)
         lay.addWidget(self.hold, 3)
         cc = Card()
-        cc.lay.addWidget(section_title("持股比重（依市值）"))
+        cc.lay.addWidget(section_title("持股比重（依帳面價值）"))
         self.donut = DonutChart(height=240)
         cc.lay.addWidget(self.donut)
         lay.addWidget(cc, 2)
@@ -132,7 +133,7 @@ class InvestmentsPage(Page):
         ], sortable=False)
         self.ev.rowActivated.connect(self._open_event)
         lay.addWidget(self.ev, 1)
-        note = QLabel("每筆買賣、股利與股價更新都會自動產生會計分錄（收支明細中類型顯示為「投資」）。"
+        note = QLabel("每筆買賣、股利與市價評價都會自動產生會計分錄（收支明細中類型顯示為「投資」）。買賣不會自動評價。"
                       "「買進／賣出（分錄）」是在複式分錄中連結標的的交易，按兩下可開啟該傳票。"
                       "若輸入錯誤，請刪除該筆交易（分錄請作廢該傳票），系統會自動重算之後的成本與分錄。")
         note.setObjectName("Hint")
@@ -204,7 +205,7 @@ class InvestmentsPage(Page):
         self.load_realized()
 
     def load_events(self) -> None:
-        rows = [e for e in self.inv.events(self.ev_filter.currentData()) if e["kind"] != "price"]
+        rows = self.inv.events(self.ev_filter.currentData())
         self.ev.set_rows(list(reversed(rows)))
 
     def load_realized(self) -> None:

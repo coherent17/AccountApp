@@ -1,15 +1,17 @@
 """投資明細帳：證券持股、平均成本、已實現／未實現損益與股利。
 
 會計處理（帳上投資科目以市價表示）：
-* 買進：借 投資帳戶（成本＝股數×價格＋手續費）／貸 交割帳戶；並依成交價重新評價。
+* 買進：借 投資帳戶（成本＝股數×價格＋手續費）／貸 交割帳戶；不產生評價分錄。
 * 賣出：借 交割帳戶（淨價款）、貸 投資帳戶（平均成本）、差額記「處分投資損益」；
-        同時迴轉所售股份已認列之「未實現評價損益」，再依成交價重新評價剩餘持股。
+        同時迴轉所售股份已認列之「未實現評價損益」，剩餘持股不重新評價。
 * 現金股利：借 交割帳戶（淨額）、借 健保補充保費（如有）／貸 股利收入。
 * 股票股利：增加股數，成本不變（平均成本下降），不產生分錄。
-* 更新股價：依最新價格調整投資帳戶，差額記「未實現評價損益」。
+* 評價：只有使用者選定日期並手動輸入市價（price 事件）才產生評價分錄，
+        依該市價調整投資帳戶，差額記「未實現評價損益」。
+        帳面價值＝成本＋已認列評價，即投資帳戶餘額（state["market_value"]）。
 * 分錄連結：使用者在複式分錄中直接借記（買進）或貸記（賣出）投資科目並指定標的與股數，
   分錄由使用者自行輸入；系統只補做後續處理：
-    分錄買進：成本＝借記金額，之後依股價自動評價。
+    分錄買進：成本＝借記金額，不產生評價分錄。
     分錄賣出：迴轉所售股份之未實現評價損益，並將貸記金額與平均成本之差額調整為處分投資損益。
 系統分錄由系統自動產生（source = 'inv:<證券 id>'），交易變更時自該日起重新產生。
 """
@@ -21,7 +23,7 @@ import datetime as _dt
 from .database import Database, fmt_shares, money_round, voucher_no
 
 KIND_LABELS = {"buy": "買進", "sell": "賣出", "cash_div": "現金股利", "stock_div": "股票股利",
-               "price": "更新股價", "jbuy": "買進（分錄）", "jsell": "賣出（分錄）"}
+               "price": "市價評價", "jbuy": "買進（分錄）", "jsell": "賣出（分錄）"}
 NHI_RATE = 0.0211       # 二代健保補充保費費率
 NHI_THRESHOLD = 20000   # 單筆股利達此金額才扣繳
 
@@ -221,7 +223,6 @@ class Investments:
                 state["shares"] += e["shares"]
                 state["cost"] += gross
                 lines += [{"account": inv, "amt": gross}, {"account": e["cash_account_id"], "amt": -gross}]
-                state["price"], state["price_date"] = e["price"], e["date"]
                 note = f"買進 {sec['name']} {e['shares']:,.0f} 股 @ {e['price']:,.2f}"
             elif k == "sell":
                 if e["shares"] > state["shares"] + 1e-9:
@@ -244,14 +245,11 @@ class Investments:
                     state["shares"] = state["cost"] = state["val_adj"] = 0.0
                 state["realized"].append({"date": e["date"], "gain": gain, "event": e["id"],
                                           "cost": cost_out, "proceeds": proceeds})
-                state["price"], state["price_date"] = e["price"], e["date"]
                 note = f"賣出 {sec['name']} {e['shares']:,.0f} 股 @ {e['price']:,.2f}"
             elif k == "jbuy":
                 # 分錄已由使用者借記投資科目、貸記付款科目，這裡只累計成本與股數
                 state["shares"] += e["shares"]
                 state["cost"] += e["value"]
-                state["price"], state["price_date"] = e["price"], e["date"]
-                note = f"{sec['name']} 分錄買進後重新評價"
             elif k == "jsell":
                 if e["shares"] > state["shares"] + 1e-9:
                     raise ValueError(f"{e['date'].replace('-', '/')} 分錄賣出 {fmt_shares(e['shares'])} 股，"
@@ -286,24 +284,20 @@ class Investments:
                 note = f"{sec['name']} 現金股利"
             elif k == "stock_div":
                 state["shares"] += e["shares"]
-                note = ""
             elif k == "price":
                 state["price"], state["price_date"] = e["price"], e["date"]
                 note = f"{sec['name']} 股價更新 @ {e['price']:,.2f}"
-            # 依最新價格重新評價（買進、賣出、配股、更新股價皆適用）
-            if k in ("buy", "sell", "jbuy", "jsell", "stock_div", "price") and state["price"]:
                 target = state["shares"] * state["price"] - state["cost"]
                 delta = target - state["val_adj"]
                 if abs(delta) >= 0.005:
                     lines += [{"account": inv, "amt": delta}, {"special": "adjust", "gain": delta}]
                     state["val_adj"] = target
-                    if not note:
-                        note = f"{sec['name']} 配股後重新評價"
+            if state["shares"] < 1e-9:
+                state["price"], state["price_date"] = 0.0, ""
             if lines:
                 state["vouchers"].append({"event": e["id"], "date": e["date"], "note": note,
                                           "lines": lines})
-        state["market_value"] = money_round(state["shares"] * state["price"]) if state["price"] else \
-            money_round(state["cost"] + state["val_adj"])
+        state["market_value"] = money_round(state["cost"] + state["val_adj"])
         state["unrealized"] = money_round(state["market_value"] - state["cost"])
         state["avg_cost"] = state["cost"] / state["shares"] if state["shares"] else 0.0
         return state

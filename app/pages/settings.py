@@ -171,7 +171,7 @@ class SettingsPage(Page):
         self.online.toggled.connect(self.set_online)
         gl.addWidget(QLabel("網路更新"), 1, 0)
         gl.addWidget(self.online, 1, 1, 1, 3)
-        oh = QLabel("開啟後，「更新股價」與「更新匯率」會多一個「從網路取得」按鈕。只會下載公開資料、不會上傳任何個人資料；"
+        oh = QLabel("開啟後，「市價評價」與「更新匯率」會多一個「從網路取得」按鈕。只會下載公開資料、不會上傳任何個人資料；"
                     "股價來源為臺灣證券交易所與櫃買中心官方開放資料，匯率為 ExchangeRate-API 國際參考匯率。"
                     "沒有網路時仍可手動輸入，所有功能都不受影響。關閉時程式完全不連網。")
         oh.setObjectName("Hint")

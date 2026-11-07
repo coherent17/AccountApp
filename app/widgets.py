@@ -5,16 +5,18 @@ from __future__ import annotations
 import ast
 import datetime as dt
 import operator
+import re
+import unicodedata
 from typing import Any, Callable
 
-from PySide6.QtCore import (QAbstractTableModel, QDate, QModelIndex, QSortFilterProxyModel,
-                            Qt, Signal)
+from PySide6.QtCore import (QAbstractTableModel, QDate, QEvent, QModelIndex, QPoint,
+                            QSortFilterProxyModel, Qt, QTimer, Signal)
 from PySide6.QtGui import QBrush, QColor, QFont
-from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QDateEdit, QFrame,
+from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCalendarWidget, QComboBox, QFrame,
                                QGraphicsDropShadowEffect, QGridLayout, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton,
-                               QSizePolicy, QStyle, QStyledItemDelegate, QTableView, QVBoxLayout,
-                               QWidget)
+                               QSizePolicy, QStyle, QStyledItemDelegate, QTableView, QToolTip,
+                               QVBoxLayout, QWidget)
 
 from .theme import C, fmt_num
 
@@ -98,15 +100,127 @@ def iso(qd: QDate) -> str:
     return f"{qd.year():04d}-{qd.month():02d}-{qd.day():02d}"
 
 
-def make_date_edit(value: str | None = None) -> QDateEdit:
-    w = QDateEdit()
-    w.setCalendarPopup(True)
-    w.setDisplayFormat("yyyy/MM/dd（ddd）")
-    w.setDate(qdate(value) if value else QDate.currentDate())
-    w.calendarWidget().setGridVisible(False)
-    w.calendarWidget().setVerticalHeaderFormat(w.calendarWidget().VerticalHeaderFormat.NoVerticalHeader)
-    w.calendarWidget().setMinimumSize(380, 300)
-    return w
+def parse_date_text(text: str) -> QDate | None:
+    """解析手動輸入的日期：西元或民國年皆可，例如 2026/11/5、115/11/5、20261105、1151105、11/5。"""
+    t = unicodedata.normalize("NFKC", text).split("(")[0].strip()
+    if t.isdigit():
+        n = len(t)
+        if n not in (4, 7, 8):
+            return None
+        parts = [t[:-4], t[-4:-2], t[-2:]] if n > 4 else [t[:2], t[2:]]
+    else:
+        parts = [p for p in re.split(r"[/\-.\s年月日]+", t) if p]
+    if len(parts) not in (2, 3) or not all(p.isdigit() for p in parts):
+        return None
+    nums = [int(p) for p in parts]
+    if len(nums) == 2:
+        nums.insert(0, QDate.currentDate().year())
+    if nums[0] < 1000:
+        nums[0] += 1911
+    d = QDate(*nums)
+    return d if d.isValid() and 1900 <= d.year() <= 2200 else None
+
+
+class DateEdit(QComboBox):
+    """可直接打字的日期欄（Enter 或離開欄位時生效），也可按箭頭開月曆；↑↓ 前後一天。"""
+    dateChanged = Signal(QDate)
+    FORMAT = "yyyy/MM/dd（ddd）"
+
+    def __init__(self, value: str | None = None):
+        super().__init__()
+        self.setEditable(True)
+        self.setCompleter(None)
+        self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.setMinimumContentsLength(19)
+        self.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.setToolTip("可直接輸入，例如 2026/11/5、115/11/5、1151105 或 11/5，也可按右側箭頭開月曆")
+        self._date = qdate(value) if value else QDate.currentDate()
+        self._calendar: QCalendarWidget | None = None
+        self.lineEdit().installEventFilter(self)
+        self.lineEdit().editingFinished.connect(self._commit)
+        self._show_date()
+
+    def date(self) -> QDate:
+        self._commit()
+        return self._date
+
+    def setDate(self, d: QDate) -> None:
+        if d.isValid() and d != self._date:
+            self._date = d
+            self._show_date()
+            self.dateChanged.emit(d)
+        else:
+            self._show_date()
+
+    def calendarWidget(self) -> QCalendarWidget:
+        if self._calendar is None:
+            cal = QCalendarWidget(self)
+            cal.setWindowFlags(Qt.WindowType.Popup)
+            cal.setGridVisible(False)
+            cal.setVerticalHeaderFormat(cal.VerticalHeaderFormat.NoVerticalHeader)
+            cal.setMinimumSize(380, 300)
+            cal.clicked.connect(self._picked)
+            cal.activated.connect(self._picked)
+            self._calendar = cal
+        return self._calendar
+
+    def showPopup(self) -> None:
+        self._commit()
+        cal = self.calendarWidget()
+        cal.setSelectedDate(self._date)
+        cal.adjustSize()
+        pos = self.mapToGlobal(QPoint(0, self.height()))
+        screen = self.screen().availableGeometry()
+        if pos.y() + cal.height() > screen.bottom():
+            pos.setY(self.mapToGlobal(QPoint(0, 0)).y() - cal.height())
+        pos.setX(max(screen.left(), min(pos.x(), screen.right() - cal.width())))
+        cal.move(pos)
+        cal.show()
+        cal.setFocus()
+
+    def hidePopup(self) -> None:
+        if self._calendar is not None:
+            self._calendar.hide()
+
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self.lineEdit():
+            if event.type() == QEvent.Type.FocusIn:
+                QTimer.singleShot(0, obj.selectAll)
+            elif event.type() == QEvent.Type.KeyPress:
+                key = event.key()
+                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    self._commit()
+                    obj.selectAll()
+                    return True
+                if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+                    self._commit()
+                    self.setDate(self._date.addDays(-1 if key == Qt.Key.Key_Up else 1))
+                    obj.selectAll()
+                    return True
+        return super().eventFilter(obj, event)
+
+    def _picked(self, d: QDate) -> None:
+        self.hidePopup()
+        self.setDate(d)
+
+    def _show_date(self) -> None:
+        self.lineEdit().setText(self.locale().toString(self._date, self.FORMAT))
+
+    def _commit(self) -> None:
+        text = self.lineEdit().text()
+        if text == self.locale().toString(self._date, self.FORMAT):
+            return
+        d = parse_date_text(text)
+        if d is None:
+            self._show_date()
+            QToolTip.showText(self.mapToGlobal(QPoint(0, self.height())),
+                              f"「{text}」不是有效的日期，已還原。請輸入例如 2026/11/5 或 115/11/5", self)
+            return
+        self.setDate(d)
+
+
+def make_date_edit(value: str | None = None) -> DateEdit:
+    return DateEdit(value)
 
 
 # ---------------------------------------------------------------------- 卡片

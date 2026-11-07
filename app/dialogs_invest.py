@@ -1,4 +1,4 @@
-"""投資管理視窗：標的、買賣、股利、更新股價、更新匯率。"""
+"""投資管理視窗：標的、買賣、股利、市價評價、更新匯率。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFormLayout, QHBoxLayo
                                QLabel, QLineEdit, QTableWidget, QTableWidgetItem)
 
 from .context import AppContext
-from .database import CURRENCIES, INVESTMENT_CATEGORIES
+from .database import CURRENCIES, INVESTMENT_CATEGORIES, fmt_shares
 from .dialogs import BaseDialog, fill_account_combo
 from .investments import KIND_LABELS, Investments
 from .theme import C, fmt_money, icon
@@ -47,7 +47,7 @@ class SecurityDialog(BaseDialog):
         self.root.addLayout(f)
         hint = QLabel("投資科目請先在「會計科目表」或「帳戶管理」建立（類別選「短期投資」、「長期投資」、"
                       "「股票」、「基金」或「債券」，期初餘額填 0）。持股可用「買進」登錄，"
-                      "或在複式分錄中借記投資科目並選擇標的與股數；之後依股價自動評價。")
+                      "或在複式分錄中借記投資科目並選擇標的與股數；需要評價時再用「市價評價」輸入市價。")
         hint.setObjectName("Hint")
         hint.setWordWrap(True)
         self.root.addWidget(hint)
@@ -208,7 +208,7 @@ class TradeDialog(BaseDialog):
         self.state = st
         self.currency = s["currency"]
         self.held.setText(f"目前持股 {st['shares']:,.0f}　平均成本 {st['avg_cost']:,.2f}　"
-                          f"最近價格 {st['price']:,.2f}")
+                          f"最近評價市價 {st['price']:,.2f}")
         if self.kind in ("buy", "sell") and not self.price.text() and st["price"]:
             self.price.setValue(st["price"])
         self._auto_fees()
@@ -277,12 +277,13 @@ class TradeDialog(BaseDialog):
 
 class PriceDialog(BaseDialog):
     def __init__(self, ctx: AppContext, parent=None):
-        super().__init__("更新股價", parent, width=820)
+        super().__init__("市價評價", parent, width=820)
         self.ctx = ctx
         self.inv = Investments(ctx.db)
         top = QHBoxLayout()
-        top.addWidget(QLabel("價格日期"))
+        top.addWidget(QLabel("評價日期"))
         self.date = make_date_edit()
+        self.date.dateChanged.connect(lambda _: self.load())
         top.addWidget(self.date)
         top.addStretch()
         if online_enabled(ctx):
@@ -290,32 +291,19 @@ class PriceDialog(BaseDialog):
             self.fetch_btn.clicked.connect(self.fetch)
             top.addWidget(self.fetch_btn)
         self.root.addLayout(top)
-        self.holdings = self.inv.holdings()
-        self.table = QTableWidget(len(self.holdings), 5)
-        self.table.setHorizontalHeaderLabels(["代號", "名稱", "持股", "目前價格", "新價格"])
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(["代號", "名稱", "持股", "最近評價市價", "評價市價"])
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(48)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         for i, w in ((0, 90), (2, 120), (3, 130), (4, 170)):
             self.table.setColumnWidth(i, w)
-        self.edits = []
-        for r, h in enumerate(self.holdings):
-            for col, text in ((0, h["code"]), (1, h["name"]), (2, f"{h['shares']:,.0f}"),
-                              (3, f"{h['price']:,.2f}")):
-                it = QTableWidgetItem(text)
-                it.setFlags(Qt.ItemFlag.ItemIsEnabled)
-                if col >= 2:
-                    it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                self.table.setItem(r, col, it)
-            ed = AmountEdit()
-            ed.decimals = 4
-            ed.setObjectName("")
-            ed.setPlaceholderText(f"{h['price']:,.2f}")
-            self.table.setCellWidget(r, 4, ed)
-            self.edits.append(ed)
+        self.load()
         self.table.setMinimumHeight(min(10, max(3, len(self.holdings))) * 48 + 50)
         self.root.addWidget(self.table)
-        hint = QLabel("輸入最新價格（留空表示不變）。系統會依新價格重新評價，差額記為「未實現評價損益」。")
+        hint = QLabel("選擇評價日期並輸入市價（留空表示這檔不評價）。按「產生評價分錄」後才會依市價調整帳面價值，"
+                      "差額記為「未實現評價損益」；同一天再次評價會取代先前的市價。"
+                      "買進、賣出不會自動評價。輸入錯誤時，可到「交易紀錄」刪除該筆市價評價。")
         hint.setObjectName("Hint")
         hint.setWordWrap(True)
         self.root.addWidget(hint)
@@ -324,11 +312,31 @@ class PriceDialog(BaseDialog):
         bar.addStretch()
         c = button("取消")
         c.clicked.connect(self.reject)
-        ok = button("儲存", "Primary")
+        ok = button("產生評價分錄", "Primary")
         ok.clicked.connect(self.save)
         bar.addWidget(c)
         bar.addWidget(ok)
         self.root.addLayout(bar)
+
+    def load(self) -> None:
+        """列出評價日當時的持股。"""
+        self.holdings = self.inv.holdings(iso(self.date.date()))
+        self.table.setRowCount(len(self.holdings))
+        self.edits = []
+        for r, h in enumerate(self.holdings):
+            last = f"{h['price']:,.2f}" if h["price"] else "尚未評價"
+            for col, text in ((0, h["code"]), (1, h["name"]), (2, fmt_shares(h["shares"])), (3, last)):
+                it = QTableWidgetItem(text)
+                it.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                if col >= 2:
+                    it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.table.setItem(r, col, it)
+            ed = AmountEdit()
+            ed.decimals = 4
+            ed.setObjectName("")
+            ed.setPlaceholderText("輸入市價")
+            self.table.setCellWidget(r, 4, ed)
+            self.edits.append(ed)
 
     def fetch(self) -> None:
         from . import online
@@ -346,7 +354,7 @@ class PriceDialog(BaseDialog):
         self.fetch_btn.setEnabled(True)
         self.fetch_btn.setText("從網路取得收盤價")
         from .online import PRICE_SOURCE
-        self.show_ok(f"已填入 {n} 檔收盤價（來源：{PRICE_SOURCE}），請確認後按「儲存」。")
+        self.show_ok(f"已填入 {n} 檔收盤價（來源：{PRICE_SOURCE}），請確認後按「產生評價分錄」。")
 
     def _failed(self, msg: str) -> None:
         self.fetch_btn.setEnabled(True)
@@ -356,7 +364,7 @@ class PriceDialog(BaseDialog):
     def save(self) -> None:
         prices = [(h["id"], ed.value()) for h, ed in zip(self.holdings, self.edits) if ed.value()]
         if not prices:
-            self.show_error("請至少輸入一個新價格")
+            self.show_error("請至少輸入一檔的市價")
             return
         try:
             n = self.inv.set_prices(prices, iso(self.date.date()))
@@ -364,7 +372,7 @@ class PriceDialog(BaseDialog):
             self.show_error(str(e))
             return
         self.ctx.changed()
-        self.ctx.toast.emit(f"已更新 {n} 檔價格並重新評價")
+        self.ctx.toast.emit(f"已產生 {n} 檔評價分錄")
         self.accept()
 
 
@@ -432,7 +440,7 @@ class RateDialog(BaseDialog):
         self.fetch_btn.setEnabled(True)
         self.fetch_btn.setText("從網路取得參考匯率")
         from .online import FX_SOURCE
-        self.show_ok(f"已填入 {n} 種匯率（來源：{FX_SOURCE}），請確認後按「儲存」。")
+        self.show_ok(f"已填入 {n} 種匯率（來源：{FX_SOURCE}），請確認後按「產生評價分錄」。")
 
     def _failed(self, msg: str) -> None:
         self.fetch_btn.setEnabled(True)
