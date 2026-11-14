@@ -659,6 +659,54 @@ def test_rebuild_keeps_voucher_numbers_and_reconciliation():
     assert investment_accounts_match(db)
 
 
+FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
+# 經她要求、可以讓投資科目餘額改變的升級（其他帳務都必須完全相同）
+APPROVED_INVESTMENT_CHANGES = {3: "v4 買賣不再自動評價", 4: "v5 評價改以預估淨售價"}
+
+
+def old_ledgers():
+    return sorted(f for f in os.listdir(FIXTURES) if f.startswith("ledger_v") and f.endswith(".db"))
+
+
+def test_old_version_ledgers_load():
+    """每個已發行版本建立的帳本，用目前程式開啟後帳務都不可遺失（tools/make_fixtures.py 產生）。"""
+    import json
+    import shutil
+    sys.path.insert(0, FIXTURES)
+    import ledger_tools
+    files = old_ledgers()
+    assert len(files) >= 3, files
+    for name in files:
+        old = json.load(open(os.path.join(FIXTURES, name[:-3] + ".json"), encoding="utf-8"))
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, "理財帳本.db")
+        shutil.copy(os.path.join(FIXTURES, name), path)
+        db = Database(path)
+        inv = Investments(db)
+        new = ledger_tools.snapshot(db, inv)
+        where = f"{name}（第 {old['schema']} 版）"
+        assert new["schema"] == SCHEMA_VERSION, where
+        if old["schema"] < SCHEMA_VERSION:
+            assert os.path.exists(os.path.join(d, f"理財帳本_升級前備份_v{old['schema']}.db")), where
+        for key in ("user_vouchers", "user_lines", "income", "expense", "categories", "realized", "holdings",
+                    "events", "recon", "attachments", "recurring", "settings"):
+            assert json.loads(json.dumps(new[key])) == old[key], (where, key)
+        assert new["audit_rows"] >= old["audit_rows"], where
+        assert new["accounts"].keys() == old["accounts"].keys(), where
+        for acc, o in old["accounts"].items():
+            n = new["accounts"][acc]
+            if o["investment"] and old["schema"] in APPROVED_INVESTMENT_CHANGES:
+                continue   # 只允許經同意的評價規則改變；下方再檢查投資科目＝持股帳面價值
+            assert n["balance"] == o["balance"], (where, acc, o["balance"], n["balance"])
+        check_books(db, where)
+        db.close()
+        # 再開一次不會重複升級或改變帳務
+        db = Database(path)
+        again = ledger_tools.snapshot(db, Investments(db))
+        assert again["accounts"] == new["accounts"] and again["user_vouchers"] == new["user_vouchers"], where
+        db.close()
+
+
 def test_journal_linked_void_and_reverse():
     db, inv, bank, st, sid = _plain_ledger()
     j = db.add_journal("2026-02-01", "買進", [

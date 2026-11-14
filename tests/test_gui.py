@@ -586,4 +586,32 @@ if year:
     sp_.reopen_books()
     assert year not in db.year_closings() and db.closed_until == ""
 
+
+# ---- 每個已發行版本建立的帳本：以目前程式開啟主視窗、所有頁面與分頁、匯出與列印都不出錯
+import shutil  # noqa: E402
+from app.context import AppContext  # noqa: E402
+from app.printing import REPORTS as _REPORTS  # noqa: E402
+FIX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
+for name in sorted(f for f in os.listdir(FIX) if f.startswith("ledger_v") and f.endswith(".db")):
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "理財帳本.db")
+    shutil.copy(os.path.join(FIX, name), path)
+    c2 = AppContext(path)
+    w2 = MainWindow(c2)
+    w2.show()
+    app.processEvents()
+    for key in w2.pages:
+        w2.go(key, animate=False)
+        app.processEvents()
+    for page in ("reports", "investments"):
+        tabs = w2.pages[page].tabs
+        for i2 in range(tabs.count()):
+            tabs.setCurrentIndex(i2)
+            app.processEvents()
+    export_workbook(c2.db, os.path.join(d, "old.xlsx"), "2025-01-01", "2025-12-31")
+    Report(c2.db).build([k for k, _ in _REPORTS], "2025-01-01", "2025-12-31")
+    w2.close()
+    c2.db.close()
+    print("OLD LEDGER OK", name)
+
 print("CHART / JOURNAL-INVEST GUI TESTS PASSED")
