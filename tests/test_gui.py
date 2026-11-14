@@ -510,4 +510,80 @@ de.lineEdit().setText("2026/2/30")
 assert de.date() == QDate(2026, 3, 1) and warned and "不是有效的日期" in warned[0]
 widgets.warn = lambda *a, **k: None
 
+
+# ---- 商用功能：六欄式試算表、年度結帳、列印／PDF、傳票號碼
+from PySide6.QtPdf import QPdfDocument  # noqa: E402  （只在測試使用，不打包）
+from app.dialogs_print import PrintDialog  # noqa: E402
+from app.dialogs_more import YearCloseDialog  # noqa: E402
+from app.printing import REPORTS, Report, save_pdf  # noqa: E402
+
+
+def pdf_pages(path):
+    d = QPdfDocument()
+    d.load(path)
+    return d.pageCount()
+
+
+lo, hi = db.date_range()
+rp = win.pages["reports"]
+rp.tabs.setCurrentIndex(rp._tab_index("試算表"))
+app.processEvents()
+assert rp.tb.model().columnCount() == 9 and "借貸平衡" in rp.tb_sum.text(), rp.tb_sum.text()
+assert rp.tb.model_.rows[-1]["name"] == "合計"
+
+# 列印：每份報表都能輸出 PDF
+for key, name in REPORTS:
+    out = os.path.join(tmp, f"r_{key}.pdf")
+    save_pdf(Report(db).build([key], lo, hi), out)
+    assert os.path.getsize(out) > 1000 and pdf_pages(out) >= 1, (key, name)
+pd_ = PrintDialog(ctx, lo, hi, win)
+for k, cb in pd_.boxes.items():
+    cb.setChecked(k in ("journal", "ledger", "trial", "bs", "is", "equity"))
+pd_.landscape.setChecked(True)
+allpdf = pd_.export_pdf(os.path.join(tmp, "全部.pdf"))
+assert allpdf and pdf_pages(allpdf) >= 6, pdf_pages(allpdf)
+for cb in pd_.boxes.values():
+    cb.setChecked(False)
+assert pd_.export_pdf(os.path.join(tmp, "空.pdf")) is None and "至少" in pd_.msg.text()
+pd_.close()
+html = Report(db).build(["trial", "bs"], lo, hi)
+assert "✓ 借貸平衡" in html and "資產總計" in html
+# 傳票：類別、簽章欄、號碼
+some = db.query_transactions(start=lo, end=hi)[0]
+from app.database import voucher_no as voucher_no_  # noqa: E402
+vh = Report(db).build_voucher(some["id"])
+assert voucher_no_(some["id"]) in vh and "製　單" in vh
+cash_acc = next(a for a in db.list_accounts() if a["category"] == "現金")
+exp_id = db.add_transaction(type="expense", account_id=cash_acc["id"], amount=120,
+                            date=__import__("datetime").date.today().isoformat(),
+                            category_id=db.list_categories("expense")[0]["id"], note="列印測試")
+assert "現金支出傳票" in Report(db).build_voucher(exp_id)
+vp = os.path.join(tmp, "voucher.pdf")
+save_pdf(Report(db).build(["vouchers"], lo, hi), vp)
+n_v = len(db.query_transactions(start=lo, end=hi))
+assert pdf_pages(vp) >= n_v, (pdf_pages(vp), n_v)   # 每張傳票一頁
+
+# 年度結帳：預覽、確認、檢視結帳分錄（唯讀）、解除結帳
+first = db.first_year()
+year = __import__("datetime").date.today().year - 1
+if first > year:
+    year = None
+if year:
+    yd = YearCloseDialog(ctx, year, win)
+    assert not yd.blocked
+    yd.confirm()
+    assert yd.closed_ok and year in db.year_closings() and db.closed_until >= f"{year}-12-31"
+    cid = db.year_closings()[year]
+    jd = JournalDialog(ctx, db.get_transaction(cid), parent=win)
+    assert jd.readonly and "年度結帳" in jd.msg.text()
+    assert any((jd.table.cellWidget(r, 0).currentText() or "").startswith("3201") for r in range(jd.table.rowCount()))
+    jd.close()
+    win.pages["transactions"].refresh()
+    rp.refresh()
+    assert YearCloseDialog(ctx, year, win).blocked
+    sp_ = win.pages["settings"]
+    sp_.refresh()
+    sp_.reopen_books()
+    assert year not in db.year_closings() and db.closed_until == ""
+
 print("CHART / JOURNAL-INVEST GUI TESTS PASSED")

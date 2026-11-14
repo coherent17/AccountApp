@@ -14,7 +14,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from .database import (ADJUST_ACCOUNT, CURRENCIES, EQUITY_ACCOUNT, FX_ACCOUNT, REALIZED_ACCOUNT,
-                       TYPE_LABELS,
+                       CLOSING_SOURCE, TYPE_LABELS,
                        Database, month_keys, voucher_no)
 
 FONT = "微軟正黑體"
@@ -204,6 +204,8 @@ def export_workbook(db: Database, path: str, start: str, end: str, sheets=None) 
     cat_names = {c["id"]: (c["name"], c["kind"]) for c in db.list_categories(include_archived=True)}
     detail = []
     for t in txns:
+        if t["source"].startswith(CLOSING_SOURCE):
+            continue   # 年度結帳分錄只記錄於日記簿，不列入收支
         if t["type"] != "journal":
             cat = t["category_name"] or ("帳戶間轉帳" if t["type"] == "transfer" else ADJUST_ACCOUNT)
             detail.append((t, TYPE_LABELS[t["type"]], cat, t["account_name"], t["to_account_name"] or "",
@@ -660,8 +662,9 @@ def export_workbook(db: Database, path: str, start: str, end: str, sheets=None) 
 
     # ================================================================ 試算表
     s = _Sheet(ws_tb)
-    r = s.title("試算表", sub + "　｜　資產負債科目為期末餘額，損益科目為本期發生額", 5)
-    s.header(r, ["科目代號", "會計科目", "科目類別", f"借方餘額（{base}）", f"貸方餘額（{base}）"])
+    r = s.title("試算表（六欄式）", sub + "　｜　期初餘額＋本期發生額＝期末餘額；損益科目為本期發生額", 9)
+    s.header(r, ["科目代號", "會計科目", "科目類別", "期初借方", "期初貸方", "本期借方", "本期貸方",
+                 f"期末借方（{base}）", f"期末貸方（{base}）"])
     tb_hdr = r
     t_first = r + 1
     for i, row in enumerate(db.trial_balance(start, end)):
@@ -670,17 +673,22 @@ def export_workbook(db: Database, path: str, start: str, end: str, sheets=None) 
         s.cell(r, 1, _code(row["code"]), fill=fill, align="center")
         s.cell(r, 2, row["name"], fill=fill)
         s.cell(r, 3, row["group"], fill=fill, align="center")
-        s.cell(r, 4, row["debit"] or None, bfmt, fill=fill)
-        s.cell(r, 5, row["credit"] or None, bfmt, fill=fill)
+        for col, key in ((4, "open_debit"), (5, "open_credit"), (6, "period_debit"), (7, "period_credit")):
+            s.cell(r, col, row[key] or None, bfmt, fill=fill)
+        # 期末以公式計算：期初＋本期借方－本期貸方，依正負放在借方或貸方
+        net = f"(D{r}-E{r}+F{r}-G{r})"
+        s.cell(r, 8, f"=IF(ROUND({net},2)>0,{net},0)", bfmt, fill=fill, bold=True)
+        s.cell(r, 9, f"=IF(ROUND({net},2)<0,-{net},0)", bfmt, fill=fill, bold=True)
     t_last = max(r, t_first)
     r += 1
     s.cell(r, 1, None, fill=FILL_TOTAL)
     s.cell(r, 2, "合計", bold=True, fill=FILL_TOTAL, align="right")
-    s.cell(r, 3, f'=IF(ROUND(D{r}-E{r},0)=0,"✓ 借貸平衡","✗ 差額 "&TEXT(D{r}-E{r},"#,##0"))',
-           bold=True, fill=FILL_TOTAL, align="center")
-    s.cell(r, 4, f"=SUM(D{t_first}:D{t_last})", bfmt, bold=True, fill=FILL_TOTAL)
-    s.cell(r, 5, f"=SUM(E{t_first}:E{t_last})", bfmt, bold=True, fill=FILL_TOTAL)
-    s.total_border(r, 1, 5, double=True)
+    s.cell(r, 3, f'=IF(AND(ROUND(D{r}-E{r},0)=0,ROUND(F{r}-G{r},0)=0,ROUND(H{r}-I{r},0)=0),'
+                 f'"✓ 借貸平衡","✗ 不平衡")', bold=True, fill=FILL_TOTAL, align="center")
+    for col in range(4, 10):
+        L = "ABCDEFGHI"[col - 1]
+        s.cell(r, col, f"=SUM({L}{t_first}:{L}{t_last})", bfmt, bold=True, fill=FILL_TOTAL)
+    s.total_border(r, 1, 9, double=True)
     r += 2
     for text in [
         f"科目編碼：11 流動資產、12 非流動資產、21 流動負債、22 非流動負債、3101 {EQUITY_ACCOUNT}、",
@@ -690,9 +698,9 @@ def export_workbook(db: Database, path: str, start: str, end: str, sheets=None) 
         c = ws_tb.cell(row=r, column=1, value=text)
         c.font = F_SUBT
         r += 1
-    s.widths([11, 30, 12, 18, 18])
-    s.print_setup(tb_hdr)
-    ws_tb.freeze_panes = f"A{tb_hdr + 1}"
+    s.widths([10, 26, 14, 15, 15, 15, 15, 16, 16])
+    s.print_setup(tb_hdr, landscape=True)
+    ws_tb.freeze_panes = f"C{tb_hdr + 1}"
 
     # ================================================================ 帳戶清單
     s = _Sheet(ws_acc)

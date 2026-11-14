@@ -132,7 +132,8 @@ class SettingsPage(Page):
         gl.setHorizontalSpacing(14)
         gl.setVerticalSpacing(10)
         desc = QLabel("對帳完成後可執行結帳：結帳日（含）以前的紀錄將被鎖定，無法新增、修改或刪除，"
-                      "以確保已核對的帳務不會被誤改。如需更正，可隨時解除結帳。")
+                      "以確保已核對的帳務不會被誤改。年度結帳另會把該年度損益結轉「本期損益（累積淨值）」，"
+                      "並在日記簿留下結帳分錄。如需更正，可隨時解除結帳（年度結帳分錄會一併作廢）。")
         desc.setObjectName("Hint")
         desc.setWordWrap(True)
         self.closed_label = QLabel()
@@ -149,6 +150,12 @@ class SettingsPage(Page):
         gl.addWidget(self.close_date, 2, 1)
         gl.addWidget(do_close, 2, 2)
         gl.addWidget(reopen, 2, 3)
+        self.close_year = QComboBox()
+        year_btn = button("年度結帳…", "Primary")
+        year_btn.clicked.connect(self.close_year_dialog)
+        gl.addWidget(QLabel("年度結帳"), 3, 0)
+        gl.addWidget(self.close_year, 3, 1)
+        gl.addWidget(year_btn, 3, 2)
         gl.setColumnStretch(1, 1)
         b.addWidget(g)
 
@@ -232,7 +239,13 @@ class SettingsPage(Page):
         for kind, t in self.cat_tables.items():
             t.set_rows(db.list_categories(kind, include_archived=True))
         c = db.closed_until
-        self.closed_label.setText(f"已結帳至 {fmt_date(c)}" if c else "尚未結帳")
+        done = db.year_closings()
+        self.closed_label.setText((f"已結帳至 {fmt_date(c)}" if c else "尚未結帳")
+                                  + (f"　｜　已辦理年度結帳：{'、'.join(map(str, sorted(done)))} 年" if done else ""))
+        self.close_year.clear()
+        first = db.first_year() or dt.date.today().year
+        for y in range(dt.date.today().year - 1, first - 1, -1):
+            self.close_year.addItem(f"{y} 年（民國 {y - 1911} 年）" + ("　✓ 已結帳" if y in done else ""), y)
         self.closed_label.setStyleSheet(f"font-weight:700; color:{C.adjust if c else C.muted};")
         self.path_label.setText(self.ctx.db_path)
 
@@ -393,16 +406,28 @@ class SettingsPage(Page):
             error(self, "結帳日不可晚於今天。")
             return
         if ask(self, f"確定要結帳至 {fmt_date(d)} 嗎？\n此日期（含）以前的紀錄將被鎖定。", yes="結帳"):
-            self.db.set_setting("closed_until", d)
+            if d < self.db.closed_until and self.db.year_closings() and not ask(
+                    self, "結帳日往前移，之後年度的年度結帳分錄會一併作廢。確定嗎？", yes="確定", danger=True):
+                return
+            self.db.set_closed_until(d)
             self.ctx.changed()
 
     def reopen_books(self) -> None:
         if not self.db.closed_until:
             info(self, "目前尚未結帳。")
             return
-        if ask(self, "確定要解除結帳嗎？解除後所有紀錄都可以修改。", yes="解除結帳", danger=True):
-            self.db.set_setting("closed_until", "")
+        if ask(self, "確定要解除結帳嗎？解除後所有紀錄都可以修改，年度結帳分錄也會一併作廢。",
+               yes="解除結帳", danger=True):
+            self.db.set_closed_until("")
             self.ctx.changed()
+
+    def close_year_dialog(self) -> None:
+        y = self.close_year.currentData()
+        if y is None:
+            info(self, "目前沒有已結束、可辦理結帳的年度。")
+            return
+        from ..dialogs_more import YearCloseDialog
+        YearCloseDialog(self.ctx, y, self.window()).exec()
 
     # ------------------------------------------------------------------ 資料
     def backup(self) -> None:

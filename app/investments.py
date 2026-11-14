@@ -379,7 +379,8 @@ class Investments:
             if abs(orig) < 0.005:
                 continue
             base = money_round(orig * rate)
-            out.append({"account_id": aid, "orig": round(orig, 4),
+            # 金額以分為單位，避免不足一分的尾數讓分類帳逐筆合計與帳戶餘額差一分
+            out.append({"account_id": aid, "orig": money_round(orig),
                         "debit": base if base > 0 else 0, "credit": -base if base < 0 else 0})
         for ln in spec:
             if "special" in ln:
@@ -403,25 +404,44 @@ class Investments:
         return out
 
     def rebuild(self, sid: int, from_date: str) -> None:
-        """刪除該標的自 from_date 起的系統分錄，依交易重新產生。"""
+        """刪除該標的自 from_date 起的系統分錄，依交易重新產生。
+        重新產生的傳票沿用原傳票號碼（先比對日期與摘要，再依同日順序），
+        銀行對帳勾選與憑證附件因此保留；不再需要的傳票才會消失。"""
         sec = self.get_security(sid)
         src = f"inv:{sid}"
         db = self.db
-        old = db._q("SELECT id FROM transactions WHERE source = ? AND date >= ?", (src, from_date))
+        old = db._q("SELECT id, date, note FROM transactions WHERE source = ? AND date >= ? ORDER BY id",
+                    (src, from_date))
         for r in old:
             db.conn.execute("DELETE FROM txn_lines WHERE txn_id = ?", (r["id"],))
-            db.conn.execute("DELETE FROM recon_items WHERE txn_id = ?", (r["id"],))
             db.conn.execute("DELETE FROM transactions WHERE id = ?", (r["id"],))
         state = self.replay(sid)
+        todo = [v for v in state["vouchers"] if v["date"] >= from_date]
+        todo = [(v, ln) for v in todo for ln in [self._lines_to_journal(sec, v["lines"])]
+                if len([x for x in ln if x.get("debit") or x.get("credit")]) >= 2]
+        free = list(old)
+        reuse: list[int | None] = []
+        for v, _ in todo:      # 先以日期＋摘要對應
+            hit = next((o for o in free if o["date"] == v["date"] and o["note"] == v["note"]), None)
+            reuse.append(hit["id"] if hit else None)
+            if hit:
+                free.remove(hit)
+        for i, (v, _) in enumerate(todo):   # 再以同日先後順序對應（例如股價改變使摘要不同）
+            if reuse[i] is None:
+                hit = next((o for o in free if o["date"] == v["date"]), None)
+                if hit:
+                    reuse[i] = hit["id"]
+                    free.remove(hit)
         n = 0
-        for v in state["vouchers"]:
-            if v["date"] < from_date:
-                continue
-            lines = self._lines_to_journal(sec, v["lines"])
-            if len([x for x in lines if x.get("debit") or x.get("credit")]) < 2:
-                continue
-            db.add_journal(v["date"], v["note"], lines, source=src, log="")
+        for (v, lines), tid in zip(todo, reuse):
+            db.add_journal(v["date"], v["note"], lines, source=src, log="", txn_id=tid)
             n += 1
+        for o in free:      # 已不需要的傳票：清除其對帳勾選
+            db.conn.execute("DELETE FROM recon_items WHERE txn_id = ?", (o["id"],))
+        for tid in filter(None, reuse):   # 沿用的傳票若已不含該帳戶，也取消該帳戶的勾選
+            db.conn.execute("DELETE FROM recon_items WHERE txn_id = ? AND account_id NOT IN"
+                            " (SELECT account_id FROM txn_lines WHERE txn_id = ? AND account_id IS NOT NULL)",
+                            (tid, tid))
         db._log("投資分錄產生", None, f"{sec['name']}：自 {from_date.replace('-', '/')} 起重新產生 {n} 張傳票")
         db.conn.commit()
 

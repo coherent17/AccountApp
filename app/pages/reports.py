@@ -68,6 +68,10 @@ class ReportsPage(Page):
         super().__init__(ctx, scroll=False, parent=parent)
         b = self.body
         head, hl = page_header("財務報表", "資產負債表、收支損益表、分類帳與試算表")
+        prt = button("列印／PDF", icon=icon("list"))
+        prt.setMinimumHeight(44)
+        prt.clicked.connect(self.print_reports)
+        hl.addWidget(prt)
         exp = button("匯出 Excel 報表", "Income", icon("download", "#FFFFFF"))
         exp.setMinimumHeight(44)
         exp.clicked.connect(self.export)
@@ -279,22 +283,25 @@ class ReportsPage(Page):
         w = QWidget()
         lay = QVBoxLayout(w)
         lay.setContentsMargins(0, 12, 0, 0)
+        def amt(key: str, title: str) -> Column:
+            return Column(title, lambda r: fmt_num(r[key], ctx.base) if r[key] else "",
+                          align="right", width=118, sort=lambda r: r[key],
+                          bold=key in ("debit", "credit"))
+
         self.tb = DataTable([
-            Column("科目代號", lambda r: r["code"], align="center", width=110),
+            Column("代號", lambda r: r["code"], align="center", width=70),
             Column("會計科目", lambda r: r["name"], stretch=True, bold=True),
-            Column("科目類別", lambda r: r["group"], align="center", width=120,
-                   color=lambda r: C.muted),
-            Column("借方餘額", lambda r: fmt_num(r["debit"], ctx.base) if r["debit"] else "",
-                   align="right", width=170, sort=lambda r: r["debit"]),
-            Column("貸方餘額", lambda r: fmt_num(r["credit"], ctx.base) if r["credit"] else "",
-                   align="right", width=170, sort=lambda r: r["credit"]),
-        ])
+            Column("類別", lambda r: r["group"], align="center", width=64, color=lambda r: C.muted),
+            amt("open_debit", "期初借方"), amt("open_credit", "期初貸方"),
+            amt("period_debit", "本期借方"), amt("period_credit", "本期貸方"),
+            amt("debit", "期末借方"), amt("credit", "期末貸方"),
+        ], sortable=False)
         lay.addWidget(self.tb, 1)
         self.tb_sum = QLabel()
         self.tb_sum.setStyleSheet("font-weight:700; padding:8px 4px;")
         lay.addWidget(self.tb_sum)
-        hint = QLabel("資產、負債科目為期末餘額；收入、支出等損益科目為本期發生額；"
-                      "期初淨值 = 期初前一日淨資產 + 期間內新開帳戶之期初金額。借貸合計相等即表示帳務平衡。")
+        hint = QLabel("六欄式試算表：期初餘額＋本期借貸發生額＝期末餘額。損益科目只有本期發生額；"
+                      "期初淨值 = 期初前一日淨資產 + 期間內新開帳戶之期初金額。三組借貸合計都相等即表示帳務平衡。")
         hint.setObjectName("Hint")
         hint.setWordWrap(True)
         lay.addWidget(hint)
@@ -430,6 +437,16 @@ class ReportsPage(Page):
         t.row(["緊急預備金（現金及約當現金 ÷ 平均月支出）", "",
                "—" if r["emergency_months"] is None else f"{r['emergency_months']:.1f} 個月", ""], 1)
         t.row(["近 12 個月儲蓄率", "", pct(r["savings_rate"]) or "—", ""], 1)
+        t.row(["", "", "", ""], 0)
+        eq = self.db.equity_statement(start, end)
+        t.row([f"權益變動（{fmt_date(start)}～{fmt_date(end)}）", "", "", ""], 0, "section")
+        for name, v in eq["rows"]:
+            t.row([name, "", fmt_num(v, base), ""], 1)
+        t.row(["期末淨值", "", fmt_num(eq["closing"], base), ""], 0, "total", C.primary)
+        closed = self.db.year_closings()
+        years = [y for y in range(int(start[:4]), int(end[:4]) + 1) if y in closed]
+        if years:
+            t.row([f"已辦理年度結帳：{'、'.join(map(str, years))} 年（本期損益已結轉累積淨值）", "", "", ""], 1)
 
     # ------------------------------------------------------------------ 損益表
     def refresh_is(self, start: str, end: str) -> None:
@@ -661,17 +678,25 @@ class ReportsPage(Page):
     def refresh_tb(self, start: str, end: str) -> None:
         base = self.ctx.base
         rows = self.db.trial_balance(start, end)
-        d = round(sum(r["debit"] for r in rows), 2)
-        c = round(sum(r["credit"] for r in rows), 2)
-        self.tb.set_rows(rows)
-        ok = abs(d - c) < 1
-        self.tb_sum.setText(f"借方合計 {fmt_money(d, base)}　｜　貸方合計 {fmt_money(c, base)}　｜　"
-                            + ("✓ 借貸平衡" if ok else f"✗ 差額 {fmt_money(d - c, base)}"))
+        tot = {k: round(sum(r[k] for r in rows), 2) for k in
+               ("open_debit", "open_credit", "period_debit", "period_credit", "debit", "credit")}
+        total = {"code": "", "name": "合計", "group": "", "_bold": True, "_bg": "#E4ECF9", **tot}
+        self.tb.set_rows(rows + [total])
+        d, c = tot["debit"], tot["credit"]
+        ok = all(abs(tot[a] - tot[b]) < 1 for a, b in (("open_debit", "open_credit"),
+                                                        ("period_debit", "period_credit"), ("debit", "credit")))
+        self.tb_sum.setText(f"期末借方 {fmt_money(d, base)}　｜　期末貸方 {fmt_money(c, base)}　｜　"
+                            + ("✓ 期初、本期、期末皆借貸平衡" if ok else f"✗ 不平衡，期末差額 {fmt_money(d - c, base)}"))
         self.tb_sum.setStyleSheet(f"font-weight:700; padding:8px 4px; color:{C.income if ok else C.expense};")
 
     def export(self) -> None:
         a, b = self.range()
         ExportDialog(self.ctx, self.window(), a, b).exec()
+
+    def print_reports(self) -> None:
+        from ..dialogs_print import PrintDialog
+        a, b = self.range()
+        PrintDialog(self.ctx, a, b, self.window()).exec()
 
 
 def _shift_year(iso_date: str) -> str:

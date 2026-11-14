@@ -11,7 +11,7 @@ from ..dialogs import AdjustDialog, ExportDialog, TransactionDialog, open_vouche
 from ..dialogs_more import (AuditDialog, ImportDialog, JournalDialog, RecurringEditDialog,
                             RecurringManagerDialog, ask_void_reason)
 from ..theme import TYPE_COLORS, C, fmt_date, fmt_money, icon
-from ..widgets import (PERIOD_PRESETS, Card, Column, DataTable, button, error, iso,
+from ..widgets import (PERIOD_PRESETS, Card, Column, DataTable, button, error, info, iso,
                        make_date_edit, page_header, preset_range, qdate)
 from .base import Page
 
@@ -306,6 +306,9 @@ class TransactionsPage(Page):
 
     def copy_txn(self, row: dict) -> None:
         txn = dict(self.db.get_transaction(row["id"]))
+        if txn["source"].startswith(("inv:", "close:")):
+            info(self, "系統自動產生的傳票（投資分錄、年度結帳分錄）不能複製。")
+            return
         txn["date"] = dt.date.today().isoformat()
         if txn["type"] == "journal":
             prefill = []

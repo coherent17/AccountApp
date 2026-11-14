@@ -204,6 +204,9 @@ class TransactionDialog(BaseDialog):
             hist = button("修改紀錄", "Link")
             hist.clicked.connect(self.history)
             bar.addWidget(hist)
+            pr = button("列印傳票", "Link")
+            pr.clicked.connect(self.print_voucher)
+            bar.addWidget(pr)
         elif self.ttype != "adjust":
             split = button("改用複式分錄（分割多個科目）", "Link",
                            tooltip="一筆付款分攤到多個分類，或需要自行輸入借貸時使用")
@@ -356,6 +359,10 @@ class TransactionDialog(BaseDialog):
             self.amount.setFocus()
         else:
             self.accept()
+
+    def print_voucher(self) -> None:
+        from .dialogs_print import print_voucher
+        print_voucher(self.ctx, self.txn["id"], self)
 
     def delete(self) -> None:
         from .dialogs_more import ask_void_reason

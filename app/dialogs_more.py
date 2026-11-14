@@ -12,7 +12,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QComplet
                                QLabel, QLineEdit, QListWidget, QListWidgetItem, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from .context import AppContext
-from .database import INVESTMENT_CATEGORIES, TYPE_LABELS, fmt_shares, money_round, voucher_no
+from .database import (CLOSING, CLOSING_SOURCE, INVESTMENT_CATEGORIES, TYPE_LABELS, fmt_shares, money_round,
+                       voucher_no)
 from .dialogs import BaseDialog, fill_account_combo, open_path
 from .investments import Investments
 from .theme import C, fmt_date, fmt_money, fmt_num, icon
@@ -122,8 +123,9 @@ class JournalDialog(BaseDialog):
         self.inv = Investments(ctx.db)
         self.txn = txn
         self.saved = False
+        self.closing = bool(txn and txn["source"].startswith(CLOSING_SOURCE))
         self._load_chart()
-        self.readonly = bool(txn and (txn["source"].startswith("inv:") or txn["void"]))
+        self.readonly = bool(txn and (txn["source"].startswith("inv:") or txn["void"] or self.closing))
 
         top = QGridLayout()
         top.setHorizontalSpacing(12)
@@ -207,6 +209,10 @@ class JournalDialog(BaseDialog):
             void = button("作廢這張傳票", "Danger", icon("trash", C.expense))
             void.clicked.connect(self.void)
             bar.addWidget(void)
+        if txn:
+            pr = button("列印傳票", icon=icon("list"))
+            pr.clicked.connect(self.print_voucher)
+            bar.addWidget(pr)
         bar.addStretch()
         cancel = button("關閉" if self.readonly else "取消")
         cancel.clicked.connect(self.reject)
@@ -234,13 +240,19 @@ class JournalDialog(BaseDialog):
             self.table.setEnabled(False)
             for w in (self.date, self.note, self.template, self.tmpl_save, self.tmpl_manage):
                 w.setEnabled(False)
-            why = "此傳票已作廢。" if txn["void"] else "此傳票由「投資管理」自動產生，請到投資管理修改交易。"
+            why = ("此傳票已作廢。" if txn["void"] else
+                   "這是年度結帳分錄：損益科目結轉本期損益，只記錄於日記簿、不影響報表金額。"
+                   "如需更正該年度，請先到「設定」解除結帳。" if self.closing else
+                   "此傳票由「投資管理」自動產生，請到投資管理修改交易。")
             self.show_error(why)
         self.update_totals()
 
     # ------------------------------------------------------------------
     def _load_chart(self) -> None:
         self.chart = self.db.chart_of_accounts()
+        if getattr(self, "closing", False):   # 結帳分錄的「本期損益」只用於檢視
+            self.chart.append({"key": ("special", "closing"), "code": CLOSING[0], "name": CLOSING[1],
+                               "group": CLOSING[2], "investment": False})
         self.chart_by_key = {_key_str(a["key"]): a for a in self.chart}
 
     def _fill_combo(self, cb: QComboBox, key_str: str) -> None:
@@ -565,6 +577,10 @@ class JournalDialog(BaseDialog):
         self.ctx.toast.emit("分錄已儲存，借貸平衡 ✓")
         self.accept()
 
+    def print_voucher(self) -> None:
+        from .dialogs_print import print_voucher
+        print_voucher(self.ctx, self.txn["id"], self)
+
     def void(self) -> None:
         reason = ask_void_reason(self)
         if reason is None:
@@ -757,6 +773,108 @@ class TemplateManagerDialog(BaseDialog):
         if r >= 0 and 0 <= r + step < len(self.items):
             self.items[r], self.items[r + step] = self.items[r + step], self.items[r]
             self._commit(r + step)
+
+
+# ====================================================================== 年度結帳
+class YearCloseDialog(BaseDialog):
+    """年度結帳：檢查、預覽權益變動與結帳分錄，確認後結轉並鎖定該年度。"""
+
+    def __init__(self, ctx: AppContext, year: int, parent=None):
+        super().__init__(f"{year} 年度結帳", parent, width=760)
+        self.ctx = ctx
+        self.db = ctx.db
+        self.year = year
+        self.closed_ok = False
+        start, end = f"{year}-01-01", f"{year}-12-31"
+        closed = self.db.year_closings()
+        intro = QLabel(f"年度結帳會把 {year} 年的收入、費用與業外損益結轉到「本期損益（累積淨值）」，"
+                       f"並將 {year}/12/31（含）以前的帳務鎖定。結帳分錄記錄於日記簿；"
+                       "報表本來就以期初淨值承接前期損益，所以結帳不會改變任何報表金額。")
+        intro.setObjectName("Hint")
+        intro.setWordWrap(True)
+        self.root.addWidget(intro)
+
+        self.root.addWidget(section_title("結帳前檢查"))
+        checks = []
+        tb = self.db.trial_balance(start, end)
+        diff = round(sum(r["debit"] - r["credit"] for r in tb), 2)
+        checks.append((abs(diff) < 0.5, "試算表借貸平衡" if abs(diff) < 0.5 else f"試算表不平衡，差額 {diff:,.2f}"))
+        due = [d for _, d in self.db.due_recurring(end)]
+        checks.append((not due, "定期交易皆已入帳" if not due else
+                       f"尚有 {len(due)} 筆 {year} 年以前的定期交易未入帳（可先到收支明細處理）"))
+        stale = [h["name"] for h in Investments(self.db).holdings(end)
+                 if not h["price_date"] or h["price_date"] < f"{year}-12-01"]
+        checks.append((not stale, "持股皆已於 12 月辦理市價評價" if not stale else
+                       "年底前尚未評價：" + "、".join(stale) + "（可先到投資管理「市價評價」）"))
+        for ok, text in checks:
+            lab = QLabel(("✓ " if ok else "⚠ ") + text)
+            lab.setWordWrap(True)
+            lab.setStyleSheet(f"color:{C.income if ok else C.adjust}; font-weight:600;")
+            self.root.addWidget(lab)
+        self.blocked = abs(diff) >= 0.5
+
+        self.root.addWidget(section_title("權益變動"))
+        eq = self.db.equity_statement(start, end)
+        self.root.addWidget(self._table(["項目", "金額"], [(n, fmt_money(v, ctx.base)) for n, v in eq["rows"]]
+                                        + [("期末淨值", fmt_money(eq["closing"], ctx.base))]))
+
+        self.root.addWidget(section_title("結帳分錄（預覽）"))
+        chart = {_key_str(a["key"]): a for a in self.db.chart_of_accounts()}
+        rows = []
+        for ln in self.db.closing_lines(year):
+            key = f"category:{ln['category_id']}" if ln.get("category_id") else f"special:{ln['special']}"
+            a = chart.get(key) or {"code": CLOSING[0], "name": CLOSING[1]}
+            rows.append((a["code"], a["name"], fmt_money(ln["debit"], ctx.base) if ln["debit"] else "",
+                         fmt_money(ln["credit"], ctx.base) if ln["credit"] else ""))
+        self.root.addWidget(self._table(["代號", "會計科目", "借方", "貸方"], rows or [("", "本年度沒有損益", "", "")]))
+        self.root.addWidget(self.msg)
+        if year in closed:
+            self.blocked = True
+            self.show_ok(f"{year} 年度已完成結帳（{voucher_no(closed[year])}）。如需更正，請先解除結帳。")
+        elif self.blocked:
+            self.show_error("試算表不平衡，請先檢查帳務。")
+
+        bar = QHBoxLayout()
+        bar.addStretch()
+        cancel = button("關閉" if self.blocked else "取消")
+        cancel.clicked.connect(self.reject)
+        bar.addWidget(cancel)
+        if not self.blocked:
+            ok = button(f"確認 {year} 年度結帳", "Primary")
+            ok.clicked.connect(self.confirm)
+            bar.addWidget(ok)
+        self.root.addLayout(bar)
+
+    @staticmethod
+    def _table(heads: list[str], rows: list[tuple]) -> QTableWidget:
+        t = QTableWidget(len(rows), len(heads))
+        t.setHorizontalHeaderLabels(heads)
+        t.verticalHeader().setVisible(False)
+        t.verticalHeader().setDefaultSectionSize(34)
+        t.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        name_col = 1 if len(heads) > 2 else 0
+        for c in range(len(heads)):
+            t.horizontalHeader().setSectionResizeMode(
+                c, QHeaderView.ResizeMode.Stretch if c == name_col else QHeaderView.ResizeMode.ResizeToContents)
+        for r, vals in enumerate(rows):
+            for c, v in enumerate(vals):
+                it = QTableWidgetItem(str(v))
+                if c >= len(heads) - (2 if len(heads) > 2 else 1):
+                    it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                t.setItem(r, c, it)
+        t.setFixedHeight(min(len(rows), 8) * 34 + 48)
+        return t
+
+    def confirm(self) -> None:
+        try:
+            made = self.db.close_year(self.year)
+        except ValueError as e:
+            self.show_error(str(e))
+            return
+        self.closed_ok = True
+        self.ctx.changed()
+        self.ctx.toast.emit(f"{self.year} 年度結帳完成" + (f"，已產生 {len(made)} 張結帳分錄" if made else ""))
+        self.accept()
 
 
 # ====================================================================== 作廢

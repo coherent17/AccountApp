@@ -111,6 +111,10 @@ SPECIALS = {
     "equity": ("3102", EQUITY_ADJ_ACCOUNT, "權益"),
 }
 EQUITY_CODE = "3101"
+# 年度結帳：損益科目結轉至本期損益（累積淨值）。結帳分錄只記錄於日記簿，不過帳，
+# 因為期初淨值已由前一日淨資產計算，報表自然從新年度開始。
+CLOSING = ("3201", "本期損益（結轉累積淨值）", "權益")
+CLOSING_SOURCE = "close:"
 
 # 科目代號首碼：資產 1、負債 2、收入 4（業外 7）、費用 5／6（業外 7）
 CODE_FIRST_DIGITS = {"asset": "1", "liability": "2", "income": "47", "expense": "567"}
@@ -293,7 +297,7 @@ CREATE VIEW v_acc_post AS
     UNION ALL
     SELECT t.id, t.date, l.account_id, l.orig
       FROM txn_lines l JOIN transactions t ON t.id = l.txn_id
-     WHERE t.void = 0 AND t.type = 'journal' AND l.account_id IS NOT NULL;
+     WHERE t.void = 0 AND t.type = 'journal' AND t.source NOT LIKE 'close:%' AND l.account_id IS NOT NULL;
 
 DROP VIEW IF EXISTS v_cat_post;
 CREATE VIEW v_cat_post AS
@@ -307,7 +311,7 @@ CREATE VIEW v_cat_post AS
       FROM txn_lines l
       JOIN transactions t ON t.id = l.txn_id
       JOIN categories c ON c.id = l.category_id
-     WHERE t.void = 0 AND t.type = 'journal';
+     WHERE t.void = 0 AND t.type = 'journal' AND t.source NOT LIKE 'close:%';
 
 DROP VIEW IF EXISTS v_special_post;
 CREATE VIEW v_special_post AS
@@ -323,13 +327,13 @@ CREATE VIEW v_special_post AS
     UNION ALL
     SELECT t.id, t.date, l.special, l.credit - l.debit
       FROM txn_lines l JOIN transactions t ON t.id = l.txn_id
-     WHERE t.void = 0 AND t.type = 'journal' AND l.special IS NOT NULL
+     WHERE t.void = 0 AND t.type = 'journal' AND t.source NOT LIKE 'close:%' AND l.special IS NOT NULL
     UNION ALL
     SELECT t.id, t.date, 'fx', SUM(l.orig * a.rate - (l.debit - l.credit))
       FROM txn_lines l
       JOIN transactions t ON t.id = l.txn_id
       JOIN accounts a ON a.id = l.account_id
-     WHERE t.void = 0 AND t.type = 'journal'
+     WHERE t.void = 0 AND t.type = 'journal' AND t.source NOT LIKE 'close:%'
      GROUP BY t.id
     HAVING ABS(SUM(l.orig * a.rate - (l.debit - l.credit))) > 0.004;
 """
@@ -472,6 +476,7 @@ class Database:
             why = ("買賣不再自動評價（只保留手動輸入市價的評價）；" if version < 4 else "") + \
                 "評價改以預估淨售價（扣除賣出手續費與證交稅）計算"
             self._log("系統升級", None, f"已重編投資系統分錄：{why}")
+            self.refresh_year_closings()
             self.conn.commit()
         finally:
             self._restating = False
@@ -892,6 +897,8 @@ class Database:
             raise ValueError("此傳票已作廢，如需使用請先「取消作廢」。")
         if t["source"].startswith("inv:"):
             raise ValueError("此傳票由「投資管理」自動產生，請到投資管理修改交易。")
+        if t["source"].startswith(CLOSING_SOURCE):
+            raise ValueError("這是年度結帳分錄，由系統產生；如需更正，請先到「設定」解除結帳。")
 
     # ================================================================== 傳票（分錄）
     def _normalize_lines(self, lines: list[dict]) -> list[dict]:
@@ -949,7 +956,8 @@ class Database:
         return out
 
     def add_journal(self, date: str, note: str, lines: list[dict], source: str = "",
-                    log: str = "新增") -> int:
+                    log: str = "新增", txn_id: int | None = None) -> int:
+        """新增分錄。txn_id 只供系統重編傳票時沿用原傳票號碼。"""
         _dt.date.fromisoformat(date)
         self._check_open(date)
         items = self._normalize_lines(lines)
@@ -957,9 +965,9 @@ class Database:
         first_acc = next(x["account_id"] for x in items if x["account_id"])
         now = _now()
         cur = self.conn.execute(
-            "INSERT INTO transactions(date, type, account_id, amount, note, source, created_at,"
-            " updated_at) VALUES (?, 'journal', ?, ?, ?, ?, ?, ?)",
-            (date, first_acc, total, (note or "").strip(), source, now, now))
+            "INSERT INTO transactions(id, date, type, account_id, amount, note, source, created_at,"
+            " updated_at) VALUES (?, ?, 'journal', ?, ?, ?, ?, ?, ?)",
+            (txn_id, date, first_acc, total, (note or "").strip(), source, now, now))
         tid = cur.lastrowid
         self._insert_lines(tid, items)
         if log:
@@ -1029,6 +1037,8 @@ class Database:
                 continue
             if t["source"].startswith("inv:"):
                 raise ValueError(f"{voucher_no(i)} 由投資管理自動產生，請到「投資管理」刪除該筆交易。")
+            if t["source"].startswith(CLOSING_SOURCE):
+                raise ValueError(f"{voucher_no(i)} 是年度結帳分錄，請到「設定」解除結帳。")
             self._check_open(t["date"])
         sids: set[int] = set()
         first = None
@@ -1054,6 +1064,8 @@ class Database:
         t = self.get_transaction(txn_id)
         if not t or not t["void"]:
             return
+        if t["source"].startswith(CLOSING_SOURCE):
+            raise ValueError("年度結帳分錄無法取消作廢，請到「設定」重新執行年度結帳。")
         self._check_open(t["date"])
         self.conn.execute("UPDATE transactions SET void = 0, void_reason = '', updated_at = ?"
                           " WHERE id = ?", (_now(), txn_id))
@@ -1066,6 +1078,8 @@ class Database:
         t = self.get_transaction(txn_id)
         if not t or t["void"]:
             raise ValueError("找不到可迴轉的傳票")
+        if t["source"].startswith(CLOSING_SOURCE):
+            raise ValueError("年度結帳分錄無法迴轉，請到「設定」解除結帳。")
         date = date or _today()
         lines = []
         for ln in self.txn_lines_of(t, live=False):
@@ -1182,7 +1196,7 @@ class Database:
                     if ln["an"] not in accs:
                         accs.append(ln["an"])
                 else:
-                    label = ln["cn"] or SPECIALS[ln["special"]][1]
+                    label = ln["cn"] or SPECIALS.get(ln["special"], CLOSING)[1]
                     if label not in others:
                         others.append(label)
         for r in rows:
@@ -1390,7 +1404,7 @@ class Database:
                     "debit": money_round(debit), "credit": money_round(credit)}
 
         def sp_line(key, gain):
-            code, name, group = SPECIALS[key]
+            code, name, group = SPECIALS[key] if key in SPECIALS else CLOSING
             return {"kind": "special", "id": key, "code": code, "name": name, "group": group,
                     "debit": money_round(-gain) if gain < 0 else 0.0,
                     "credit": money_round(gain) if gain > 0 else 0.0}
@@ -1506,36 +1520,166 @@ class Database:
         return money_round(equity)
 
     def trial_balance(self, start: str, end: str) -> list[dict]:
-        """試算表：資產負債科目取期末餘額，損益科目取本期發生額，以期初淨值平衡。"""
+        """六欄式試算表：期初餘額、本期借貸發生額、期末餘額（本位幣）。
+        資產負債科目：期初為期初日前一日餘額（期間內新開帳戶之開帳金額列入期初），期末為期末餘額；
+        損益科目為本期發生額（期初為 0）；期初淨值平衡期初與期末兩欄。
+        debit／credit 為期末欄，其餘欄位為 open_debit、open_credit、period_debit、period_credit。"""
         acodes = self.account_codes()
         ccodes = self.category_codes()
+        prev = (_dt.date.fromisoformat(start) - _dt.timedelta(days=1)).isoformat()
+        opening = self.signed_balances(prev)
+        moves = {r["account_id"]: r for r in self._q(
+            "SELECT account_id, SUM(CASE WHEN delta > 0 THEN delta ELSE 0 END) AS dr,"
+            " SUM(CASE WHEN delta < 0 THEN -delta ELSE 0 END) AS cr"
+            " FROM v_acc_post WHERE date BETWEEN ? AND ? GROUP BY account_id", (start, end))}
         rows = []
+
+        def row(code, name, group, open_=0.0, dr=0.0, cr=0.0, close=None):
+            close = open_ + dr - cr if close is None else close
+            rows.append({"code": code, "name": name, "group": group,
+                         "open_debit": money_round(max(open_, 0)), "open_credit": money_round(max(-open_, 0)),
+                         "period_debit": money_round(dr), "period_credit": money_round(cr),
+                         "debit": money_round(max(close, 0)), "credit": money_round(max(-close, 0))})
+
         for acc in self.account_summaries(end, include_archived=True):
-            v = acc["base_value"]
-            if not v:
+            rate = acc["rate"]
+            o = opening.get(acc["id"], 0.0)
+            if start <= acc["opening_date"] <= end:
+                o += acc["opening_balance"] * (1 if acc["kind"] == "asset" else -1)
+            m = moves.get(acc["id"])
+            dr, cr = ((m["dr"] or 0) * rate, (m["cr"] or 0) * rate) if m else (0.0, 0.0)
+            if not (o or dr or cr or acc["base_value"]):
                 continue
-            rows.append({"code": acodes[acc["id"]], "name": acc["name"],
-                         "group": "資產" if acc["kind"] == "asset" else "負債",
-                         "debit": v if v > 0 else 0.0, "credit": -v if v < 0 else 0.0})
+            row(acodes[acc["id"]], acc["name"], "資產" if acc["kind"] == "asset" else "負債",
+                money_round(o * rate), dr, cr, acc["base_value"])
         equity = self.equity_opening(start, end)
-        rows.append({"code": "3101", "name": EQUITY_ACCOUNT, "group": "權益",
-                     "debit": -equity if equity < 0 else 0.0, "credit": equity if equity > 0 else 0.0})
-        for kind, group in (("income", "收入"), ("expense", "費用")):
-            for c in self.category_totals(start, end, kind):
-                v = c["total"]
-                if kind == "income":
-                    rows.append({"code": ccodes[c["id"]], "name": c["name"], "group": group,
-                                 "debit": -v if v < 0 else 0.0, "credit": v if v > 0 else 0.0})
-                else:
-                    rows.append({"code": ccodes[c["id"]], "name": c["name"], "group": group,
-                                 "debit": v if v > 0 else 0.0, "credit": -v if v < 0 else 0.0})
-        for key, (code, name, group) in SPECIALS.items():
-            g = self.special_total(key, start, end)
-            if g:
-                rows.append({"code": code, "name": name, "group": group,
-                             "debit": -g if g < 0 else 0.0, "credit": g if g > 0 else 0.0})
+        row("3101", EQUITY_ACCOUNT, "權益", -equity, close=-equity)
+        cats = {c["id"]: c for c in self._q("SELECT id, name, kind FROM categories")}
+        for r in self._q("SELECT category_id, kind, SUM(CASE WHEN base > 0 THEN base ELSE 0 END) AS pos,"
+                         " SUM(CASE WHEN base < 0 THEN -base ELSE 0 END) AS neg FROM v_cat_post"
+                         " WHERE date BETWEEN ? AND ? GROUP BY category_id, kind", (start, end)):
+            c = cats[r["category_id"]]
+            pos, neg = r["pos"] or 0, r["neg"] or 0
+            if not (pos or neg):
+                continue
+            if r["kind"] == "expense":
+                row(ccodes[c["id"]], c["name"], "費用", 0.0, pos, neg)
+            else:
+                row(ccodes[c["id"]], c["name"], "收入", 0.0, neg, pos)
+        for r in self._q("SELECT special, SUM(CASE WHEN gain > 0 THEN gain ELSE 0 END) AS cr,"
+                         " SUM(CASE WHEN gain < 0 THEN -gain ELSE 0 END) AS dr FROM v_special_post"
+                         " WHERE date BETWEEN ? AND ? GROUP BY special", (start, end)):
+            if r["special"] in SPECIALS and (r["dr"] or r["cr"]):
+                code, name, group = SPECIALS[r["special"]]
+                row(code, name, group, 0.0, r["dr"] or 0, r["cr"] or 0)
         rows.sort(key=lambda r: r["code"])
         return rows
+
+    def equity_statement(self, start: str, end: str) -> dict:
+        """權益變動表：期初淨值＋本期收支結餘＋業外損益＋淨值調整＝期末淨值。"""
+        inc = self.income_expense_totals(start, end)
+        rows = [("期初淨值", self.equity_opening(start, end)),
+                ("本期收支結餘", money_round(inc["income"] - inc["expense"])),
+                (SPECIALS["adjust"][1], self.adjust_totals(start, end)),
+                (SPECIALS["realized"][1], self.realized_totals(start, end)),
+                (SPECIALS["fx"][1], self.fx_totals(start, end)),
+                (SPECIALS["equity"][1], self.special_total("equity", start, end))]
+        closing = self.net_worth(end)["net"]
+        other = money_round(closing - sum(v for _, v in rows))
+        if abs(other) >= 0.5:
+            rows.append(("其他（匯率重估等）", other))
+        return {"rows": rows, "closing": closing,
+                "profit": money_round(sum(v for _, v in rows[1:5]))}
+
+    # ================================================================== 年度結帳
+    def year_closings(self) -> dict[int, int]:
+        """已執行年度結帳的年度與其結帳分錄傳票 id。"""
+        return {int(r["source"][len(CLOSING_SOURCE):]): r["id"] for r in self._q(
+            "SELECT id, source FROM transactions WHERE void = 0 AND source LIKE 'close:%'")}
+
+    def closing_lines(self, year: int) -> list[dict]:
+        """年度結帳分錄：收入借記、費用貸記、業外損益沖轉，差額記本期損益（貸方為盈餘）。"""
+        start, end = f"{year}-01-01", f"{year}-12-31"
+        out = []
+        for kind in ("income", "expense"):
+            for c in self.category_totals(start, end, kind):
+                v = money_round(c["total"] if kind == "income" else -c["total"])   # 貸方為正
+                if abs(v) >= 0.005:
+                    out.append({"category_id": c["id"], "debit": max(v, 0), "credit": max(-v, 0)})
+        for key in ("adjust", "realized", "fx"):
+            g = self.special_total(key, start, end)
+            if abs(g) >= 0.005:
+                out.append({"special": key, "debit": max(g, 0), "credit": max(-g, 0)})
+        profit = money_round(sum(x["debit"] - x["credit"] for x in out))
+        if abs(profit) >= 0.005:
+            out.append({"special": "closing", "debit": max(-profit, 0), "credit": max(profit, 0)})
+        return out
+
+    def first_year(self) -> int | None:
+        row = self._q1("SELECT MIN(d) AS d FROM (SELECT MIN(date) AS d FROM transactions WHERE void = 0"
+                       " UNION ALL SELECT MIN(opening_date) FROM accounts)")
+        return int(row["d"][:4]) if row and row["d"] else None
+
+    def close_year(self, year: int) -> list[int]:
+        """年度結帳：產生該年度（及之前尚未結帳年度）的結帳分錄，並鎖定至該年 12/31。"""
+        if year >= _dt.date.today().year:
+            raise ValueError(f"{year} 年度尚未結束，要到 {year + 1} 年才能辦理年度結帳。")
+        first = self.first_year() or year
+        done = self.year_closings()
+        made = []
+        for y in range(first, year + 1):
+            if y in done:
+                continue
+            tb = self.trial_balance(f"{y}-01-01", f"{y}-12-31")
+            if abs(sum(r["debit"] - r["credit"] for r in tb)) >= 0.5:
+                raise ValueError(f"{y} 年度試算表借貸不平衡，無法結帳。")
+            lines = self.closing_lines(y)
+            if not lines:
+                continue
+            now = _now()
+            cur = self.conn.execute(
+                "INSERT INTO transactions(date, type, account_id, amount, note, source, created_at, updated_at)"
+                " VALUES (?, 'journal', NULL, ?, ?, ?, ?, ?)",
+                (f"{y}-12-31", money_round(sum(x["debit"] for x in lines)),
+                 f"{y} 年度結帳：損益結轉本期損益（累積淨值）", f"{CLOSING_SOURCE}{y}", now, now))
+            tid = cur.lastrowid
+            for x in lines:
+                x.update({"account_id": None, "category_id": x.get("category_id"), "special": x.get("special"),
+                          "orig": None, "memo": "", "security_id": None, "shares": 0, "price": 0})
+            self._insert_lines(tid, lines)
+            self._log("年度結帳", tid, f"{y} 年度結帳，本期損益 {money_round(lines[-1]['credit'] - lines[-1]['debit']):,.0f}"
+                      if lines[-1].get("special") == "closing" else f"{y} 年度結帳")
+            made.append(tid)
+        if f"{year}-12-31" > self.closed_until:
+            self.set_setting("closed_until", f"{year}-12-31")
+        self.conn.commit()
+        return made
+
+    def refresh_year_closings(self) -> None:
+        """系統重編已結帳年度的分錄後（例如升級），金額有變的年度結帳分錄改以新金額重新產生。"""
+        for y, tid in sorted(self.year_closings().items()):
+            def key(ln):
+                return (ln.get("category_id") or 0, ln.get("special") or "", money_round(ln["debit"]),
+                        money_round(ln["credit"]))
+            old = sorted(key(dict(ln)) for ln in self.get_lines(tid))
+            new = sorted(key(ln) for ln in self.closing_lines(y))
+            if old != new:
+                self.conn.execute("UPDATE transactions SET void = 1, void_reason = ?, updated_at = ? WHERE id = ?",
+                                  ("系統重編後重新結轉", _now(), tid))
+                self._log("作廢", tid, f"{y} 年度結帳分錄（系統重編後重新結轉）")
+                closed = self.closed_until
+                self.close_year(y)
+                self.set_setting("closed_until", closed)
+
+    def set_closed_until(self, date: str) -> None:
+        """設定結帳日。往前移（或解除）時，結帳日之後年度的結帳分錄一併作廢。"""
+        for y, tid in self.year_closings().items():
+            if not date or f"{y}-12-31" > date:
+                self.conn.execute("UPDATE transactions SET void = 1, void_reason = ?, updated_at = ?"
+                                  " WHERE id = ?", ("解除結帳", _now(), tid))
+                self._log("作廢", tid, f"{y} 年度結帳分錄（解除結帳）")
+        self.set_setting("closed_until", date)
+        self.conn.commit()
 
     def balance_sheet(self, as_of: str) -> dict:
         groups = {"流動資產": [], "非流動資產": [], "流動負債": [], "非流動負債": []}
