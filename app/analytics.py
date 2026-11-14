@@ -1,11 +1,11 @@
-"""分析報表：現金流量表、報稅彙總、退休規劃、資產配置。"""
+"""分析報表：現金流量表、報稅彙總。"""
 
 from __future__ import annotations
 
 import datetime as _dt
 
 from .database import (CASH_EQUIVALENT_CATEGORIES, CURRENT_LIABILITY_CATEGORIES, TAX_TAGS,
-                       Database, last_n_months, money_round, month_start)
+                       Database, money_round)
 
 
 # ====================================================================== 現金流量表
@@ -138,106 +138,3 @@ def tax_summary(db: Database, year: int) -> dict:
     realized = db.realized_totals(start, end)
     return {"year": year, "incomes": incomes, "deductions": deductions, "realized": realized,
             "realized_note": "證券交易所得目前停徵所得稅（僅賣出時課徵證券交易稅），此金額僅供參考。"}
-
-
-# ====================================================================== 退休規劃
-def retirement_defaults(db: Database) -> dict:
-    today = _dt.date.today()
-    mk = last_n_months(12, today)
-    start = month_start(mk[0])
-    exp = db.income_expense_totals(start, today.isoformat())["expense"]
-    pension = 0.0
-    for c in db.category_totals(start, today.isoformat(), "income"):
-        if c.get("tax_tag") in ("pension",) or c["name"] in ("退休金", "年金"):
-            pension += c["total"]
-    nw = db.net_worth()
-    real_estate = sum(a["base_value"] for a in db.account_summaries(include_archived=True)
-                      if a["category"] == "不動產")
-    saved = db.get_json("retire_params", {}) or {}
-    by = db.get_setting("birth_year")
-    params = {
-        "age": (today.year - int(by)) if by.isdigit() else 65,
-        "life": 95,
-        "monthly_expense": round(exp / 12) if exp else 30000,
-        "monthly_income": round(pension / 12) if pension else 0,
-        "return_rate": 3.0,
-        "inflation": 2.0,
-        "assets": round(nw["net"] - real_estate),
-        "exclude_real_estate": True,
-        "net_worth": nw["net"],
-        "real_estate": real_estate,
-    }
-    params["pension_growth"] = 1.0
-    for k in ("life", "return_rate", "inflation", "exclude_real_estate", "pension_growth"):
-        if k in saved:
-            params[k] = saved[k]
-    for k in ("monthly_expense", "monthly_income"):
-        if saved.get(k + "_manual"):
-            params[k] = saved[k]
-            params[k + "_manual"] = True
-    return params
-
-
-def retirement_projection(age: int, life: int, assets: float, monthly_expense: float,
-                          monthly_income: float, return_rate: float, inflation: float,
-                          pension_growth: float | None = None) -> dict:
-    """pension_growth：退休金每年調幅（%），未指定時為通膨率的一半。"""
-    pg = inflation / 2 if pension_growth is None else pension_growth
-    rows = []
-    bal = float(assets)
-    exp = monthly_expense * 12
-    inc = monthly_income * 12
-    depleted_age = None
-    for i, a in enumerate(range(age, life + 1)):
-        start = bal
-        ret = max(start, 0) * return_rate / 100
-        bal = start + ret + inc - exp
-        deflator = (1 + inflation / 100) ** (i + 1)
-        rows.append({"age": a, "start": money_round(start), "income": money_round(inc),
-                     "expense": money_round(exp), "return": money_round(ret), "end": money_round(bal),
-                     "real_end": money_round(bal / deflator)})
-        if bal < 0 and depleted_age is None:
-            depleted_age = a
-        exp *= 1 + inflation / 100
-        inc *= 1 + pg / 100
-    gap = monthly_expense - monthly_income
-    sustainable = None
-    # 以二分法估算「可安心支用的每月金額」（資產用到預估壽命）
-    lo, hi = 0.0, max(monthly_expense * 5, 100000.0)
-    for _ in range(40):
-        mid = (lo + hi) / 2
-        b = float(assets)
-        e = mid * 12
-        n = monthly_income * 12
-        ok = True
-        for _a in range(age, life + 1):
-            b = b + max(b, 0) * return_rate / 100 + n - e
-            if b < 0:
-                ok = False
-                break
-            e *= 1 + inflation / 100
-            n *= 1 + pg / 100
-        lo, hi = (mid, hi) if ok else (lo, mid)
-    sustainable = money_round(lo)
-    return {"rows": rows, "depleted_age": depleted_age, "monthly_gap": money_round(gap),
-            "sustainable_monthly": sustainable, "final": rows[-1]["end"] if rows else 0,
-            "final_real": rows[-1]["real_end"] if rows else 0,
-            "real_return": (1 + return_rate / 100) / (1 + inflation / 100) - 1}
-
-
-DEFAULT_TARGETS = {"現金": 5, "銀行存款": 15, "定期存款": 25, "外幣存款": 10, "短期投資": 15,
-                   "長期投資": 10, "基金": 10, "債券": 10}
-
-
-def allocation_vs_target(db: Database) -> list[dict]:
-    targets = db.get_json("allocation_targets", None) or DEFAULT_TARGETS
-    actual = dict(db.allocation_by_category())
-    total = sum(v for v in actual.values() if v > 0) or 1
-    rows = []
-    for cat in sorted(set(targets) | set(actual), key=lambda k: -(actual.get(k, 0))):
-        a = actual.get(cat, 0.0)
-        t = float(targets.get(cat, 0))
-        rows.append({"category": cat, "amount": money_round(a), "actual_pct": a / total * 100,
-                     "target_pct": t, "diff_pct": a / total * 100 - t,
-                     "rebalance": money_round(t / 100 * total - a)})
-    return rows

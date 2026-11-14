@@ -1,11 +1,12 @@
+import datetime as _dt
 import os
 import sqlite3
 import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from app.analytics import cash_flow, retirement_projection, tax_summary  # noqa: E402
-from app.database import SCHEMA_VERSION, Database, month_keys  # noqa: E402
+from app.analytics import cash_flow, tax_summary  # noqa: E402
+from app.database import SCHEMA_VERSION, Database, money_round, month_keys  # noqa: E402
 from app.investments import Investments  # noqa: E402
 from app.sample_data import load_sample_data  # noqa: E402
 
@@ -126,11 +127,12 @@ def test_journal_linked_investment():
     h = inv.holdings()[0]
     assert h["shares"] == 100 and h["cost"] == 10000 and h["unrealized"] == 0
     # 手動輸入市價 → 評價：借 短期投資／貸 未實現評價損益
+    # 評價至預估淨售價：12,000 − 手續費 20（最低）− ETF 證交稅 12 ＝ 11,968
     inv.set_prices([(sid, 120)], "2026-03-31")
     h = inv.holdings()[0]
-    assert h["market_value"] == 12000 and h["unrealized"] == 2000
+    assert h["market_value"] == 11968 and h["unrealized"] == 1968, h
     assert investment_accounts_match(db)
-    assert abs(db.adjust_totals("2026-01-01", "2026-12-31") - 2000) < 0.01
+    assert abs(db.adjust_totals("2026-01-01", "2026-12-31") - 1968) < 0.01
     # 分錄賣出一半：借 銀行存款 6,500／貸 短期投資 6,500（系統依平均成本調整處分損益）
     db.add_journal("2026-04-10", "賣出 0050", [
         {"account_id": bank, "debit": 6500},
@@ -141,7 +143,7 @@ def test_journal_linked_investment():
     ps = inv.period_summary("2026-01-01", "2026-12-31")
     assert abs(ps["realized"] - 1500) < 0.01, ps
     assert abs(db.realized_totals("2026-01-01", "2026-12-31") - 1500) < 0.01
-    assert abs(db.adjust_totals("2026-01-01", "2026-12-31") - 1000) < 0.01
+    assert abs(db.adjust_totals("2026-01-01", "2026-12-31") - 984) < 0.01
     assert balanced(db.trial_balance("2026-01-01", "2026-12-31"))
     for e in db.journal("2026-01-01", "2026-12-31"):
         assert balanced(e["lines"]), e
@@ -212,17 +214,18 @@ def test_manual_valuation_on_chosen_date():
     inv.set_prices([(sid, 130)], "2026-03-31")
     v = adjust_vouchers(db)
     assert [x["date"] for x in v] == ["2026-03-31"], v
-    assert abs(db.adjust_totals("2026-01-01", "2026-12-31") - 3000) < 0.01
+    # 13,000 − 手續費 20 − 證交稅 13 ＝ 12,967
+    assert abs(db.adjust_totals("2026-01-01", "2026-12-31") - 2967) < 0.01
     h = inv.holdings()[0]
-    assert h["price"] == 130 and abs(h["market_value"] - 28000) < 0.01 and h["unrealized"] == 3000
+    assert h["price"] == 130 and abs(h["market_value"] - 27967) < 0.01 and h["unrealized"] == 2967
     assert inv.holdings("2026-03-31")[0]["shares"] == 100
     assert investment_accounts_match(db)
     # 同一天重新評價取代先前市價
     inv.set_prices([(sid, 120)], "2026-03-31")
-    assert abs(db.adjust_totals("2026-01-01", "2026-12-31") - 2000) < 0.01
+    assert abs(db.adjust_totals("2026-01-01", "2026-12-31") - 1968) < 0.01
     # 賣出迴轉所售股份的評價，剩餘持股不重新評價
     inv.add_event(sid, "sell", "2026-06-01", shares=100, price=200, cash_account_id=bank)
-    assert abs(inv.holdings()[0]["unrealized"] - 1000) < 0.01
+    assert abs(inv.holdings()[0]["unrealized"] - 984) < 0.01
     assert investment_accounts_match(db)
     # 刪除評價後，分錄一併消失
     e = next(x for x in inv.events(sid) if x["kind"] == "price")
@@ -263,7 +266,8 @@ def test_migration_v3_removes_auto_valuation():
     assert db.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     assert os.path.exists(os.path.join(d, "v3_升級前備份_v3.db"))
     assert [x["date"] for x in adjust_vouchers(db)] == ["2026-03-31"]
-    assert abs(db.adjust_totals("2026-01-01", "2026-12-31") - 4000) < 0.01
+    # 24,000 − 手續費 34 − 證交稅 24 ＝ 23,942，成本 20,000
+    assert abs(db.adjust_totals("2026-01-01", "2026-12-31") - 3942) < 0.01
     assert investment_accounts_match(db)
     # 現金、一般傳票、結帳日、對帳勾選與附件都保留
     assert db.signed_balances()[bank] == cash
@@ -283,6 +287,284 @@ def test_migration_v3_removes_auto_valuation():
     assert Database(path).conn.execute("SELECT COUNT(*) FROM audit_log WHERE action = '系統升級'").fetchone()[0] == 1
 
 
+def _her_ledger():
+    """回報案例：3715 定穎投控（股票，證交稅 0.3%）以複式分錄買進 1,000 股 @98，手續費 139 併入成本。"""
+    d = tempfile.mkdtemp()
+    db = Database(os.path.join(d, "t.db"))
+    bank = db.add_account("銀行存款-華南-活存 NT", "asset", "銀行存款", opening_balance=500000,
+                          opening_date="2025-08-01", code="1115")
+    st = db.add_account("短期投資-股票", "asset", "短期投資", opening_date="2025-08-01", code="1201")
+    inv = Investments(db)
+    sid = inv.add_security(st, "3715", "定穎投控")
+    db.add_journal("2025-09-04", "買入 定穎投控", [
+        {"account_id": st, "debit": 98139, "security_id": sid, "shares": 1000, "price": 98},
+        {"account_id": bank, "credit": 98139}])
+    return db, inv, bank, st, sid
+
+
+def test_trade_costs_round_down():
+    from app.investments import trade_costs
+    stock = {"fee_rate": 0.001425, "fee_min": 20, "tax_rate": 0.003}
+    assert trade_costs(stock, "buy", 1000, 98) == (139, 0)          # 139.65 → 139
+    assert trade_costs(stock, "sell", 1000, 130.5) == (185, 391)    # 185.96 → 185，391.5 → 391
+    assert trade_costs(dict(stock, tax_rate=0.001), "sell", 1000, 130.5) == (185, 130)
+    assert trade_costs(stock, "buy", 10, 50) == (20, 0)              # 最低手續費
+    assert trade_costs(dict(stock, fee_rate=0.000855), "buy", 1000, 98) == (83, 0)  # 6 折
+    assert Investments.suggest_fees("sell", 1000, 50, "0056") == (71, 50)
+
+
+def test_unrealized_includes_trade_costs():
+    db, inv, bank, st, sid = _her_ledger()
+    ev = inv.events(sid)[0]
+    # 分錄記錄成交單價：交易紀錄顯示 98，差額 139 為手續費
+    assert ev["kind"] == "jbuy" and ev["price"] == 98 and ev["fee"] == 139, ev
+    inv.set_prices([(sid, 130.5)], "2026-11-12")
+    h = inv.holdings()[0]
+    # 回報的算法：預估淨售價 129,924（130,500 − 手續費 185 − 證交稅 391）− 成本 98,139 ＝ 31,785
+    assert h["cost"] == 98139 and h["market_value"] == 129924 and h["unrealized"] == 31785, h
+    assert abs(db.adjust_totals("2025-01-01", "2026-12-31") - 31785) < 0.01
+    assert db.account_summaries()[1]["balance"] == 129924
+    assert investment_accounts_match(db)
+    # 分錄賣出 400 股 @135：實收 54,000 − 76 − 162 ＝ 53,762；已實現損益含買賣手續費與稅
+    db.add_journal("2026-11-20", "賣出 定穎投控", [
+        {"account_id": bank, "debit": 53762},
+        {"account_id": st, "credit": 53762, "security_id": sid, "shares": 400, "price": 135}])
+    sell = [e for e in inv.events(sid) if e["kind"] == "jsell"][0]
+    assert sell["price"] == 135 and sell["tax"] == 162 and sell["fee"] == 76, sell
+    ps = inv.period_summary("2026-01-01", "2026-12-31")
+    assert abs(ps["realized"] - (53762 - 98139 * 0.4)) < 0.01, ps
+    assert investment_accounts_match(db)
+    assert balanced(db.trial_balance("2025-01-01", "2026-12-31"))
+    # 迴轉時單價一併保留
+    j = db.query_transactions(keyword="賣出 定穎投控")[0]["id"]
+    rid = db.reverse_transaction(j, "2026-11-21")
+    assert [ln["price"] for ln in db.get_lines(rid) if ln["security_id"]] == [135]
+
+
+def test_security_rates():
+    db, inv, bank, st, sid = _her_ledger()
+    etf = inv.add_security(st, "0056", "元大高股息")
+    assert inv.get_security(etf)["tax_rate"] == 0.001 and inv.get_security(sid)["tax_rate"] == 0.003
+    inv.set_prices([(sid, 130.5)], "2026-11-12")
+    # 改為 6 折手續費後，評價分錄依新費率重編：手續費 111
+    inv.update_security(sid, "3715", "定穎投控", "", fee_rate=0.000855)
+    h = next(x for x in inv.holdings() if x["id"] == sid)
+    assert h["market_value"] == 130500 - 111 - 391, h
+    assert investment_accounts_match(db)
+    try:
+        inv.update_security(sid, "3715", "定穎投控", "", tax_rate=3)
+        raise AssertionError("rate")
+    except ValueError:
+        pass
+    # 已結帳期間有評價時不可改費率，且不留下未完成的變更
+    db.set_setting("closed_until", "2026-11-30")
+    try:
+        inv.update_security(sid, "3715", "定穎投控", "", fee_rate=0.001425)
+        raise AssertionError("closed")
+    except ValueError as e:
+        assert "已結帳" in str(e)
+    db.conn.commit()
+    assert inv.get_security(sid)["fee_rate"] == 0.000855
+    inv.update_security(sid, "3715", "定穎投控新名", "")   # 只改名稱不受影響
+    assert inv.get_security(sid)["name"] == "定穎投控新名"
+
+
+def test_migration_v4_to_v5():
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "v4.db")
+    db = Database(path)
+    bank = db.add_account("銀行", "asset", "銀行存款", opening_balance=500000, opening_date="2026-01-01")
+    st = db.add_account("短期投資", "asset", "短期投資", opening_date="2026-01-01")
+    inv = Investments(db)
+    s1 = inv.add_security(st, "3715", "定穎投控")
+    s2 = inv.add_security(st, "0050", "元大台灣50")
+    db.add_journal("2026-02-01", "買入", [
+        {"account_id": st, "debit": 98139, "security_id": s1, "shares": 1000},
+        {"account_id": bank, "credit": 98139}])
+    inv.add_event(s2, "buy", "2026-02-02", shares=100, price=100, fee=20, cash_account_id=bank)
+    inv.set_prices([(s1, 130.5), (s2, 120)], "2026-03-31")
+    db.set_json("journal_templates", [["我的範本", [["debit", "account:%d" % st, "", None],
+                                                     ["credit", "account:%d" % bank, "", None]]]])
+    db.set_setting("closed_until", "2026-03-31")
+    cash = db.signed_balances()[bank]
+    manual = db.conn.execute("SELECT COUNT(*) FROM transactions WHERE source = ''").fetchone()[0]
+    db.close()
+    c = sqlite3.connect(path)
+    # 模擬第 4 版資料庫：沒有成交單價與費率欄位，評價為市價（未扣除賣出費用）
+    c.executescript("""
+        ALTER TABLE txn_lines DROP COLUMN price;
+        ALTER TABLE securities DROP COLUMN fee_rate; ALTER TABLE securities DROP COLUMN fee_min;
+        ALTER TABLE securities DROP COLUMN tax_rate;
+        PRAGMA user_version = 4;""")
+    c.commit()
+    c.close()
+    db = Database(path)
+    assert db.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    assert os.path.exists(os.path.join(d, "v4_升級前備份_v4.db"))
+    inv = Investments(db)
+    assert inv.get_security(s1)["tax_rate"] == 0.003 and inv.get_security(s2)["tax_rate"] == 0.001
+    hs = {h["code"]: h for h in inv.holdings()}
+    assert hs["3715"]["unrealized"] == 31785 and hs["0050"]["market_value"] == 12000 - 20 - 12, hs
+    assert investment_accounts_match(db)
+    assert db.signed_balances()[bank] == cash
+    assert db.conn.execute("SELECT COUNT(*) FROM transactions WHERE source = ''").fetchone()[0] == manual
+    assert db.closed_until == "2026-03-31"
+    assert db.get_json("journal_templates")[0][0] == "我的範本"
+    assert db.get_lines(db.query_transactions(keyword="買入")[0]["id"])[0]["price"] == 0
+    assert balanced(db.trial_balance("2026-01-01", "2026-12-31"))
+
+
+def test_export_sheet_selection_and_ledger():
+    from openpyxl import load_workbook
+    from app.exporter import SHEET_INFO, export_workbook
+    db = make()
+    lo, hi = db.date_range()
+    d = tempfile.mkdtemp()
+    full = export_workbook(db, os.path.join(d, "all.xlsx"), lo, hi)
+    wb = load_workbook(full)
+    assert wb.sheetnames.index("分類帳") == wb.sheetnames.index("日記簿") + 1
+    assert set(wb.sheetnames) == {n for n, _ in SHEET_INFO}
+    assert all(ws.sheet_state == "visible" for ws in wb.worksheets)
+    # 分類帳：以公式重算每段餘額，必須與帳上期末餘額相符
+    ws = wb["分類帳"]
+    bal, blocks = {}, 0
+    for row in ws.iter_rows(min_row=1):
+        r = row[0].row
+        g = ws.cell(r, 7).value
+        if isinstance(g, (int, float)):
+            bal[r] = g
+        elif isinstance(g, str) and g.startswith("=G"):
+            if "+" in g:
+                prev = bal[r - 1]
+                e, f = ws.cell(r, 5).value or 0, ws.cell(r, 6).value or 0
+                bal[r] = prev + (e - f if "+E" in g else f - e)
+            else:
+                bal[r] = bal[int(g[2:])]
+                closing = float(ws.cell(r, 8).value.split("-")[1].split(",")[0])
+                assert abs(bal[r] - closing) < 0.01, (r, bal[r], closing)
+                blocks += 1
+    assert blocks == len([a for a in db.account_summaries(include_archived=True)
+                          if db.ledger(a["id"], lo, hi)["rows"] or a["balance"]])
+    # 只選部分報表：被引用的收支明細隱藏保留，其餘移除
+    part = export_workbook(db, os.path.join(d, "part.xlsx"), lo, hi, ["收支損益表", "分類帳"])
+    wb = load_workbook(part)
+    assert wb.sheetnames == ["收支損益表", "收支明細", "分類帳"], wb.sheetnames
+    assert wb["收支明細"].sheet_state == "hidden" and wb.active.title == "收支損益表"
+    try:
+        export_workbook(db, os.path.join(d, "none.xlsx"), lo, hi, [])
+        raise AssertionError("empty")
+    except ValueError:
+        pass
+
+
+def check_books(db, where=""):
+    lo, hi = db.date_range()
+    assert balanced(db.trial_balance(lo, hi)), where
+    for e in db.journal(lo, hi):
+        assert balanced(e["lines"]), (where, e["voucher"])
+    assert investment_accounts_match(db), where
+    for a in db.account_summaries(include_archived=True):
+        assert abs(db.ledger(a["id"], "1900-01-01", "2999-12-31")["closing"] - a["balance"]) < 0.01, (where, a["name"])
+    assert abs(db.balance_sheet("2999-12-31")["net"] - db.net_worth()["net"]) < 0.01, where
+    assert abs(cash_flow(db, lo, hi)["check"]) < 0.05, where
+
+
+def random_operations(seed, steps=60):
+    """隨機操作帳本（收支、分錄買賣含單價、交易、評價、作廢、迴轉、修改、改費率、結帳），每步檢查帳務。"""
+    import random
+    rnd = random.Random(seed)
+    d = tempfile.mkdtemp()
+    db = Database(os.path.join(d, "r.db"))
+    inv = Investments(db)
+    bank = db.add_account("銀行", "asset", "銀行存款", opening_balance=5_000_000, opening_date="2026-01-01")
+    card = db.add_account("信用卡", "liability", "信用卡", opening_date="2026-01-01")
+    st = db.add_account("短期投資-股票", "asset", "短期投資", opening_date="2026-01-01")
+    etf = db.add_account("短期投資-ETF", "asset", "短期投資", opening_date="2026-01-01")
+    secs = [inv.add_security(st, "2330", "台積電"), inv.add_security(st, "3715", "定穎投控"),
+            inv.add_security(etf, "0050", "元大台灣50")]
+    acc_of = {secs[0]: st, secs[1]: st, secs[2]: etf}
+    cat_e = db.list_categories("expense")[0]["id"]
+    cat_i = db.list_categories("income")[0]["id"]
+    journals = []
+
+    def day():
+        lo = db.closed_until or "2026-01-01"
+        base = _dt.date.fromisoformat(max(lo, "2026-01-01")) + _dt.timedelta(days=1)
+        return (base + _dt.timedelta(days=rnd.randint(0, 200))).isoformat()
+
+    for step in range(steps):
+        op = rnd.choice(["exp", "inc", "jbuy", "jbuy", "jsell", "buy", "sell", "div", "sdiv", "price",
+                         "price", "void", "reverse", "edit", "rate", "close"])
+        try:
+            sid = rnd.choice(secs)
+            q = rnd.choice([100, 500, 1000, 1500])
+            p = round(rnd.uniform(20, 900), 2)
+            if op in ("exp", "inc"):
+                db.add_transaction(type="expense" if op == "exp" else "income",
+                                   account_id=rnd.choice([bank, card]), amount=rnd.randint(1, 50000),
+                                   date=day(), category_id=cat_e if op == "exp" else cat_i, note=op)
+            elif op == "jbuy":
+                fee, _ = inv.fees_for(sid, "buy", q, p)
+                amt = money_round(q * p + fee)
+                journals.append(db.add_journal(day(), "分錄買進", [
+                    {"account_id": acc_of[sid], "debit": amt, "security_id": sid, "shares": q,
+                     "price": p if rnd.random() < .7 else 0},
+                    {"account_id": bank, "credit": amt}]))
+            elif op == "jsell":
+                held = inv.replay(sid)["shares"]
+                if held:
+                    q = min(q, held)
+                    fee, tax = inv.fees_for(sid, "sell", q, p)
+                    amt = money_round(q * p - fee - tax)
+                    journals.append(db.add_journal(day(), "分錄賣出", [
+                        {"account_id": bank, "debit": amt},
+                        {"account_id": acc_of[sid], "credit": amt, "security_id": sid, "shares": q, "price": p}]))
+            elif op in ("buy", "sell"):
+                fee, tax = inv.fees_for(sid, op, q, p)
+                if op == "sell":
+                    q = min(q, inv.replay(sid)["shares"]) or 0
+                if q:
+                    inv.add_event(sid, op, day(), shares=q, price=p, fee=fee, tax=tax, cash_account_id=bank)
+            elif op == "div":
+                inv.add_event(sid, "cash_div", day(), amount=rnd.randint(100, 30000), cash_account_id=bank)
+            elif op == "sdiv":
+                inv.add_event(sid, "stock_div", day(), shares=rnd.choice([10, 50]))
+            elif op == "price":
+                inv.set_prices([(sid, p)], day())
+            elif op in ("void", "reverse", "edit") and journals:
+                j = rnd.choice(journals)
+                t = db.get_transaction(j)
+                if op == "void":
+                    if t["void"]:
+                        db.unvoid_transaction(j)
+                    else:
+                        db.void_transactions([j], "隨機")
+                elif op == "reverse" and not t["void"]:
+                    db.reverse_transaction(j, day())
+                elif op == "edit" and not t["void"]:
+                    lines = [dict(ln) for ln in db.get_lines(j)]
+                    db.update_journal(j, day(), "修改", lines)
+            elif op == "rate":
+                inv.update_security(sid, inv.get_security(sid)["code"], inv.get_security(sid)["name"], "",
+                                    fee_rate=rnd.choice([0.001425, 0.000855, 0.0005]))
+            elif op == "close" and rnd.random() < .3:
+                db.set_setting("closed_until", (_dt.date.fromisoformat(day()) - _dt.timedelta(days=30)).isoformat())
+        except ValueError:
+            db.conn.rollback()   # 超賣、已結帳等：拒絕操作，帳務不應改變
+        check_books(db, f"seed {seed} step {step} {op}")
+    return db
+
+
+def test_random_operations_keep_books_balanced():
+    for seed in range(4):
+        random_operations(seed, 45)
+
+
+def test_random_operations_keep_codes():
+    db = random_operations(7, 30)
+    assert {s["code"] for s in Investments(db).list_securities()} == {"2330", "3715", "0050"}
+
+
 def test_journal_linked_void_and_reverse():
     db, inv, bank, st, sid = _plain_ledger()
     j = db.add_journal("2026-02-01", "買進", [
@@ -293,7 +575,7 @@ def test_journal_linked_void_and_reverse():
     assert not inv.holdings()
     assert db.account_summaries()[1]["balance"] == 0
     db.unvoid_transaction(j)
-    assert inv.holdings()[0]["market_value"] == 11000
+    assert inv.holdings()[0]["market_value"] == 10969
     assert investment_accounts_match(db)
     db.reverse_transaction(j, "2026-03-15")
     assert not inv.holdings()
@@ -416,13 +698,11 @@ def test_reconciliation():
     assert db.recon_candidates(post["id"], "2026-03-31") == []
 
 
-def test_tax_and_retirement():
+def test_tax_summary():
     db = make()
     ts = tax_summary(db, int(db.date_range()[1][:4]))
     tags = {t["tag"] for t in ts["incomes"]}
     assert {"interest", "dividend", "pension"} <= tags, tags
-    p = retirement_projection(66, 95, 5_000_000, 50000, 42000, 3, 2)
-    assert p["rows"][0]["age"] == 66 and p["sustainable_monthly"] > 0
 
 
 def test_import_template():

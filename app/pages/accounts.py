@@ -80,8 +80,9 @@ class AccountsPage(Page):
                        color=lambda r: C.expense if (r["balance"] < 0) else None),
                 Column("匯率", lambda r: "" if r["rate"] == 1 else f"{r['rate']:.4f}",
                        align="right", width=72),
-                Column(f"折合{ctx.base}", lambda r: fmt_num(abs(r["base_value"]), ctx.base),
-                       align="right", sort=lambda r: abs(r["base_value"]), bold=True, width=140),
+                Column(f"折合{ctx.base}", lambda r: fmt_num(r["_value"], ctx.base),
+                       align="right", sort=lambda r: r["_value"], bold=True, width=140,
+                       color=lambda r: C.expense if r["_value"] < 0 else None),
                 Column("占比", lambda r: f"{r.get('_pct', 0):.1%}", align="right",
                        sort=lambda r: r.get("_pct", 0), width=72),
                 Column("到期日", lambda r: fmt_date(r["maturity_date"]) if r["maturity_date"] else "",
@@ -92,7 +93,7 @@ class AccountsPage(Page):
                                                      if r["interest_rate"] else ""),
                        stretch=True, color=lambda r: C.muted),
             ])
-            t.sortByColumn(7, Qt.SortOrder.DescendingOrder)
+            t.sortByColumn(0, Qt.SortOrder.AscendingOrder)
             t.rowActivated.connect(self.edit)
             t.pressed.connect(lambda _idx, k=kind: setattr(self, "_last", k))
             t.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -132,9 +133,12 @@ class AccountsPage(Page):
         self.c_net.set_money(nw["net"], base, "", C.primary if nw["net"] >= 0 else C.expense)
         for kind, t in self.tables.items():
             rows = [a for a in accs if a["kind"] == kind]
-            total = sum(abs(a["base_value"]) for a in rows) or 1
             for a in rows:
-                a["_pct"] = abs(a["base_value"]) / total
+                # 資產為正、負債以欠款為正；透支等反向餘額顯示負數，不取絕對值
+                a["_value"] = a["base_value"] if kind == "asset" else -a["base_value"]
+            total = sum(a["_value"] for a in rows) or 1
+            for a in rows:
+                a["_pct"] = a["_value"] / total
             t.set_rows(rows)
             t.setMinimumHeight(min(12, max(2, len(rows))) * 44 + 50)
             t.setMaximumHeight(min(12, max(2, len(rows))) * 44 + 50)

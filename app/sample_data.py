@@ -156,7 +156,6 @@ def load_sample_data(db: Database) -> None:
                          ("居家水電", 1600)):
         db.update_category(exp[name], budget=budget)
 
-    db.set_setting("birth_year", "1973")
     db.set_setting("first_run_done", "1")
     db.set_setting("sample_data", "1")
     db.set_setting("last_account_id", cash)

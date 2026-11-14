@@ -28,7 +28,7 @@ import shutil
 import sqlite3
 from typing import Iterable
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 ASSET_CATEGORIES = [
     "現金", "銀行存款", "定期存款", "外幣存款", "短期投資", "股票", "基金", "債券",
@@ -138,6 +138,7 @@ DEFAULT_SETTINGS = {
     "retire_params": "",
     "online_updates": "0",
     "journal_templates": "",
+    "export_sheets": "",
 }
 
 _TABLES = """
@@ -195,7 +196,8 @@ CREATE TABLE IF NOT EXISTS txn_lines (
     orig        REAL,
     memo        TEXT    NOT NULL DEFAULT '',
     security_id INTEGER REFERENCES securities(id),
-    shares      REAL    NOT NULL DEFAULT 0
+    shares      REAL    NOT NULL DEFAULT 0,
+    price       REAL    NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
@@ -247,7 +249,10 @@ CREATE TABLE IF NOT EXISTS securities (
     code       TEXT    NOT NULL DEFAULT '',
     name       TEXT    NOT NULL,
     note       TEXT    NOT NULL DEFAULT '',
-    archived   INTEGER NOT NULL DEFAULT 0
+    archived   INTEGER NOT NULL DEFAULT 0,
+    fee_rate   REAL    NOT NULL DEFAULT 0.001425,
+    fee_min    REAL    NOT NULL DEFAULT 20,
+    tax_rate   REAL    NOT NULL DEFAULT 0.003
 );
 CREATE TABLE IF NOT EXISTS sec_events (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -375,11 +380,13 @@ class Database:
             self._migrate_v1_to_v2()
         if has_tables and version < 3:
             self._migrate_v2_to_v3()
+        if has_tables and version < 5:
+            self._migrate_v4_to_v5()
         self.conn.executescript(_TABLES)
         self.conn.executescript(_VIEWS)
-        # 投資分錄重編完成才標記為第 4 版，中途失敗時下次開啟會重做
-        restate = bool(has_tables) and version < 4
-        self.conn.execute(f"PRAGMA user_version = {3 if restate else SCHEMA_VERSION}")
+        # 結構已升級；投資分錄重編完成才標記為新版本，中途失敗時下次開啟只重做重編
+        restate = bool(has_tables) and version < SCHEMA_VERSION
+        self.conn.execute(f"PRAGMA user_version = {4 if restate else SCHEMA_VERSION}")
         for key, value in DEFAULT_SETTINGS.items():
             self.conn.execute(
                 "INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, value))
@@ -389,7 +396,7 @@ class Database:
         self.conn.commit()
         self.conn.execute("PRAGMA foreign_keys = ON")
         if restate:
-            self._migrate_v3_to_v4()
+            self._restate_investments(version)
             self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             self.conn.commit()
 
@@ -407,8 +414,26 @@ class Database:
         except (OSError, sqlite3.Error):
             pass
 
-    def _migrate_v3_to_v4(self) -> None:
-        """買賣不再自動評價：依新規則重編所有投資系統分錄（含已結帳期間，以維持帳與明細一致）。
+    def _migrate_v4_to_v5(self) -> None:
+        """第 5 版：分錄行記錄成交單價；投資標的可設定手續費率、最低手續費與證交稅率。"""
+        c = self.conn
+        added = False
+        for table, col, ddl in (("txn_lines", "price", "REAL NOT NULL DEFAULT 0"),
+                                ("securities", "fee_rate", "REAL NOT NULL DEFAULT 0.001425"),
+                                ("securities", "fee_min", "REAL NOT NULL DEFAULT 20"),
+                                ("securities", "tax_rate", "REAL NOT NULL DEFAULT 0.003")):
+            cols = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
+            if cols and col not in cols:
+                c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+                added = added or col == "tax_rate"
+        if added:
+            # ETF（代號 00 開頭）證交稅 0.1%，其餘股票 0.3%
+            c.execute("UPDATE securities SET tax_rate = 0.001 WHERE code LIKE '00%'")
+        c.commit()
+
+    def _restate_investments(self, version: int) -> None:
+        """依新規則重編所有投資系統分錄（含已結帳期間，以維持帳與明細一致）：
+        v4 起買賣不再自動評價；v5 起評價以預估淨售價（扣除賣出手續費與證交稅）計算。
         重編前的資料已留在升級前備份；銀行對帳勾選與憑證附件會接回重編後的傳票。"""
         from .investments import Investments
         inv = Investments(self)
@@ -444,7 +469,9 @@ class Database:
                             self.conn.execute(
                                 "INSERT OR IGNORE INTO recon_items(recon_id, txn_id, account_id)"
                                 " VALUES (?, ?, ?)", (r["recon_id"], nid, r["account_id"]))
-            self._log("系統升級", None, "投資買賣不再自動評價，已重編投資系統分錄；只保留手動輸入市價的評價")
+            why = ("買賣不再自動評價（只保留手動輸入市價的評價）；" if version < 4 else "") + \
+                "評價改以預估淨售價（扣除賣出手續費與證交稅）計算"
+            self._log("系統升級", None, f"已重編投資系統分錄：{why}")
             self.conn.commit()
         finally:
             self._restating = False
@@ -884,7 +911,7 @@ class Database:
             item = {"account_id": ln.get("account_id"), "category_id": ln.get("category_id"),
                     "special": ln.get("special"), "debit": debit, "credit": credit,
                     "memo": (ln.get("memo") or "").strip(), "orig": None,
-                    "security_id": ln.get("security_id") or None, "shares": 0.0}
+                    "security_id": ln.get("security_id") or None, "shares": 0.0, "price": 0.0}
             if item["security_id"]:
                 sec = self._q1("SELECT * FROM securities WHERE id = ?", (item["security_id"],))
                 if not sec or sec["account_id"] != item["account_id"]:
@@ -893,6 +920,10 @@ class Database:
                 if shares <= 0:
                     raise ValueError(f"請輸入「{sec['name']}」的股數（單位數）")
                 item["shares"] = round(shares, 4)
+                price = float(ln.get("price") or 0)
+                if price < 0:
+                    raise ValueError(f"「{sec['name']}」的成交單價不可為負數")
+                item["price"] = round(price, 4)
             if item["account_id"]:
                 acc = self.get_account(item["account_id"])
                 if not acc:
@@ -941,9 +972,9 @@ class Database:
         for seq, x in enumerate(items):
             self.conn.execute(
                 "INSERT INTO txn_lines(txn_id, seq, account_id, category_id, special, debit, credit,"
-                " orig, memo, security_id, shares) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " orig, memo, security_id, shares, price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (tid, seq, x["account_id"], x["category_id"], x["special"], x["debit"], x["credit"],
-                 x["orig"], x["memo"], x.get("security_id"), x.get("shares") or 0))
+                 x["orig"], x["memo"], x.get("security_id"), x.get("shares") or 0, x.get("price") or 0))
 
     def linked_securities(self, txn_id: int) -> set[int]:
         return {r["security_id"] for r in self._q(
@@ -1045,6 +1076,7 @@ class Database:
                 if ln.get("security_id"):
                     item["security_id"] = ln["security_id"]
                     item["shares"] = ln["shares"]
+                    item["price"] = ln["price"]
             elif ln["kind"] == "category":
                 item["category_id"] = ln["id"]
             else:
@@ -1397,6 +1429,7 @@ class Database:
             item["memo"] = ln["memo"]
             item["security_id"] = ln["security_id"]
             item["shares"] = ln["shares"]
+            item["price"] = ln["price"]
             out.append(item)
         if live and abs(fx) >= 0.005:
             out.append(sp_line("fx", fx))

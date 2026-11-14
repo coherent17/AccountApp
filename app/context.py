@@ -9,7 +9,7 @@ from PySide6.QtCore import QObject, QStandardPaths, Signal
 from .database import Database
 
 APP_NAME = "我的理財帳本"
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.3.0"
 
 
 def data_dir() -> str:

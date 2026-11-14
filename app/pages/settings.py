@@ -5,7 +5,7 @@ import os
 
 from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QFileDialog, QGridLayout, QGroupBox,
                                QHBoxLayout, QInputDialog, QLabel, QLineEdit, QRadioButton,
-                               QSpinBox, QVBoxLayout)
+                               QVBoxLayout)
 
 from ..context import APP_NAME, APP_VERSION
 from ..database import CURRENCIES, TAX_TAGS
@@ -49,16 +49,6 @@ class SettingsPage(Page):
             fr.addWidget(rb)
         fr.addStretch()
         gl.addLayout(fr, 1, 1, 1, 2)
-        gl.addWidget(QLabel("出生年（西元）"), 6, 0)
-        self.birth = QSpinBox()
-        self.birth.setRange(1920, 2010)
-        self.birth.setSpecialValueText("未設定")
-        self.birth.setValue(1920)
-        self.birth.editingFinished.connect(self.save_birth)
-        gl.addWidget(self.birth, 6, 1)
-        bh = QLabel("用於「退休規劃」計算年齡。")
-        bh.setObjectName("Hint")
-        gl.addWidget(bh, 7, 1, 1, 2)
         gl.addWidget(QLabel("動畫效果"), 4, 0)
         self.anim_switch = QCheckBox("開啟動畫效果（按鈕漣漪、頁面轉場、數字滾動、圖表動畫）")
         self.anim_switch.toggled.connect(self.set_animations)
@@ -233,10 +223,6 @@ class SettingsPage(Page):
             rb.setChecked(True)
             rb.blockSignals(False)
         self.base.setCurrentIndex(max(0, self.base.findData(db.base_currency)))
-        by = db.get_setting("birth_year")
-        self.birth.blockSignals(True)
-        self.birth.setValue(int(by) if by.isdigit() else 1920)
-        self.birth.blockSignals(False)
         self.online.blockSignals(True)
         self.online.setChecked(db.get_setting("online_updates", "0") == "1")
         self.online.blockSignals(False)
@@ -254,11 +240,6 @@ class SettingsPage(Page):
         self.db.set_setting("owner_name", self.name.text().strip())
         self.ctx.settingsChanged.emit()
         info(self, "已儲存。")
-
-    def save_birth(self) -> None:
-        v = self.birth.value()
-        self.db.set_setting("birth_year", "" if v <= 1920 else str(v))
-        self.ctx.settingsChanged.emit()
 
     def set_online(self, on: bool) -> None:
         self.db.set_setting("online_updates", "1" if on else "0")

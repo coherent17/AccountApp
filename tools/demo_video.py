@@ -395,7 +395,7 @@ rec = Recorder()
 # ============================================================== 片頭
 rec.card = ("我的理財帳本", "個人資產與記帳管理　・　功能示範",
             ["日記帳　分類帳　資產負債表　損益表　現金流量表　試算表",
-             "投資管理　退休規劃　一鍵匯出專業 Excel 報表"])
+             "投資管理　一鍵匯出專業 Excel 報表"])
 rec.hold(0.8)
 if VOICE:
     wav, dur = tts("游媽媽您好，歡迎使用我的理財帳本。接下來為您示範主要功能。")
@@ -620,25 +620,6 @@ open_tab("試算表", "試算表：借貸合計自動核對 ✓ 借貸平衡", 0
 rec.move(rp.tb_sum, 0.8)
 rec.hold(1.4)
 open_tab("報稅彙總", "報稅彙總：利息、股利、退職所得與可扣除項目，報稅時參考")
-
-# ============================================================== 9. 退休規劃
-rec.wait_voice()
-rec.step = "9　退休規劃"
-nav("retirement", "退休規劃")
-rtp = win.pages["retirement"]
-rec.say("退休規劃：依帳本資料自動帶入年齡、資產與每月收支", sec=1.6)
-rec.say("通膨率與退休金調幅都可以自行設定")
-rec.move(rtp.infl, 0.7)
-rec.flash = 1.0
-rec.hold(1.4)
-area = page_scroll("retirement")
-rec.say("試算資產能支應到幾歲，並換算成今日幣值")
-rec.scroll(area, 470, 1.8)
-rec.hold(2.0)
-rec.say("資產配置：比較目標與實際比例，提供再平衡建議")
-rec.scroll(area, area.verticalScrollBar().maximum(), 1.8)
-rec.hold(2.0)
-rec.scroll(area, 0, 0.6)
 
 # ============================================================== 10. 設定
 rec.wait_voice()

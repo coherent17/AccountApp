@@ -93,7 +93,13 @@ class InvestmentsPage(Page):
         self.hold.rowActivated.connect(lambda r: self.show_events(r["id"]))
         self.hold.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.hold.customContextMenuRequested.connect(self.hold_menu)
+        self.hold.setMinimumHeight(5 * 44 + 50)   # 至少顯示 5 檔持股
         lay.addWidget(self.hold, 3)
+        hh = QLabel("帳面價值＝成本＋已認列的評價。評價以預估淨售價計算（市價×股數，扣除預估賣出手續費與證交稅），"
+                    "成本已含買進手續費，因此未實現損益已包含買賣的手續費與稅。費率可在「編輯標的」設定。")
+        hh.setObjectName("Hint")
+        hh.setWordWrap(True)
+        lay.addWidget(hh)
         cc = Card()
         cc.lay.addWidget(section_title("持股比重（依帳面價值）"))
         self.donut = DonutChart(height=240)

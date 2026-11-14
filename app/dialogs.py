@@ -772,6 +772,11 @@ class WelcomeDialog(BaseDialog):
         self.ctx.db.set_setting("owner_name", self.name.text().strip())
         self.accept()
 
+    def reject(self) -> None:
+        # 按 ✕ 或 Esc 關閉時也保留稱呼（程式仍會建立基本帳戶）
+        self.ctx.db.set_setting("owner_name", self.name.text().strip())
+        super().reject()
+
 
 # ====================================================================== 匯出
 class ExportDialog(BaseDialog):
@@ -807,12 +812,31 @@ class ExportDialog(BaseDialog):
         self.root.addLayout(g)
         (self.r_custom if start else self.r_year).setChecked(True)
 
-        self.root.addWidget(section_title("報表內容"))
-        sheets = QLabel("．財務摘要　．資產負債表　．收支損益表　．現金流量表　．收支明細\n"
-                        "．月度收支（含圖表）　．分類統計　．日記簿　．試算表　．帳戶清單\n"
-                        "．投資明細　．報稅彙總\n"
-                        "合計欄位皆使用 Excel 公式，可直接在 Excel 內稽核與修改。")
+        from .exporter import SHEET_INFO
+        head = QHBoxLayout()
+        head.addWidget(section_title("選擇要匯出的報表"))
+        head.addStretch()
+        for text, on in (("全選", True), ("全不選", False)):
+            b = button(text, "Link")
+            b.clicked.connect(lambda _=False, v=on: [c.setChecked(v) for c in self.sheet_boxes.values()])
+            head.addWidget(b)
+        self.root.addLayout(head)
+        saved = ctx.db.get_json("export_sheets", None)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(18)
+        grid.setVerticalSpacing(6)
+        self.sheet_boxes: dict[str, QCheckBox] = {}
+        for i, (name, desc) in enumerate(SHEET_INFO):
+            cb = QCheckBox(name)
+            cb.setToolTip(desc)
+            cb.setChecked(saved is None or name in saved)
+            grid.addWidget(cb, i // 3, i % 3)
+            self.sheet_boxes[name] = cb
+        self.root.addLayout(grid)
+        sheets = QLabel("合計欄位皆使用 Excel 公式，可直接在 Excel 內稽核與修改。"
+                        "未勾選、但被其他報表公式引用的工作表（例如收支明細）會以隱藏工作表保留。")
         sheets.setObjectName("Hint")
+        sheets.setWordWrap(True)
         self.root.addWidget(sheets)
 
         self.root.addWidget(section_title("存檔位置"))
@@ -880,8 +904,13 @@ class ExportDialog(BaseDialog):
             return
         if not path.lower().endswith(".xlsx"):
             path += ".xlsx"
+        chosen = [n for n, cb in self.sheet_boxes.items() if cb.isChecked()]
+        if not chosen:
+            self.show_error("請至少勾選一份報表")
+            return
+        self.ctx.db.set_json("export_sheets", chosen)
         try:
-            export_workbook(self.ctx.db, path, start, end)
+            export_workbook(self.ctx.db, path, start, end, chosen)
         except PermissionError:
             self.show_error("無法寫入檔案，可能檔案正在 Excel 中開啟。請先關閉該檔案後再試一次。")
             return

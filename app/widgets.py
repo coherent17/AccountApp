@@ -15,7 +15,7 @@ from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCalendarWidget, QComboBox, QFrame,
                                QGraphicsDropShadowEffect, QGridLayout, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton,
-                               QSizePolicy, QStyle, QStyledItemDelegate, QTableView, QToolTip,
+                               QSizePolicy, QStyle, QStyledItemDelegate, QTableView,
                                QVBoxLayout, QWidget)
 
 from .theme import C, fmt_num
@@ -212,9 +212,10 @@ class DateEdit(QComboBox):
             return
         d = parse_date_text(text)
         if d is None:
+            # 還原並以對話框提醒：對話框會攔下這次點擊，避免用舊日期直接儲存
             self._show_date()
-            QToolTip.showText(self.mapToGlobal(QPoint(0, self.height())),
-                              f"「{text}」不是有效的日期，已還原。請輸入例如 2026/11/5 或 115/11/5", self)
+            warn(self.window(), f"「{text}」不是有效的日期，已還原為 {self.lineEdit().text()}。\n"
+                                "請重新輸入，例如 2026/11/5、115/11/5 或 1151105。")
             return
         self.setDate(d)
 

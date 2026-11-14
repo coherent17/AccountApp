@@ -130,7 +130,42 @@ class _Sheet:
         ws.sheet_view.showGridLines = False
 
 
-def export_workbook(db: Database, path: str, start: str, end: str) -> str:
+# 可選擇匯出的工作表（依活頁簿順序）與說明
+SHEET_INFO = [
+    ("財務摘要", "報表期間的重點數字與各工作表說明"),
+    ("資產負債表", "依流動性分類列示資產與負債，並附財務比率分析"),
+    ("收支損益表", "本期收入、支出、結餘與業外損益"),
+    ("現金流量表", "期初現金 ＋ 生活／投資／籌資活動 ＝ 期末現金（直接法）"),
+    ("收支明細", "逐筆交易紀錄，可使用篩選，合計會自動重算"),
+    ("月度收支", "每月收支、儲蓄率、累計結餘與淨資產趨勢（含圖表）"),
+    ("分類統計", "各分類逐月金額、占比與預算執行率"),
+    ("日記簿", "每筆交易之借貸分錄"),
+    ("分類帳", "各帳戶（會計科目）期初餘額、逐筆借貸與累計餘額"),
+    ("試算表", "科目借貸餘額，驗證帳務平衡"),
+    ("帳戶清單", "所有帳戶（會計科目）之基本資料與期末餘額"),
+    ("投資明細", "期末持股、平均成本、帳面價值、未實現損益與期間交易"),
+    ("報稅彙總", "依稅務歸類彙總之所得與扣除項目（綜合所得稅參考）"),
+]
+# 工作表公式引用的其他工作表：未勾選但被引用時改為隱藏，公式才能正確計算
+SHEET_DEPS = {"財務摘要": ("資產負債表", "收支損益表"), "收支損益表": ("收支明細",),
+              "月度收支": ("收支明細",), "分類統計": ("收支明細",)}
+
+
+def sheets_needed(selected) -> set[str]:
+    need, todo = set(), list(selected)
+    while todo:
+        name = todo.pop()
+        if name not in need:
+            need.add(name)
+            todo.extend(SHEET_DEPS.get(name, ()))
+    return need
+
+
+def export_workbook(db: Database, path: str, start: str, end: str, sheets=None) -> str:
+    """匯出 Excel 報表。sheets 為要匯出的工作表名稱（None 表示全部）。"""
+    selected = [n for n, _ in SHEET_INFO if sheets is None or n in sheets]
+    if not selected:
+        raise ValueError("請至少選擇一份報表")
     base = db.base_currency
     base_name = CURRENCIES.get(base, (base,))[0]
     owner = db.get_setting("owner_name") or "本人"
@@ -148,6 +183,7 @@ def export_workbook(db: Database, path: str, start: str, end: str) -> str:
     ws_mon = wb.create_sheet("月度收支")
     ws_cat = wb.create_sheet("分類統計")
     ws_jnl = wb.create_sheet("日記簿")
+    ws_led = wb.create_sheet("分類帳")
     ws_tb = wb.create_sheet("試算表")
     ws_acc = wb.create_sheet("帳戶清單")
     ws_cf = wb.create_sheet("現金流量表", 3)
@@ -620,6 +656,8 @@ def export_workbook(db: Database, path: str, start: str, end: str) -> str:
     s.print_setup(j_hdr, landscape=True)
     ws_jnl.freeze_panes = f"A{j_hdr + 1}"
 
+    _ledger_sheet(db, ws_led, start, end, sub, acodes)
+
     # ================================================================ 試算表
     s = _Sheet(ws_tb)
     r = s.title("試算表", sub + "　｜　資產負債科目為期末餘額，損益科目為本期發生額", 5)
@@ -723,17 +761,7 @@ def export_workbook(db: Database, path: str, start: str, end: str) -> str:
     r += 2
     c = ws_sum.cell(row=r, column=1, value="各工作表說明")
     c.font = F_SECTION
-    for name, desc in [("資產負債表", "依流動性分類列示資產與負債，並附財務比率分析"),
-                       ("收支損益表", "本期收入、支出、結餘與業外損益"),
-                       ("收支明細", "逐筆交易紀錄，可使用篩選，合計會自動重算"),
-                       ("月度收支", "每月收支、儲蓄率、累計結餘與淨資產趨勢（含圖表）"),
-                       ("分類統計", "各分類逐月金額、占比與預算執行率"),
-                       ("日記簿", "每筆交易之借貸分錄"),
-                       ("試算表", "科目借貸餘額，驗證帳務平衡"),
-                       ("現金流量表", "期初現金 ＋ 生活／投資／籌資活動 ＝ 期末現金（直接法）"),
-                       ("投資明細", "期末持股、平均成本、市值、未實現損益與期間交易"),
-                       ("報稅彙總", "依稅務歸類彙總之所得與扣除項目（綜合所得稅參考）"),
-                       ("帳戶清單", "所有帳戶（會計科目）之基本資料與期末餘額")]:
+    for name, desc in [x for x in SHEET_INFO[1:] if x[0] in selected]:
         r += 1
         s.cell(r, 1, name, bold=True)
         s.cell(r, 2, desc)
@@ -745,9 +773,72 @@ def export_workbook(db: Database, path: str, start: str, end: str) -> str:
     _investment_sheet(db, ws_inv, start, end, sub, bfmt)
     _tax_sheet(db, ws_tax, int(end[:4]), owner, made, bfmt, base_name, base)
 
+    need = sheets_needed(selected)
+    for ws in list(wb.worksheets):
+        if ws.title not in need:
+            wb.remove(ws)
+        elif ws.title not in selected:
+            ws.sheet_state = "hidden"
+    wb.active = next(i for i, ws in enumerate(wb.worksheets) if ws.sheet_state == "visible")
     wb.calculation.fullCalcOnLoad = True
     wb.save(path)
     return path
+
+
+def _ledger_sheet(db: Database, ws, start: str, end: str, sub: str, acodes: dict) -> None:
+    """分類帳：每個帳戶一段，期初餘額、逐筆借貸、以公式累計餘額，並與帳上期末餘額核對。"""
+    s = _Sheet(ws)
+    r = s.title("分類帳", sub + "　｜　金額為各帳戶原幣", 8)
+    s.header(r, ["日期", "傳票號碼", "摘要", "對方科目", "借方", "貸方", "餘額", "核對"])
+    hdr = r
+    n = 0
+    for acc in sorted(db.list_accounts(include_archived=True), key=lambda a: acodes[a["id"]]):
+        lg = db.ledger(acc["id"], start, end)
+        if not lg["rows"] and not lg["opening"] and not lg["closing"]:
+            continue
+        n += 1
+        fmt = _num_fmt(acc["currency"])
+        debit_side = lg["normal_side"] == "借"
+        r += 2 if n > 1 else 1
+        s.cell(r, 1, f"{acodes[acc['id']]}　{acc['name']}", bold=True, fill=FILL_SUB, color=NAVY)
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
+        s.cell(r, 5, f"{acc['category']}　{acc['currency']}　正常餘額：{lg['normal_side']}方",
+               fill=FILL_SUB, color="64748B")
+        ws.merge_cells(start_row=r, start_column=5, end_row=r, end_column=8)
+        r += 1
+        s.cell(r, 1, _d(start), DATE, align="center")
+        s.cell(r, 3, "期初餘額（上期結轉）", bold=True)
+        for col in (2, 4, 5, 6, 8):
+            s.cell(r, col, None)
+        s.cell(r, 7, lg["opening"], fmt, bold=True)
+        first = r + 1
+        for i, row in enumerate(lg["rows"]):
+            r += 1
+            fill = FILL_ZEBRA if i % 2 else None
+            s.cell(r, 1, _d(row["date"]), DATE, fill=fill, align="center")
+            s.cell(r, 2, row["voucher"], fill=fill, align="center")
+            s.cell(r, 3, row["summary"], fill=fill)
+            s.cell(r, 4, row["counter"], fill=fill)
+            s.cell(r, 5, row["debit"] or None, fmt, fill=fill)
+            s.cell(r, 6, row["credit"] or None, fmt, fill=fill)
+            s.cell(r, 7, f"=G{r - 1}+E{r}-F{r}" if debit_side else f"=G{r - 1}+F{r}-E{r}", fmt, fill=fill)
+            s.cell(r, 8, None, fill=fill)
+        last = r
+        r += 1
+        s.cell(r, 3, "本期合計／期末餘額", bold=True, fill=FILL_TOTAL, align="right")
+        for col in (1, 2, 4):
+            s.cell(r, col, None, fill=FILL_TOTAL)
+        s.cell(r, 5, f"=SUM(E{first}:E{last})" if last >= first else 0, fmt, bold=True, fill=FILL_TOTAL)
+        s.cell(r, 6, f"=SUM(F{first}:F{last})" if last >= first else 0, fmt, bold=True, fill=FILL_TOTAL)
+        s.cell(r, 7, f"=G{last}", fmt, bold=True, fill=FILL_TOTAL)
+        s.cell(r, 8, f'=IF(ROUND(G{r}-{lg["closing"]},2)=0,"✓ 相符","✗ 不符")', bold=True,
+               fill=FILL_TOTAL, align="center")
+        s.total_border(r, 1, 8)
+    if not n:
+        s.cell(r + 1, 1, "本期間沒有任何帳戶紀錄", border=False)
+    s.widths([14, 11, 28, 26, 15, 15, 16, 10])
+    s.print_setup(hdr, landscape=True)
+    ws.freeze_panes = f"A{hdr + 1}"
 
 
 
