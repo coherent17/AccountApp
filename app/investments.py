@@ -6,12 +6,15 @@
         同時迴轉所售股份已認列之「未實現評價損益」，剩餘持股不重新評價。
 * 現金股利：借 交割帳戶（淨額）、借 健保補充保費（如有）／貸 股利收入。
 * 股票股利：增加股數，成本不變（平均成本下降），不產生分錄。
-* 評價：只有使用者選定日期並手動輸入市價（price 事件）才產生評價分錄，
-        依該市價調整投資帳戶，差額記「未實現評價損益」。
+* 評價：只有使用者選定日期並手動輸入市價（price 事件）才產生評價分錄。
+        評價金額為預估淨售價＝市價×股數－預估賣出手續費－預估證交稅，
+        差額記「未實現評價損益」，因此未實現損益已扣除買賣的手續費與稅。
         帳面價值＝成本＋已認列評價，即投資帳戶餘額（state["market_value"]）。
+* 手續費與證交稅依標的設定（fee_rate、fee_min、tax_rate），台股券商慣例無條件捨去。
 * 分錄連結：使用者在複式分錄中直接借記（買進）或貸記（賣出）投資科目並指定標的與股數，
   分錄由使用者自行輸入；系統只補做後續處理：
-    分錄買進：成本＝借記金額，不產生評價分錄。
+    分錄買進：成本＝借記金額（含手續費），不產生評價分錄。
+    分錄行可記錄成交單價（txn_lines.price），用來顯示成交價與推算手續費、稅。
     分錄賣出：迴轉所售股份之未實現評價損益，並將貸記金額與平均成本之差額調整為處分投資損益。
 系統分錄由系統自動產生（source = 'inv:<證券 id>'），交易變更時自該日起重新產生。
 """
@@ -19,6 +22,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import math
 
 from .database import Database, fmt_shares, money_round, voucher_no
 
@@ -26,6 +30,24 @@ KIND_LABELS = {"buy": "買進", "sell": "賣出", "cash_div": "現金股利", "s
                "price": "市價評價", "jbuy": "買進（分錄）", "jsell": "賣出（分錄）"}
 NHI_RATE = 0.0211       # 二代健保補充保費費率
 NHI_THRESHOLD = 20000   # 單筆股利達此金額才扣繳
+FEE_RATE = 0.001425     # 台股手續費率（未打折）
+FEE_MIN = 20.0          # 最低手續費
+STOCK_TAX = 0.003       # 股票證交稅
+ETF_TAX = 0.001         # ETF 證交稅
+
+
+def default_tax_rate(code: str) -> float:
+    return ETF_TAX if code.strip().startswith("00") else STOCK_TAX
+
+
+def trade_costs(sec: dict, kind: str, shares: float, price: float) -> tuple[float, float]:
+    """依標的設定計算手續費與證交稅（賣出才有稅），無條件捨去至元。"""
+    gross = shares * price
+    if gross <= 0:
+        return 0.0, 0.0
+    fee = max(float(sec.get("fee_min", FEE_MIN)), math.floor(gross * sec.get("fee_rate", FEE_RATE) + 1e-6))
+    tax = math.floor(gross * sec.get("tax_rate", STOCK_TAX) + 1e-6) if kind in ("sell", "jsell") else 0.0
+    return float(fee), float(tax)
 
 
 def _now() -> str:
@@ -53,21 +75,52 @@ class Investments:
                            " FROM securities s JOIN accounts a ON a.id = s.account_id WHERE s.id = ?",
                            (sid,))
 
-    def add_security(self, account_id: int, code: str, name: str, note: str = "") -> int:
+    def add_security(self, account_id: int, code: str, name: str, note: str = "",
+                     fee_rate: float | None = None, fee_min: float | None = None,
+                     tax_rate: float | None = None) -> int:
         if not name.strip():
             raise ValueError("請輸入標的名稱")
         acc = self.db.get_account(account_id)
         if not acc or acc["kind"] != "asset":
             raise ValueError("請選擇投資帳戶（資產）")
+        rates = self._check_rates(FEE_RATE if fee_rate is None else fee_rate,
+                                  FEE_MIN if fee_min is None else fee_min,
+                                  default_tax_rate(code) if tax_rate is None else tax_rate)
         cur = self.db.conn.execute(
-            "INSERT INTO securities(account_id, code, name, note) VALUES (?, ?, ?, ?)",
-            (account_id, code.strip(), name.strip(), note.strip()))
+            "INSERT INTO securities(account_id, code, name, note, fee_rate, fee_min, tax_rate)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)", (account_id, code.strip(), name.strip(), note.strip(), *rates))
         self.db.conn.commit()
         return cur.lastrowid
 
-    def update_security(self, sid: int, code: str, name: str, note: str = "") -> None:
-        self.db.conn.execute("UPDATE securities SET code = ?, name = ?, note = ? WHERE id = ?",
-                             (code.strip(), name.strip(), note.strip(), sid))
+    @staticmethod
+    def _check_rates(fee_rate: float, fee_min: float, tax_rate: float) -> tuple[float, float, float]:
+        if not (0 <= fee_rate < 0.05 and 0 <= fee_min < 10000 and 0 <= tax_rate < 0.05):
+            raise ValueError("手續費率與證交稅率請輸入合理的百分比（例如 0.1425%、0.3%）")
+        return float(fee_rate), float(fee_min), float(tax_rate)
+
+    def update_security(self, sid: int, code: str, name: str, note: str = "",
+                        fee_rate: float | None = None, fee_min: float | None = None,
+                        tax_rate: float | None = None) -> None:
+        sec = self.get_security(sid)
+        rates = self._check_rates(sec["fee_rate"] if fee_rate is None else fee_rate,
+                                  sec["fee_min"] if fee_min is None else fee_min,
+                                  sec["tax_rate"] if tax_rate is None else tax_rate)
+        if not name.strip():
+            raise ValueError("請輸入標的名稱")
+        # 評價以預估淨售價計算，費率改變時自第一筆評價起重編分錄（先檢查結帳，避免留下未完成的變更）
+        changed = rates != (sec["fee_rate"], sec["fee_min"], sec["tax_rate"])
+        first = self.db._q1("SELECT MIN(date) AS d FROM sec_events WHERE security_id = ? AND kind = 'price'",
+                            (sid,))["d"] if changed else None
+        if first:
+            c = self.db.closed_until
+            if c and first <= c:
+                raise ValueError(f"此標的在已結帳期間（{c.replace('-', '/')} 以前）有評價分錄，無法變更費率；"
+                                 "請先到「設定」解除結帳。")
+        self.db.conn.execute("UPDATE securities SET code = ?, name = ?, note = ?, fee_rate = ?, fee_min = ?,"
+                             " tax_rate = ? WHERE id = ?",
+                             (code.strip(), name.strip(), note.strip(), *rates, sid))
+        if first:
+            self.rebuild(sid, first)
         self.db.conn.commit()
 
     def archive_security(self, sid: int, archived: bool = True) -> None:
@@ -105,7 +158,7 @@ class Investments:
                        end: str | None = None) -> list[dict]:
         """複式分錄中連結投資標的之買進／賣出（作廢的分錄不計入）。"""
         sql = ("SELECT t.id AS txn_id, t.date, t.note, t.created_at, l.security_id, s.code,"
-               " s.name AS sec_name, s.account_id, SUM(l.orig) AS orig,"
+               " s.name AS sec_name, s.account_id, SUM(l.orig) AS orig, MAX(l.price) AS unit_price,"
                " SUM(CASE WHEN l.debit > 0 THEN l.shares ELSE -l.shares END) AS net_shares,"
                " (SELECT COALESCE(SUM(x.credit - x.debit), 0) FROM txn_lines x"
                "   WHERE x.txn_id = t.id AND x.special = 'realized') AS booked_gain"
@@ -129,10 +182,20 @@ class Investments:
             if shares < 1e-9:
                 continue
             buy = (r["orig"] or 0) > 0
+            # 有輸入成交單價時，金額與「單價×股數」的差額即為手續費（賣出時含證交稅）
+            unit = r["unit_price"] or 0.0
+            fee = tax = 0.0
+            if unit > 0:
+                diff = money_round(value - shares * unit) if buy else money_round(shares * unit - value)
+                if diff > 0:
+                    if not buy:
+                        sec = self.get_security(r["security_id"])
+                        tax = min(diff, trade_costs(sec, "sell", shares, unit)[1])
+                    fee = money_round(diff - tax)
             out.append({
                 "id": None, "txn_id": r["txn_id"], "security_id": r["security_id"],
                 "date": r["date"], "kind": "jbuy" if buy else "jsell", "shares": shares,
-                "price": value / shares, "fee": 0.0, "tax": 0.0, "amount": 0.0, "nhi": 0.0,
+                "price": unit or value / shares, "fee": fee, "tax": tax, "amount": 0.0, "nhi": 0.0,
                 "value": value, "booked_gain": r["booked_gain"] or 0.0,
                 "cash_account_id": None, "cash_name": f"分錄 {voucher_no(r['txn_id'])}",
                 "note": r["note"], "created_at": r["created_at"], "code": r["code"],
@@ -287,7 +350,9 @@ class Investments:
             elif k == "price":
                 state["price"], state["price_date"] = e["price"], e["date"]
                 note = f"{sec['name']} 股價更新 @ {e['price']:,.2f}"
-                target = state["shares"] * state["price"] - state["cost"]
+                # 評價至預估淨售價：市價×股數－預估賣出手續費－預估證交稅
+                fee, tax = trade_costs(sec, "sell", state["shares"], state["price"])
+                target = state["shares"] * state["price"] - fee - tax - state["cost"] if state["shares"] else 0.0
                 delta = target - state["val_adj"]
                 if abs(delta) >= 0.005:
                     lines += [{"account": inv, "amt": delta}, {"special": "adjust", "gain": delta}]
@@ -396,11 +461,10 @@ class Investments:
     @staticmethod
     def suggest_fees(kind: str, shares: float, price: float, code: str = "") -> tuple[float, float]:
         """台股預設費用：手續費 0.1425%（最低 20 元）；賣出證交稅股票 0.3%、ETF（代號 00 開頭）0.1%。"""
-        gross = shares * price
-        fee = max(20.0, round(gross * 0.001425)) if gross else 0.0
-        rate = 0.001 if code.strip().startswith("00") else 0.003
-        tax = round(gross * rate) if kind == "sell" else 0.0
-        return fee, tax
+        return trade_costs({"tax_rate": default_tax_rate(code)}, kind, shares, price)
+
+    def fees_for(self, sid: int, kind: str, shares: float, price: float) -> tuple[float, float]:
+        return trade_costs(self.get_security(sid), kind, shares, price)
 
     def last_cash_account(self, sid: int) -> int | None:
         row = self.db._q1("SELECT cash_account_id FROM sec_events WHERE security_id = ? AND"

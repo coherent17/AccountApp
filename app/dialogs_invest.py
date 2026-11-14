@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFormLayout, QHBoxLayo
 from .context import AppContext
 from .database import CURRENCIES, INVESTMENT_CATEGORIES, fmt_shares
 from .dialogs import BaseDialog, fill_account_combo
-from .investments import KIND_LABELS, Investments
+from .investments import ETF_TAX, FEE_MIN, FEE_RATE, KIND_LABELS, STOCK_TAX, Investments, default_tax_rate
 from .theme import C, fmt_money, icon
 from .widgets import AmountEdit, button, iso, make_date_edit, section_title
 
@@ -44,7 +44,35 @@ class SecurityDialog(BaseDialog):
         f.addRow("代號", self.code)
         f.addRow("名稱", self.name)
         f.addRow("備註", self.note)
+        # 手續費與證交稅：用於自動帶入費用，以及評價時估算淨售價
+        self.kind = QComboBox()
+        for text, rate in (("股票（證交稅 0.3%）", STOCK_TAX), ("ETF（證交稅 0.1%）", ETF_TAX),
+                           ("債券 ETF（免證交稅）", 0.0), ("自訂", None)):
+            self.kind.addItem(text, rate)
+        self.fee_rate = self._pct_box(4, 2.0)
+        self.fee_min = QDoubleSpinBox()
+        self.fee_min.setRange(0, 9999)
+        self.fee_min.setDecimals(0)
+        self.fee_min.setSuffix(" 元")
+        self.tax_rate = self._pct_box(3, 2.0)
+        self.fee_rate.setValue((sec["fee_rate"] if sec else FEE_RATE) * 100)
+        self.fee_min.setValue(sec["fee_min"] if sec else FEE_MIN)
+        self.tax_rate.setValue((sec["tax_rate"] if sec else default_tax_rate(self.code.text())) * 100)
+        self._match_kind()
+        self.kind.activated.connect(self._kind_chosen)
+        self.tax_rate.valueChanged.connect(self._match_kind)
+        if not sec:
+            self.code.textEdited.connect(self._code_typed)
+        f.addRow("類型", self.kind)
+        f.addRow("手續費率", self.fee_rate)
+        f.addRow("最低手續費", self.fee_min)
+        f.addRow("證券交易稅率", self.tax_rate)
         self.root.addLayout(f)
+        fh = QLabel("手續費一般為 0.1425%，有折扣時請輸入折扣後的費率（例如 6 折為 0.0855%）。"
+                    "手續費與證交稅依券商慣例無條件捨去至元。")
+        fh.setObjectName("Hint")
+        fh.setWordWrap(True)
+        self.root.addWidget(fh)
         hint = QLabel("投資科目請先在「會計科目表」或「帳戶管理」建立（類別選「短期投資」、「長期投資」、"
                       "「股票」、「基金」或「債券」，期初餘額填 0）。持股可用「買進」登錄，"
                       "或在複式分錄中借記投資科目並選擇標的與股數；需要評價時再用「市價評價」輸入市價。")
@@ -62,16 +90,40 @@ class SecurityDialog(BaseDialog):
         bar.addWidget(ok)
         self.root.addLayout(bar)
 
+    @staticmethod
+    def _pct_box(decimals: int, top: float) -> QDoubleSpinBox:
+        w = QDoubleSpinBox()
+        w.setRange(0, top)
+        w.setDecimals(decimals)
+        w.setSingleStep(0.01)
+        w.setSuffix(" %")
+        return w
+
+    def _match_kind(self) -> None:
+        i = self.kind.findData(round(self.tax_rate.value() / 100, 6))
+        self.kind.setCurrentIndex(i if i >= 0 else self.kind.count() - 1)
+
+    def _kind_chosen(self) -> None:
+        rate = self.kind.currentData()
+        if rate is not None:
+            self.tax_rate.setValue(rate * 100)
+
+    def _code_typed(self, code: str) -> None:
+        if self.kind.currentData() in (STOCK_TAX, ETF_TAX):
+            self.tax_rate.setValue(default_tax_rate(code) * 100)
+
     def save(self) -> None:
+        rates = {"fee_rate": round(self.fee_rate.value() / 100, 6), "fee_min": self.fee_min.value(),
+                 "tax_rate": round(self.tax_rate.value() / 100, 6)}
         try:
             if self.sec:
                 self.inv.update_security(self.sec["id"], self.code.text(), self.name.text(),
-                                         self.note.text())
+                                         self.note.text(), **rates)
             else:
                 if self.account.currentData() is None:
                     raise ValueError("請先到「帳戶管理」新增投資帳戶（例如：證券戶）")
                 self.new_id = self.inv.add_security(self.account.currentData(), self.code.text(),
-                                                    self.name.text(), self.note.text())
+                                                    self.name.text(), self.note.text(), **rates)
         except ValueError as e:
             self.show_error(str(e))
             return
@@ -215,8 +267,10 @@ class TradeDialog(BaseDialog):
 
     def _auto_fees(self) -> None:
         if self.kind in ("buy", "sell") and not self._fee_touched:
-            fee, tax = self.inv.suggest_fees(self.kind, self.shares.value() or 0, self.price.value() or 0,
-                                             getattr(self, "code", ""))
+            sid = self.sec.currentData()
+            q, p = self.shares.value() or 0, self.price.value() or 0
+            fee, tax = (self.inv.fees_for(sid, self.kind, q, p) if isinstance(sid, int)
+                        else self.inv.suggest_fees(self.kind, q, p))
             self.fee.blockSignals(True)
             self.tax.blockSignals(True)
             self.fee.setValue(fee or None)
@@ -301,8 +355,9 @@ class PriceDialog(BaseDialog):
         self.load()
         self.table.setMinimumHeight(min(10, max(3, len(self.holdings))) * 48 + 50)
         self.root.addWidget(self.table)
-        hint = QLabel("選擇評價日期並輸入市價（留空表示這檔不評價）。按「產生評價分錄」後才會依市價調整帳面價值，"
-                      "差額記為「未實現評價損益」；同一天再次評價會取代先前的市價。"
+        hint = QLabel("選擇評價日期並輸入市價（留空表示這檔不評價）。按「產生評價分錄」後才會把帳面價值調整為"
+                      "預估淨售價（市價×股數，扣除預估賣出手續費與證交稅），差額記為「未實現評價損益」；"
+                      "同一天再次評價會取代先前的市價。"
                       "買進、賣出不會自動評價。輸入錯誤時，可到「交易紀錄」刪除該筆市價評價。")
         hint.setObjectName("Hint")
         hint.setWordWrap(True)

@@ -213,7 +213,7 @@ p.unvoid({"id": vid})
 assert not db.get_transaction(vid)["void"]
 
 # 所有頁面與分頁
-for key in ("dashboard", "transactions", "accounts", "investments", "reports", "retirement", "settings"):
+for key in ("dashboard", "transactions", "accounts", "investments", "reports", "settings"):
     win.go(key, animate=False)
     app.processEvents()
 rp = win.pages["reports"]
@@ -225,7 +225,7 @@ ip = win.pages["investments"]
 for i in range(ip.tabs.count()):
     ip.tabs.setCurrentIndex(i)
     app.processEvents()
-win.pages["retirement"].calculate()
+assert "retirement" not in win.pages
 assert "借貸平衡" in rp.tb_sum.text() or True
 lo, hi = db.date_range()
 assert abs(sum(x["debit"] for x in db.trial_balance(lo, hi)) - sum(x["credit"] for x in db.trial_balance(lo, hi))) < 0.05
@@ -283,7 +283,7 @@ h = next(x for x in inv.holdings() if x["id"] == sec_id)
 assert h["shares"] == 100 and h["cost"] == 12500
 inv.set_prices([(sec_id, 130)], __import__("datetime").date.today().isoformat())
 lt2 = next(a for a in db.account_summaries() if a["id"] == lt["id"])
-assert lt2["balance"] == 13000, lt2["balance"]
+assert lt2["balance"] == 13000 - 20 - 39, lt2["balance"]   # 預估淨售價：扣最低手續費與 0.3% 證交稅
 win.go("reports", animate=False)
 rp.tabs.setCurrentIndex(rp._tab_index("日記帳"))
 app.processEvents()
@@ -396,5 +396,118 @@ assert hp["price_date"] == QDate.currentDate().toString("yyyy-MM-dd")
 ip = win.pages["investments"]
 ip.refresh()
 assert any(r["kind"] == "price" for r in ip.ev.model_.rows)
+
+
+# ---- 1151113 回報
+from app.dialogs import ExportDialog as _ExportDialog  # noqa: E402
+from app.dialogs_invest import SecurityDialog  # noqa: E402
+
+# Q5 複式分錄輸入成交單價：金額空白時自動帶入含手續費成本，交易紀錄顯示單價
+st_acc = next(a for a in db.list_accounts() if a["category"] == "短期投資")
+s3715 = inv.add_security(st_acc["id"], "3715", "定穎投控")
+bank_acc = next(a for a in db.list_accounts() if a["category"] == "銀行存款")
+j = JournalDialog(ctx, parent=win)
+j.table.setRowCount(0)
+j.add_row(("account", st_acc["id"]))
+j.add_row(("account", bank_acc["id"]))
+c0 = j.table.cellWidget(0, 3)
+c0.sec.setCurrentIndex(c0.sec.findData(s3715))
+j._sec_chosen(c0, j.table.cellWidget(0, 0))
+assert c0.price.isEnabled()
+c0.shares.setValue(1000)
+c0.price.setValue(98)
+assert j.table.cellWidget(0, 1).value() == 98139, j.table.cellWidget(0, 1).value()
+assert "手續費 139" in j.inv_info.text(), j.inv_info.text()
+c0.price.setValue(97)                       # 自動帶入的金額會跟著更新
+assert j.table.cellWidget(0, 1).value() == 97138
+j.table.cellWidget(0, 1).setText("97000")   # 使用者自行輸入後不再覆蓋
+j.table.cellWidget(0, 1).textEdited.emit("97000")
+c0.price.setValue(98)
+assert j.table.cellWidget(0, 1).value() == 97000
+j.table.cellWidget(0, 1).setValue(98139)
+j.auto_balance()
+j.note.setText("買入 定穎投控")
+j.save()
+assert j.saved, j.msg.text()
+ev = next(e for e in inv.events(s3715) if e["kind"] == "jbuy")
+assert ev["price"] == 98 and ev["fee"] == 139, ev
+jv = db.query_transactions(keyword="買入 定穎投控")[0]
+j2 = JournalDialog(ctx, db.get_transaction(jv["id"]), parent=win)
+assert j2.table.cellWidget(0, 3).price.value() == 98
+j2.close()
+# 賣出：貸方自動帶入實收（扣手續費與證交稅）
+j = JournalDialog(ctx, parent=win)
+j.apply_template(next(i for i, (n, _) in enumerate(j.templates) if n.startswith("賣出股票")))
+row = next(r for r in range(j.table.rowCount())
+           if (j.table.cellWidget(r, 0).currentData() or "") == "account:%d" % st_acc["id"])
+cs = j.table.cellWidget(row, 3)
+cs.sec.setCurrentIndex(cs.sec.findData(s3715))
+j._sec_chosen(cs, j.table.cellWidget(row, 0))
+cs.shares.setValue(400)
+cs.price.setValue(135)
+assert j.table.cellWidget(row, 2).value() == 54000 - 76 - 162, j.table.cellWidget(row, 2).value()
+j.close()
+
+# Q1 標的費率設定
+sd = SecurityDialog(ctx, inv.get_security(s3715), parent=win)
+assert abs(sd.tax_rate.value() - 0.3) < 1e-9 and sd.kind.currentIndex() == 0
+sd.kind.setCurrentIndex(1)
+sd._kind_chosen()
+assert abs(sd.tax_rate.value() - 0.1) < 1e-9
+sd.fee_rate.setValue(0.0855)
+sd.save()
+assert inv.get_security(s3715)["fee_rate"] == 0.000855 and inv.get_security(s3715)["tax_rate"] == 0.001
+nd = SecurityDialog(ctx, parent=win, account_id=st_acc["id"])
+nd.code.setText("00878")
+nd._code_typed("00878")
+assert abs(nd.tax_rate.value() - 0.1) < 1e-9
+nd.close()
+
+# Q3 匯出可勾選報表，選擇會記住
+ed = _ExportDialog(ctx, win)
+assert len(ed.sheet_boxes) == 13 and all(cb.isChecked() for cb in ed.sheet_boxes.values())
+for name, cb in ed.sheet_boxes.items():
+    cb.setChecked(name in ("資產負債表", "分類帳"))
+ed.open_after.setChecked(False)
+ed.path.setText(os.path.join(tmp, "選擇.xlsx"))
+ed.do_export()
+from openpyxl import load_workbook  # noqa: E402
+assert load_workbook(os.path.join(tmp, "選擇.xlsx")).sheetnames == ["資產負債表", "分類帳"]
+ed2 = _ExportDialog(ctx, win)
+assert [n for n, cb in ed2.sheet_boxes.items() if cb.isChecked()] == ["資產負債表", "分類帳"]
+for cb in ed2.sheet_boxes.values():
+    cb.setChecked(False)
+ed2.do_export()
+assert "至少" in ed2.msg.text()
+ed2.close()
+
+# Q4 帳戶管理依科目代號排序；負餘額不取絕對值
+ap = win.pages["accounts"]
+cash = next(a for a in db.list_accounts() if a["category"] == "現金")
+db.add_transaction(type="expense", account_id=cash["id"], amount=10_000_000,
+                   date=__import__("datetime").date.today().isoformat(),
+                   category_id=db.list_categories("expense")[0]["id"], note="透支測試")
+ap.refresh()
+t = ap.tables["asset"]
+codes = [t.proxy.data(t.proxy.index(i, 0)) for i in range(t.proxy.rowCount())]
+assert codes == sorted(codes), codes
+neg = [r for r in t.model_.rows if r["balance"] < 0]
+assert neg and all(r["_value"] < 0 for r in neg), [(r["name"], r["balance"], r["_value"]) for r in neg]
+
+
+# 歡迎畫面按 ✕ 關閉也保留稱呼
+from app.dialogs import WelcomeDialog  # noqa: E402
+db.set_setting("owner_name", "")
+wd = WelcomeDialog(ctx, win)
+wd.reject()
+assert db.get_setting("owner_name") == "游媽媽"
+
+# 無效日期：跳出提醒並還原
+warned = []
+widgets.warn = lambda *a, **k: warned.append(a[1])
+de = make_date_edit("2026-03-01")
+de.lineEdit().setText("2026/2/30")
+assert de.date() == QDate(2026, 3, 1) and warned and "不是有效的日期" in warned[0]
+widgets.warn = lambda *a, **k: None
 
 print("CHART / JOURNAL-INVEST GUI TESTS PASSED")

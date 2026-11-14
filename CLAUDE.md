@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The app is still evolving: expect more feature requests from her. Each release replaces the exe on her PC and must open her existing data **without crashing**. See "Release checklist" below.
 
-**Data from earlier releases must never be lost.** After upgrading, all of her accounts, vouchers, investments, settings and attachments must still be there with the same balances. The only exception is a change she explicitly asked for, such as v4 removing automatic valuation; the affected accounts must then differ only by that change. Never delete, reset or overwrite her data folder or existing rows during an upgrade.
+**Data from earlier releases must never be lost.** After upgrading, all of her accounts, vouchers, investments, settings and attachments must still be there with the same balances. The only exception is a change she explicitly asked for, such as v4 removing automatic valuation or v5 valuing at the net sale price; the affected accounts must then differ only by that change. Never delete, reset or overwrite her data folder or existing rows during an upgrade.
 
 ## Environment and commands
 
@@ -39,7 +39,7 @@ Final deliverables go to `C:\Users\User\accountApp_build\交付_給游媽媽\` a
 
 Environment variables:
 - `MY_LEDGER_DATA_DIR`: data folder override.
-- `MY_LEDGER_SMOKE_DIR`: smoke mode. It loads the data, screenshots all 7 pages as `exe_*.png`, then quits.
+- `MY_LEDGER_SMOKE_DIR`: smoke mode. It loads the data, screenshots all 6 pages as `exe_*.png`, then quits.
 
 To pass these from WSL to the exe, set `WSLENV=MY_LEDGER_DATA_DIR:MY_LEDGER_SMOKE_DIR` and use Windows paths.
 
@@ -58,10 +58,11 @@ To pass these from WSL to the exe, set `WSLENV=MY_LEDGER_DATA_DIR:MY_LEDGER_SMOK
   - `chart_of_accounts()` is the single list the UI uses.
 - **Immutability:** records are voided or reversed, never deleted. A closing date (`closed_until`) locks earlier periods. Every change is written to `audit_log`.
 - **Schema:**
-  - `SCHEMA_VERSION` is currently 4.
-  - `_open()` copies the DB to `理財帳本_升級前備份_v<N>.db`, then runs migrations in order (`_migrate_v1_to_v2`, `_migrate_v2_to_v3`) **before** `executescript(_TABLES)`.
+  - `SCHEMA_VERSION` is currently 5.
+  - `_open()` copies the DB to `理財帳本_升級前備份_v<N>.db`, then runs migrations in order (`_migrate_v1_to_v2`, `_migrate_v2_to_v3`, `_migrate_v4_to_v5`) **before** `executescript(_TABLES)`.
   - The ALTERs are guarded by `PRAGMA table_info`.
-  - `_migrate_v3_to_v4` runs at the end of `_open()`, because it needs the views: it rebuilds all investment system vouchers, including closed periods, and reattaches reconciliation marks and attachments. `user_version` stays 3 until it finishes.
+  - v5 adds `txn_lines.price` (unit price on investment journal lines) and `securities.fee_rate`/`fee_min`/`tax_rate` (ETF codes starting `00` get 0.1% tax, other stocks 0.3%).
+  - `_restate_investments` runs at the end of `_open()` for any DB older than the current version, because it needs the views. It rebuilds all investment system vouchers, including closed periods, and reattaches reconciliation marks and attachments. `user_version` stays 4 until it finishes, so an interrupted upgrade only repeats the rebuild.
   - `_ensure_codes()` then fills any missing 科目代號.
 
 **Investment sub-ledger (`app/investments.py`).**
@@ -69,16 +70,18 @@ To pass these from WSL to the exe, set `WSLENV=MY_LEDGER_DATA_DIR:MY_LEDGER_SMOK
 - `rebuild(sid, from_date)` deletes and regenerates the system vouchers (`transactions.source = 'inv:<sid>'`) from that date. Those vouchers are read-only in the UI.
 - `Database._sync_securities()` (lazy-imports Investments) runs replay as validation, and rolls back on errors such as overselling. Then it runs rebuild after any journal add, update, void, unvoid, reverse or delete that touches a linked security.
 - Valuation is manual only: buys, sells and stock dividends never create valuation vouchers. Only a `price` event (投資管理 → 市價評價: a date and market price she enters) does. A sale still reverses the valuation already booked on the shares sold.
+- Valuation is at the **estimated net sale price**: price × shares − estimated sell fee − securities tax. So 未實現損益 already includes trading costs, as she asked; cost already includes the buy fee because she debits it into 1201/1202.
+- Fees come from `trade_costs()` using the security's rates. They are rounded **down** to the yuan (Taiwan broker practice) with a minimum fee. Changing a security's rates rebuilds its valuation vouchers and is refused if a valuation falls in a closed period.
 - Invariant: an investment account's balance equals the book value of its holdings, i.e. cost + booked valuation (`state["market_value"]`; `tests/test_db.py::investment_accounts_match`).
 
 **Other modules:**
-- `analytics.py`: cash flow (direct method, self-checking), tax summary, retirement projection.
-- `exporter.py`: a 12-sheet Excel workbook with live formulas and ✓ balance checks.
+- `analytics.py`: cash flow (direct method, self-checking) and tax summary. The 退休規劃 page was removed in v2.3.0; its settings keys (`birth_year`, `retire_params`, `allocation_targets`) are left in old DBs untouched.
+- `exporter.py`: a 13-sheet Excel workbook with live formulas and ✓ balance checks, including 分類帳. She picks sheets in the export dialog (`SHEET_INFO`); an unselected sheet that a selected one references (`SHEET_DEPS`) is kept hidden so the formulas still work.
 - `importer.py`: Excel/CSV import.
 - `online.py`: optional internet updates, **off by default**; manual entry must always work.
 
 **UI.**
-- `main.py` builds `MainWindow` with 7 pages (`app/pages/*`, subclasses of `pages/base.Page`).
+- `main.py` builds `MainWindow` with 6 pages (`app/pages/*`, subclasses of `pages/base.Page`).
 - `AppContext` (`context.py`) holds the DB, paths and signals. Call `ctx.changed()` after any data change so all pages refresh, and use `ctx.toast` for messages.
 - Dialogs are in `dialogs.py`, `dialogs_more.py` (journal, void, audit, recurring, reconcile, import), `dialogs_invest.py` and `dialogs_chart.py` (會計科目表).
 - `widgets.DateEdit` (from `make_date_edit`) is a typed date field on a `QComboBox`, because `QDateEdit` ignores typing. It accepts 西元 and 民國 dates, and `date()` commits pending text.

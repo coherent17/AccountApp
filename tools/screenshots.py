@@ -35,22 +35,11 @@ def snap(name, w=None):
     print("saved", name)
 
 
-for key in ["dashboard", "transactions", "accounts", "investments", "reports", "retirement", "settings"]:
+for key in ["dashboard", "transactions", "accounts", "investments", "reports", "settings"]:
     win.go(key)
     pump(40)
     import time; time.sleep(0.7); pump(40)
     snap(key)
-from PySide6.QtWidgets import QScrollArea  # noqa: E402
-win.go("retirement", animate=False)
-pump(30)
-_sa = win.pages["retirement"].findChild(QScrollArea)
-_sa.verticalScrollBar().setValue(470)
-pump(30); time.sleep(0.6); pump(20)
-snap("retirement_2")
-_sa.verticalScrollBar().setValue(_sa.verticalScrollBar().maximum())
-pump(30); time.sleep(0.6); pump(20)
-snap("retirement_3")
-_sa.verticalScrollBar().setValue(0)
 rep = win.pages["reports"]
 for i in range(1, rep.tabs.count()):
     win.go("reports")

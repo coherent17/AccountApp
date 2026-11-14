@@ -17,7 +17,6 @@ from .dialogs import ExportDialog, TransactionDialog, WelcomeDialog
 from .pages.accounts import AccountsPage
 from .pages.dashboard import DashboardPage
 from .pages.investments import InvestmentsPage
-from .pages.retirement import RetirementPage
 from .pages.reports import ReportsPage
 from .pages.settings import SettingsPage
 from .pages.transactions import TransactionsPage
@@ -31,7 +30,6 @@ NAV = [
     ("accounts", "帳戶管理", "wallet", AccountsPage),
     ("investments", "投資管理", "chart", InvestmentsPage),
     ("reports", "財務報表", "excel", ReportsPage),
-    ("retirement", "退休規劃", "restore", RetirementPage),
     ("settings", "設定", "settings", SettingsPage),
 ]
 
