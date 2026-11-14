@@ -565,6 +565,100 @@ def test_random_operations_keep_codes():
     assert {s["code"] for s in Investments(db).list_securities()} == {"2330", "3715", "0050"}
 
 
+def test_year_end_closing():
+    db = make()
+    lo, hi = db.date_range()
+    y = int(lo[:4])
+    start, end = f"{y}-01-01", f"{y}-12-31"
+    before = {k: db.trial_balance(start, end) for k in ("tb",)}["tb"]
+    inc = db.income_statement(start, end)
+    eq = db.equity_statement(start, end)
+    # 權益變動表：期初淨值＋各項變動＝期末淨值
+    assert abs(sum(v for _, v in eq["rows"]) - eq["closing"]) < 0.01, eq
+    assert abs(eq["closing"] - db.net_worth(end)["net"]) < 0.01
+    made = db.close_year(y)
+    assert len(made) == 1 and db.year_closings() == {y: made[0]} and db.closed_until == end
+    # 結帳分錄：借貸平衡、本期損益＝綜合損益，且不改變任何報表金額
+    lines = db.txn_lines_of(db.get_transaction(made[0]))
+    assert balanced(lines)
+    closing_line = next(ln for ln in lines if ln["code"] == "3201")
+    assert abs((closing_line["credit"] - closing_line["debit"]) - inc["comprehensive"]) < 0.01
+    assert db.trial_balance(start, end) == before
+    assert db.income_statement(start, end) == inc
+    assert any(e["id"] == made[0] for e in db.journal(start, end))
+    assert not any(t["id"] == made[0] and (t["inc"] or t["exp"]) for t in db.query_transactions(start=end, end=end))
+    check_books(db, "after closing")
+    # 系統分錄不可修改、作廢、迴轉
+    for fn in (lambda: db.void_transactions([made[0]]), lambda: db.reverse_transaction(made[0], hi)):
+        try:
+            fn()
+            raise AssertionError("closing voucher changed")
+        except ValueError as e:
+            assert "結帳" in str(e)
+    # 年度尚未結束不可結帳；重複結帳不再產生
+    try:
+        db.close_year(_dt.date.today().year)
+        raise AssertionError("current year")
+    except ValueError:
+        pass
+    assert db.close_year(y) == []
+    # 解除結帳：結帳分錄作廢，可重新結帳
+    db.set_closed_until("")
+    assert db.year_closings() == {} and db.get_transaction(made[0])["void"]
+    again = db.close_year(y)
+    assert len(again) == 1 and again[0] != made[0]
+    # 系統重編改變已結帳年度的損益時，結帳分錄依新金額重新結轉
+    db.conn.execute("UPDATE txn_lines SET credit = credit + 100 WHERE txn_id = ? AND special = 'closing'",
+                    (again[0],))
+    db.refresh_year_closings()
+    cur = db.year_closings()[y]
+    assert cur != again[0] and db.closed_until == end
+    assert balanced(db.txn_lines_of(db.get_transaction(cur)))
+
+
+def test_six_column_trial_balance():
+    db = make()
+    lo, hi = db.date_range()
+    mid = (_dt.date.fromisoformat(lo) + _dt.timedelta(days=100)).isoformat()
+    for start, end in ranges(db) + [(mid, hi)]:
+        rows = db.trial_balance(start, end)
+        for a, b in (("open_debit", "open_credit"), ("period_debit", "period_credit"), ("debit", "credit")):
+            assert abs(sum(r[a] for r in rows) - sum(r[b] for r in rows)) < 0.05, (start, end, a)
+        for r in rows:
+            net = r["open_debit"] - r["open_credit"] + r["period_debit"] - r["period_credit"]
+            assert abs(net - (r["debit"] - r["credit"])) < 0.05, (start, end, r)
+        nw = sum(r["debit"] - r["credit"] for r in rows if r["group"] in ("資產", "負債"))
+        assert abs(nw - db.net_worth(end)["net"]) < 0.05
+
+
+def test_rebuild_keeps_voucher_numbers_and_reconciliation():
+    db, inv, bank, st, sid = _plain_ledger()
+    e1 = inv.add_event(sid, "buy", "2026-02-01", shares=100, price=100, fee=20, cash_account_id=bank)
+    inv.add_event(sid, "buy", "2026-03-01", shares=100, price=110, fee=20, cash_account_id=bank)
+    inv.set_prices([(sid, 120)], "2026-03-31")
+    ids = {t["date"]: t["id"] for t in db._q("SELECT id, date FROM transactions WHERE source = ?",
+                                              (f"inv:{sid}",))}
+    rid = db.conn.execute("INSERT INTO reconciliations(account_id, statement_date, statement_balance, created_at)"
+                          " VALUES (?, '2026-03-31', 0, 'x')", (bank,)).lastrowid
+    db.conn.execute("INSERT INTO recon_items VALUES (?, ?, ?)", (rid, ids["2026-03-01"], bank))
+    db.conn.commit()
+    # 在最前面補一筆交易、並改評價市價：之後的傳票號碼與對帳勾選都不變
+    inv.add_event(sid, "buy", "2026-01-15", shares=50, price=90, fee=20, cash_account_id=bank)
+    inv.set_prices([(sid, 125)], "2026-03-31")
+    now = {t["date"]: t["id"] for t in db._q("SELECT id, date FROM transactions WHERE source = ?",
+                                              (f"inv:{sid}",))}
+    for d in ("2026-02-01", "2026-03-01", "2026-03-31"):
+        assert now[d] == ids[d], (d, now[d], ids[d])
+    assert "2026-01-15" in now and now["2026-01-15"] > max(ids.values())
+    assert [r["txn_id"] for r in db._q("SELECT txn_id FROM recon_items")] == [ids["2026-03-01"]]
+    # 刪除交易：該傳票消失，其餘號碼不變
+    inv.delete_event(e1)
+    left = {t["date"]: t["id"] for t in db._q("SELECT id, date FROM transactions WHERE source = ?",
+                                               (f"inv:{sid}",))}
+    assert "2026-02-01" not in left and left["2026-03-01"] == ids["2026-03-01"]
+    assert investment_accounts_match(db)
+
+
 def test_journal_linked_void_and_reverse():
     db, inv, bank, st, sid = _plain_ledger()
     j = db.add_journal("2026-02-01", "買進", [

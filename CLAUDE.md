@@ -57,6 +57,9 @@ To pass these from WSL to the exe, set `WSLENV=MY_LEDGER_DATA_DIR:MY_LEDGER_SMOK
   - The fixed system 科目 live in `SPECIALS` plus 3101.
   - `chart_of_accounts()` is the single list the UI uses.
 - **Immutability:** records are voided or reversed, never deleted. A closing date (`closed_until`) locks earlier periods. Every change is written to `audit_log`.
+- **Voucher numbers** are `V` + `transactions.id`. `Investments.rebuild()` reinserts regenerated system vouchers with their old ids (matched by date + note, then by order within the day), so numbers, reconciliation marks and attachments survive a rebuild. Only vouchers that are no longer needed disappear.
+- **Equity is perpetual:** 期初淨值 is net worth the day before a period starts (`equity_opening`), so every period already starts "closed". 年度結帳 (`close_year`) still records a closing entry (`source = 'close:<year>'`, special line `closing` = 3201 本期損益) for the 日記簿 and locks the year. The views exclude `close:%` vouchers so reports never change, and any code that reads `txn_lines` directly must skip them too (e.g. the Excel 收支明細). Moving `closed_until` earlier (`set_closed_until`) voids later closing entries; `refresh_year_closings()` regenerates stale ones after a system rebuild.
+- **Trial balance** is six-column (`open_*`, `period_*`, closing `debit`/`credit`); each pair must balance. `equity_statement()` is the 權益變動表.
 - **Schema:**
   - `SCHEMA_VERSION` is currently 5.
   - `_open()` copies the DB to `理財帳本_升級前備份_v<N>.db`, then runs migrations in order (`_migrate_v1_to_v2`, `_migrate_v2_to_v3`, `_migrate_v4_to_v5`) **before** `executescript(_TABLES)`.
@@ -76,6 +79,7 @@ To pass these from WSL to the exe, set `WSLENV=MY_LEDGER_DATA_DIR:MY_LEDGER_SMOK
 
 **Other modules:**
 - `analytics.py`: cash flow (direct method, self-checking) and tax summary. The 退休規劃 page was removed in v2.3.0; its settings keys (`birth_year`, `retire_params`, `allocation_targets`) are left in old DBs untouched.
+- `printing.py`: print/PDF via `QTextDocument` + `QtPrintSupport` (vouchers with sign-off boxes, 日記簿, 總分類帳, six-column 試算表, statements, 權益變動表). `<thead>` repeats per page and page numbers are automatic; Qt ignores CSS height, so use content for spacing. `dialogs_print.py` is the UI. Tests count PDF pages with QtPdf, which is excluded from the exe, so keep it test-only.
 - `exporter.py`: a 13-sheet Excel workbook with live formulas and ✓ balance checks, including 分類帳. She picks sheets in the export dialog (`SHEET_INFO`); an unselected sheet that a selected one references (`SHEET_DEPS`) is kept hidden so the formulas still work.
 - `importer.py`: Excel/CSV import.
 - `online.py`: optional internet updates, **off by default**; manual entry must always work.
