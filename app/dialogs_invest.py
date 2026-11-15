@@ -393,7 +393,7 @@ class PriceDialog(BaseDialog):
             ed.setObjectName("")
             ed.setPlaceholderText("輸入市價")
             if sold:   # 已無持股但仍有評價調整：評價時自動歸零
-                ed.setPlaceholderText(f"評價調整 {h['market_value']:,.0f} 歸零")
+                ed.setPlaceholderText(f"剩餘帳面價值 {h['market_value']:,.0f} 歸零")
                 ed.setEnabled(False)
             self.table.setCellWidget(r, 4, ed)
             self.edits.append(ed)

@@ -95,13 +95,17 @@ class InvestmentsPage(Page):
         self.hold.customContextMenuRequested.connect(self.hold_menu)
         self.hold.setMinimumHeight(5 * 44 + 50)   # 至少顯示 5 檔持股
         lay.addWidget(self.hold, 3)
-        hh = QLabel("帳面價值＝成本＋已認列的評價。評價以預估淨售價計算（市價×股數，扣除預估賣出手續費與證交稅），"
-                    "成本已含買進手續費，因此未實現損益已包含買賣的手續費與稅。費率可在「編輯標的」設定。")
-        hh.setObjectName("Hint")
-        hh.setWordWrap(True)
-        lay.addWidget(hh)
         cc = Card()
-        cc.lay.addWidget(section_title("持股比重（依帳面價值）"))
+        # 說明文字放在持股比重標題列，不夾在持股明細中間（回饋 1151115-2 Q7）；完整說明以滑鼠提示顯示
+        title_row = QHBoxLayout()
+        title_row.addWidget(section_title("持股比重（依帳面價值）"))
+        title_row.addStretch()
+        hh = QLabel("ⓘ 帳面價值＝成本＋已認列的評價（評價已扣除預估賣出手續費與證交稅）")
+        hh.setObjectName("Hint")
+        hh.setToolTip("帳面價值＝成本＋已認列的評價。評價以預估淨售價計算（市價×股數，扣除預估賣出手續費與證交稅），"
+                      "成本已含買進手續費，因此未實現損益已包含買賣的手續費與稅。費率可在「編輯標的」設定。")
+        title_row.addWidget(hh)
+        cc.lay.addLayout(title_row)
         self.donut = DonutChart(height=240)
         cc.lay.addWidget(self.donut)
         lay.addWidget(cc, 2)
@@ -139,8 +143,10 @@ class InvestmentsPage(Page):
         ], sortable=False)
         self.ev.rowActivated.connect(self._open_event)
         lay.addWidget(self.ev, 1)
-        note = QLabel("每筆買賣、股利與市價評價都會自動產生會計分錄（收支明細中類型顯示為「投資」）。買賣不會自動評價。"
-                      "「買進／賣出／股利（分錄）」是在複式分錄中連結標的的交易，按兩下可開啟該傳票。"
+        note = QLabel("在這裡輸入的買賣、股利與市價評價會自動產生會計分錄（收支明細中類型顯示為「投資」，"
+                      "可在收支明細直接刪除）。買賣不會自動評價。"
+                      "「買進／賣出／股利（分錄）」是在複式分錄中連結標的的交易，按兩下可開啟該傳票；"
+                      "分錄賣出若已列處分投資損益，系統不另產生分錄。"
                       "賣出不迴轉未實現評價損益，所售股份的評價會在下次市價評價時一併調整。"
                       "若輸入錯誤，請刪除該筆交易（分錄請作廢該傳票），系統會自動重算之後的成本與分錄。")
         note.setObjectName("Hint")

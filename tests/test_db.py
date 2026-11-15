@@ -356,6 +356,139 @@ def test_migration_v5_drops_sale_reversals():
     check_books(db)
 
 
+def _feedback2_ledger():
+    """回饋 1151115-2 的長興（1717）：兩次各買 1,000 股（46,065、46,716），賣出時依她自己的成本 46,065 貸記。"""
+    db, inv, bank, st, _ = _plain_ledger()
+    sid = inv.add_security(st, "1717", "長興")
+    db.add_journal("2025-09-03", "買入 長興", [
+        {"account_id": st, "debit": 46065, "security_id": sid, "shares": 1000},
+        {"account_id": bank, "credit": 46065}])
+    db.add_journal("2025-09-04", "買入 長興", [
+        {"account_id": st, "debit": 46716, "security_id": sid, "shares": 1000},
+        {"account_id": bank, "credit": 46716}])
+    return db, inv, bank, st, sid
+
+
+def _her_sale(db, bank, st, sid, date="2026-01-15", credit=46065, gain=13172):
+    return db.add_journal(date, "賣出 長興", [
+        {"account_id": bank, "debit": credit + gain},
+        {"account_id": st, "credit": credit, "security_id": sid, "shares": 1000},
+        {"special": "realized", "credit": gain}])
+
+
+def test_journal_sell_with_booked_gain_creates_no_voucher():
+    """Q6：分錄已列處分投資損益時，賣出不產生任何系統傳票（V000094）；出售成本以她貸記的金額為準。"""
+    db, inv, bank, st, sid = _feedback2_ledger()
+    _her_sale(db, bank, st, sid)
+    assert not db._q("SELECT id FROM transactions WHERE source LIKE 'inv:%'")
+    h = inv.holdings()[0]
+    assert h["shares"] == 1000 and h["cost"] == 46716 and h["market_value"] == 46716, h
+    assert investment_accounts_match(db)
+    assert abs(db.realized_totals("2026-01-01", "2026-12-31") - 13172) < 0.01
+    row = inv.period_summary("2026-01-01", "2026-12-31")["realized_rows"][0]
+    assert row["cost"] == 46065 and row["shares"] == 1000 and abs(row["gain"] - 13172) < 0.01
+    # 第二次賣出時她多扣了成本：全數賣出後剩 -284 的成本差額，持股表保留這一列，市價評價時轉列處分損益
+    _her_sale(db, bank, st, sid, "2026-02-10", credit=47000, gain=10000)
+    assert not db._q("SELECT id FROM transactions WHERE source LIKE 'inv:%'")
+    h = inv.holdings()
+    assert len(h) == 1 and h[0]["shares"] == 0 and abs(h[0]["market_value"] + 284) < 0.01, h
+    assert investment_accounts_match(db)
+    inv.add_event(sid, "price", "2026-03-31", price=50, note="已全數賣出，剩餘評價歸零")
+    assert not inv.holdings() and investment_accounts_match(db)
+    assert abs(db.realized_totals("2026-01-01", "2026-12-31") - (13172 + 10000 + 284)) < 0.01
+    assert abs(db.adjust_totals("2026-01-01", "2026-12-31")) < 0.01
+    check_books(db)
+
+
+def test_journal_sell_without_gain_line_still_splits_cost():
+    """只貸記淨價款、未列處分損益的舊寫法：仍依平均成本拆出處分損益，投資科目才會正確。"""
+    db, inv, bank, st, sid = _feedback2_ledger()
+    db.add_journal("2026-01-15", "賣出 長興", [
+        {"account_id": bank, "debit": 59237},
+        {"account_id": st, "credit": 59237, "security_id": sid, "shares": 1000}])
+    h = inv.holdings()[0]
+    assert abs(h["cost"] - 46390.5) < 0.01 and investment_accounts_match(db)
+    assert abs(db.realized_totals("2026-01-01", "2026-12-31") - (59237 - 46390.5)) < 0.01
+    # 這種傳票無法單獨刪除，訊息說明如何改寫分錄
+    tid = db._q1("SELECT id FROM transactions WHERE source LIKE 'inv:%'")["id"]
+    try:
+        inv.delete_vouchers([tid])
+        raise AssertionError("delete")
+    except ValueError as e:
+        assert "處分投資損益" in str(e)
+    assert db.get_transaction(tid)
+
+
+def test_delete_system_vouchers():
+    """Q6：收支明細可刪除投資管理自動產生的傳票（一併刪除產生它的交易，之後的分錄自動重算）。"""
+    db, inv, bank, st, sid = _feedback2_ledger()
+    inv.set_prices([(sid, 47)], "2025-12-31")
+    inv.set_prices([(sid, 50)], "2026-03-31")
+    v = adjust_vouchers(db)
+    assert len(v) == 2
+    n_events = len(db._q("SELECT id FROM sec_events"))
+    assert inv.voucher_event(v[0]["id"])["date"] == "2025-12-31"
+    assert inv.delete_vouchers([v[0]["id"]]) == 1
+    assert len(db._q("SELECT id FROM sec_events")) == n_events - 1
+    left = adjust_vouchers(db)
+    assert [x["date"] for x in left] == ["2026-03-31"] and left[0]["id"] == v[1]["id"]   # 傳票號碼不變
+    assert investment_accounts_match(db)
+    assert any(a["action"] == "刪除投資交易" for a in db._q("SELECT action FROM audit_log"))
+    # 投資管理的買進：刪除傳票會造成之後賣出超賣 → 拒絕，資料不變
+    inv.add_event(sid, "buy", "2026-04-01", shares=100, price=50, cash_account_id=bank)
+    db.add_journal("2026-05-01", "賣出", [
+        {"account_id": bank, "debit": 100000},
+        {"account_id": st, "credit": 97000, "security_id": sid, "shares": 2100},
+        {"special": "realized", "credit": 3000}])
+    buy = db._q1("SELECT id FROM transactions WHERE source LIKE 'inv:%' AND date = '2026-04-01'")["id"]
+    try:
+        inv.delete_vouchers([buy])
+        raise AssertionError("oversell")
+    except ValueError as e:
+        assert "超過持股" in str(e)
+    assert db.get_transaction(buy) and len(db._q("SELECT id FROM sec_events")) == n_events
+    # 已結帳期間不可刪除
+    db.set_setting("closed_until", "2026-03-31")
+    try:
+        inv.delete_vouchers([left[0]["id"]])
+        raise AssertionError("closed")
+    except ValueError:
+        pass
+    check_books(db)
+
+
+def test_migration_v6_drops_journal_sell_adjustments():
+    """v7 升級：舊版在分錄賣出時產生的「依平均成本調整處分投資損益」傳票（V000094）被移除。"""
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "v6.db")
+    db = Database(path)
+    bank = db.add_account("銀行", "asset", "銀行存款", opening_balance=200000, opening_date="2025-01-01")
+    st = db.add_account("短期投資", "asset", "短期投資", opening_date="2025-01-01")
+    inv = Investments(db)
+    sid = inv.add_security(st, "1717", "長興")
+    for date, amt in (("2025-09-03", 46065), ("2025-09-04", 46716)):
+        db.add_journal(date, "買入 長興", [
+            {"account_id": st, "debit": amt, "security_id": sid, "shares": 1000},
+            {"account_id": bank, "credit": amt}])
+    sale = _her_sale(db, bank, st, sid)
+    # 舊版（v6）產生的調整傳票：借 處分投資損益 325.50／貸 短期投資 325.50
+    rid = db.add_journal("2026-01-15", f"長興 分錄賣出：依平均成本調整處分投資損益（V{sale:06d}）",
+                         [{"account_id": st, "credit": 325.5}, {"special": "realized", "debit": 325.5}],
+                         source=f"inv:{sid}")
+    db.conn.execute("PRAGMA user_version = 6")
+    db.conn.commit()
+    db.close()
+    db = Database(path)
+    inv = Investments(db)
+    assert db.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    assert os.path.exists(os.path.join(d, "v6_升級前備份_v6.db"))
+    assert not db.get_transaction(rid) and db.get_transaction(sale)
+    assert not db._q("SELECT id FROM transactions WHERE source LIKE 'inv:%'")
+    assert inv.holdings()[0]["cost"] == 46716 and investment_accounts_match(db)
+    assert abs(db.realized_totals("2026-01-01", "2026-12-31") - 13172) < 0.01
+    check_books(db)
+
+
 def test_manual_valuation_on_chosen_date():
     db, inv, bank, st, sid = _plain_ledger()
     inv.add_event(sid, "buy", "2026-02-01", shares=100, price=100, cash_account_id=bank)
@@ -820,7 +953,8 @@ def test_rebuild_keeps_voucher_numbers_and_reconciliation():
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 # 經她要求、可以讓投資科目餘額改變的升級（其他帳務都必須完全相同）
 APPROVED_INVESTMENT_CHANGES = {3: "v4 買賣不再自動評價", 4: "v5 評價改以預估淨售價",
-                               5: "v6 賣出不再迴轉未實現評價損益"}
+                               5: "v6 賣出不再迴轉未實現評價損益",
+                               6: "v7 分錄已列處分損益時賣出不產生系統分錄"}
 
 
 def old_ledgers():

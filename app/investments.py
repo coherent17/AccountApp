@@ -16,7 +16,9 @@
   分錄由使用者自行輸入；系統只補做後續處理：
     分錄買進：成本＝借記金額（含手續費），不產生評價分錄。
     分錄行可記錄成交單價（txn_lines.price），用來顯示成交價與推算手續費、稅。
-    分錄賣出：貸記金額與平均成本之差額調整為處分投資損益（不迴轉未實現評價損益）。
+    分錄賣出：分錄中已列處分投資損益時不產生任何分錄，貸記投資科目的金額即為出售成本（v2.6.0 起）；
+              只貸記淨價款、未列處分損益時，才依平均成本拆出處分投資損益。
+              全數賣出後若仍有成本差額或評價，市價評價時歸零（成本差額記處分投資損益）。
     分錄股利：股利收入科目行可連結標的、持有股數與每股股利，計入該標的的股利紀錄，不產生分錄。
 系統分錄由系統自動產生（source = 'inv:<證券 id>'），交易變更時自該日起重新產生。
 """
@@ -340,21 +342,27 @@ class Investments:
                 if e["shares"] > state["shares"] + 1e-9:
                     raise ValueError(f"{e['date'].replace('-', '/')} 分錄賣出 {fmt_shares(e['shares'])} 股，"
                                      f"超過當時持股 {fmt_shares(state['shares'])} 股")
-                ratio = e["shares"] / state["shares"]
-                cost_out = state["cost"] * ratio
-                # 使用者已貸記投資科目 value；差額依平均成本調整為處分損益（不迴轉評價）
-                diff = e["value"] - cost_out
-                if abs(diff) >= 0.005:
-                    lines += [{"account": inv, "amt": diff}, {"special": "realized", "gain": diff}]
-                gain = e["booked_gain"] / (sec["rate"] or 1) + diff
+                gain = e["booked_gain"] / (sec["rate"] or 1)
+                if abs(gain) >= 0.005:
+                    # 使用者已自行記入處分投資損益：以貸記投資科目的金額為出售成本，系統不產生任何分錄（v2.6.0）
+                    cost_out = e["value"]
+                else:
+                    # 只貸記淨價款、未列處分損益：依平均成本拆出處分投資損益（否則投資科目會多扣）
+                    cost_out = state["cost"] * e["shares"] / state["shares"]
+                    diff = e["value"] - cost_out
+                    if abs(diff) >= 0.005:
+                        lines += [{"account": inv, "amt": diff}, {"special": "realized", "gain": diff}]
+                        note = f"{sec['name']} 分錄賣出：依平均成本調整處分投資損益（{voucher_no(e['txn_id'])}）"
+                    gain = diff
                 state["shares"] -= e["shares"]
                 state["cost"] -= cost_out
                 if state["shares"] < 1e-9:
-                    state["shares"] = state["cost"] = 0.0
+                    state["shares"] = 0.0
+                if abs(state["cost"]) < 0.005:
+                    state["cost"] = 0.0
                 state["realized"].append({"date": e["date"], "gain": gain, "event": None,
                                           "txn_id": e["txn_id"], "shares": e["shares"], "cost": cost_out,
                                           "proceeds": cost_out + gain})
-                note = f"{sec['name']} 分錄賣出：依平均成本調整處分投資損益（{voucher_no(e['txn_id'])}）"
             elif k == "cash_div":
                 net = e["amount"] - e["nhi"]
                 lines += [{"account": e["cash_account_id"], "amt": net},
@@ -370,11 +378,21 @@ class Investments:
                 state["shares"] += e["shares"]
             elif k == "price":
                 state["price"], state["price_date"] = e["price"], e["date"]
-                note = (f"{sec['name']} 股價更新 @ {e['price']:,.2f}" if state["shares"] else
-                        f"{sec['name']} 已全數賣出：調整剩餘評價")
-                # 評價至預估淨售價：市價×股數－預估賣出手續費－預估證交稅
-                fee, tax = trade_costs(sec, "sell", state["shares"], state["price"])
-                target = state["shares"] * state["price"] - fee - tax - state["cost"] if state["shares"] else 0.0
+                if state["shares"]:
+                    note = f"{sec['name']} 股價更新 @ {e['price']:,.2f}"
+                    # 評價至預估淨售價：市價×股數－預估賣出手續費－預估證交稅
+                    fee, tax = trade_costs(sec, "sell", state["shares"], state["price"])
+                    target = state["shares"] * state["price"] - fee - tax - state["cost"]
+                else:
+                    # 已全數賣出：剩餘評價歸零；分錄賣出貸記金額與成本的差額轉列處分投資損益
+                    note = f"{sec['name']} 已全數賣出：調整剩餘評價"
+                    target = 0.0
+                    if abs(state["cost"]) >= 0.005:
+                        lines += [{"account": inv, "amt": -state["cost"]},
+                                  {"special": "realized", "gain": -state["cost"]}]
+                        state["realized"].append({"date": e["date"], "gain": -state["cost"], "event": e["id"],
+                                                  "shares": 0.0, "cost": state["cost"], "proceeds": 0.0})
+                        state["cost"] = 0.0
                 delta = target - state["val_adj"]
                 if abs(delta) >= 0.005:
                     lines += [{"account": inv, "amt": delta}, {"special": "adjust", "gain": delta}]
@@ -441,19 +459,7 @@ class Investments:
         todo = [v for v in state["vouchers"] if v["date"] >= from_date]
         todo = [(v, ln) for v in todo for ln in [self._lines_to_journal(sec, v["lines"])]
                 if len([x for x in ln if x.get("debit") or x.get("credit")]) >= 2]
-        free = list(old)
-        reuse: list[int | None] = []
-        for v, _ in todo:      # 先以日期＋摘要對應
-            hit = next((o for o in free if o["date"] == v["date"] and o["note"] == v["note"]), None)
-            reuse.append(hit["id"] if hit else None)
-            if hit:
-                free.remove(hit)
-        for i, (v, _) in enumerate(todo):   # 再以同日先後順序對應（例如股價改變使摘要不同）
-            if reuse[i] is None:
-                hit = next((o for o in free if o["date"] == v["date"]), None)
-                if hit:
-                    reuse[i] = hit["id"]
-                    free.remove(hit)
+        reuse, free = self._match_vouchers(old, [v for v, _ in todo])
         n = 0
         for (v, lines), tid in zip(todo, reuse):
             db.add_journal(v["date"], v["note"], lines, source=src, log="", txn_id=tid)
@@ -467,12 +473,83 @@ class Investments:
         db._log("投資分錄產生", None, f"{sec['name']}：自 {from_date.replace('-', '/')} 起重新產生 {n} 張傳票")
         db.conn.commit()
 
+    @staticmethod
+    def _match_vouchers(old: list[dict], todo: list[dict]) -> tuple[list[int | None], list[dict]]:
+        """系統傳票對應原傳票號碼：先以日期＋摘要對應，再以同日先後順序對應（例如股價改變使摘要不同）。"""
+        free = list(old)
+        reuse: list[int | None] = []
+        for v in todo:
+            hit = next((o for o in free if o["date"] == v["date"] and o["note"] == v["note"]), None)
+            reuse.append(hit["id"] if hit else None)
+            if hit:
+                free.remove(hit)
+        for i, v in enumerate(todo):
+            if reuse[i] is None:
+                hit = next((o for o in free if o["date"] == v["date"]), None)
+                if hit:
+                    reuse[i] = hit["id"]
+                    free.remove(hit)
+        return reuse, free
+
+    def voucher_event(self, txn_id: int) -> dict | None:
+        """系統傳票是由投資管理的哪一筆交易產生（找不到時傳回 None）。"""
+        t = self.db.get_transaction(txn_id)
+        if not t or not t["source"].startswith("inv:"):
+            return None
+        sid = int(t["source"][4:])
+        sec = self.get_security(sid)
+        if not sec:
+            return None
+        old = self.db._q("SELECT id, date, note FROM transactions WHERE source = ? ORDER BY id", (t["source"],))
+        todo = [v for v in self.replay(sid)["vouchers"]
+                if len([x for x in self._lines_to_journal(sec, v["lines"]) if x.get("debit") or x.get("credit")]) >= 2]
+        reuse, _ = self._match_vouchers(old, todo)
+        for v, tid in zip(todo, reuse):
+            if tid == txn_id and v["event"]:
+                return self.db._q1("SELECT * FROM sec_events WHERE id = ?", (v["event"],))
+        return None
+
+    def delete_vouchers(self, txn_ids: list[int]) -> int:
+        """刪除系統傳票＝刪除產生它的投資管理交易（之後的成本與分錄自動重算）。傳回刪除的交易筆數。"""
+        events, missing = {}, []
+        for tid in txn_ids:
+            ev = self.voucher_event(tid)
+            if ev:
+                events[ev["id"]] = ev
+            else:
+                missing.append(voucher_no(tid))
+        if missing:
+            raise ValueError(f"{'、'.join(missing)} 是依您的分錄賣出計算的處分投資損益（該分錄只貸記淨價款）。"
+                             "請開啟那張賣出分錄，貸記投資科目改為出售成本，並自行列出「處分投資損益」，"
+                             "系統就不會再產生這張傳票。")
+        first: dict[int, str] = {}
+        for ev in events.values():
+            self.db._check_open(ev["date"])
+        for ev in events.values():
+            self.db.conn.execute("DELETE FROM sec_events WHERE id = ?", (ev["id"],))
+            sid = ev["security_id"]
+            first[sid] = min(first.get(sid, ev["date"]), ev["date"])
+        try:
+            for sid in first:
+                self.replay(sid)
+        except ValueError:
+            self.db.conn.rollback()
+            raise ValueError("刪除後會造成之後的賣出股數超過持股，請先刪除之後的賣出交易。") from None
+        for ev in events.values():
+            sec = self.get_security(ev["security_id"])
+            self.db._log("刪除投資交易", None, f"{ev['date'].replace('-', '/')} {sec['name']} "
+                                         f"{KIND_LABELS.get(ev['kind'], ev['kind'])}（由收支明細刪除系統傳票）")
+        for sid, d in first.items():
+            self.rebuild(sid, d)
+        return len(events)
+
     def holdings(self, as_of: str | None = None, include_zero: bool = False) -> list[dict]:
         out = []
         for sec in self.list_securities(include_archived=True):
             st = self.replay(sec["id"], as_of)
-            if st["shares"] <= 1e-9 and not include_zero and abs(st["market_value"]) < 0.005:
-                continue   # 全數賣出、但仍有待調整的評價時保留（帳面價值＝投資科目餘額）
+            if st["shares"] <= 1e-9 and not include_zero and abs(st["market_value"]) < 0.005 \
+                    and abs(st["cost"]) < 0.005:
+                continue   # 全數賣出、但仍有待調整的評價或成本差額時保留（帳面價值＝投資科目餘額）
             row = dict(sec)
             row.update({k: st[k] for k in ("shares", "cost", "price", "price_date", "market_value",
                                            "unrealized", "avg_cost")})

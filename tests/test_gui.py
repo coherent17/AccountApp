@@ -355,6 +355,33 @@ pd.save()
 assert not any(h["id"] == sec_id for h in inv.holdings())
 assert next(a for a in db.account_summaries() if a["id"] == lt["id"])["balance"] == 0
 
+# 1151115-2 Q6：投資管理自動產生的傳票可刪除（開啟傳票按「刪除這張傳票」，或在收支明細選取後按作廢）
+held = next(h for h in inv.holdings() if h["shares"] > 0)
+d2 = (_dtm.date.today() + _dtm.timedelta(days=2)).isoformat()
+inv.set_prices([(held["id"], round(held["avg_cost"] * 1.2, 2) or 10)], d2)
+vid = db._q1("SELECT id FROM transactions WHERE source = ? AND date = ?", (f"inv:{held['id']}", d2))["id"]
+jd3 = JournalDialog(ctx, db.get_transaction(vid), parent=win)
+assert jd3.readonly and jd3.del_sys.isEnabled() and "刪除這張傳票" in jd3.msg.text()
+jd3.delete_system_voucher()
+assert not db.get_transaction(vid), jd3.msg.text()
+assert not any(e["kind"] == "price" and e["date"] == d2 for e in inv.events(held["id"]))
+inv.set_prices([(held["id"], round(held["avg_cost"] * 1.3, 2) or 10)], d2)
+vid = db._q1("SELECT id FROM transactions WHERE source = ? AND date = ?", (f"inv:{held['id']}", d2))["id"]
+tp = win.pages["transactions"]
+tp.clear_filters()
+tp.d1.setDate(QDate.fromString(d2, "yyyy-MM-dd"))
+tp.d2.setDate(QDate.fromString(d2, "yyyy-MM-dd"))
+tp.reload()
+tp.table.clearSelection()
+r = next(i for i, x in enumerate(tp.table.model_.rows) if x["id"] == vid)
+tp.table.selectRow(tp.table.proxy.mapFromSource(tp.table.model_.index(r, 0)).row())
+assert [x["id"] for x in tp.table.selected_rows()] == [vid]
+tp.void_selected()
+assert not db.get_transaction(vid)
+_acc = held["account_id"]
+assert abs(next(a for a in db.account_summaries() if a["id"] == _acc)["balance"]
+           - sum(h["market_value"] for h in inv.holdings() if h["account_id"] == _acc)) < 0.01
+
 # Q1 日期可直接輸入（西元、民國、無分隔、只打月日）
 from PySide6.QtCore import QDate, Qt as _Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
