@@ -156,7 +156,7 @@ class JournalDialog(BaseDialog):
         self.root.addLayout(top)
 
         self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["會計科目", "借方金額", "貸方金額", "投資標的／股數／成交單價",
+        self.table.setHorizontalHeaderLabels(["會計科目", "借方金額", "貸方金額", "投資標的／股數／單價",
                                               "行備註"])
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(50)
@@ -198,6 +198,7 @@ class JournalDialog(BaseDialog):
                       "外幣帳戶請以新台幣（本位幣）金額輸入，系統會依匯率換算。"
                       "投資科目（短期投資、長期投資等）請選擇投資標的並填股數與成交單價，"
                       "金額空白時會自動帶入含手續費的成本（賣出為扣除手續費與證交稅後的實收金額）；"
+                      "股利科目可選擇標的並填持有股數與每股股利；"
                       "評價請到「投資管理 → 市價評價」選日期並輸入市價。")
         hint.setObjectName("Hint")
         hint.setWordWrap(True)
@@ -297,7 +298,7 @@ class JournalDialog(BaseDialog):
         pr.setStyleSheet("font-size: inherit; font-weight: 400;")
         pr.setObjectName("")
         pr.setPlaceholderText("單價")
-        pr.setToolTip("成交單價（每股價格），會顯示在投資管理的交易紀錄")
+        pr.setToolTip("成交單價（每股價格）；股利科目則為每股股利。會顯示在投資管理的交易紀錄")
         pr.setFixedWidth(92)
         if price:
             pr.setValue(price)
@@ -322,25 +323,35 @@ class JournalDialog(BaseDialog):
         a = self.chart_by_key.get(cb.currentData() or "")
         return a if a and a["key"][0] == "account" else None
 
+    def _is_dividend_row(self, cb: QComboBox) -> bool:
+        """收入科目（例如 4104 股利）可連結投資標的，記錄持有股數與每股股利。"""
+        a = self.chart_by_key.get(cb.currentData() or "")
+        return bool(a and a["key"][0] == "category" and a["kind"] == "income")
+
     def _refresh_sec(self, cell: QWidget, cb: QComboBox, select: int | None = None) -> None:
-        """會計科目為投資科目時，列出其投資標的供連結。"""
+        """會計科目為投資科目時，列出其投資標的供連結；收入（股利）科目則列出全部標的。"""
         a = self._row_account(cb)
+        div = self._is_dividend_row(cb)
         sec, sh, pr = cell.sec, cell.shares, cell.price
         keep = select if select is not None else sec.currentData()
         if keep == "new":
             keep = None
         sec.blockSignals(True)
         sec.clear()
-        on = bool(a and a["investment"])
+        on = bool(a and a["investment"]) or div
         if on:
             sec.addItem("（不連結標的）", None)
-            for s in self.inv.list_securities(a["key"][1]):
-                sec.addItem(f"{s['code']} {s['name']}".strip(), s["id"])
-            sec.addItem("＋ 新增投資標的…", "new")
+            secs = self.inv.list_securities(None if div else a["key"][1], include_archived=div)
+            for s in secs:
+                if not s["archived"] or s["id"] == keep:
+                    sec.addItem(f"{s['code']} {s['name']}".strip(), s["id"])
+            if not div:
+                sec.addItem("＋ 新增投資標的…", "new")
             sec.setCurrentIndex(max(0, sec.findData(keep)) if keep else 0)
         else:
             sec.addItem("—", None)
         sec.blockSignals(False)
+        pr.setPlaceholderText("每股股利" if div else "單價")
         sec.setEnabled(on and not self.readonly)
         sh.setEnabled(on and not self.readonly and sec.currentData() not in (None, "new"))
         pr.setEnabled(sh.isEnabled())
@@ -380,6 +391,14 @@ class JournalDialog(BaseDialog):
         買進（借方）＝ 單價×股數＋手續費；賣出（貸方）＝ 單價×股數－手續費－證交稅。"""
         r = self._row_of(cell)
         sid, q, p = cell.sec.currentData(), cell.shares.value() or 0, cell.price.value() or 0
+        if r >= 0 and self._is_dividend_row(self.table.cellWidget(r, 0)):
+            # 股利：空白（或先前自動帶入）的貸方金額＝股數×每股股利
+            c, d = self.table.cellWidget(r, 2), self.table.cellWidget(r, 1)
+            if isinstance(sid, int) and q > 0 and p > 0 and not d.value() and (
+                    c.property("auto") or not c.value()):
+                c.setValue(money_round(q * p))
+                c.setProperty("auto", True)
+            return
         a = self._row_account(self.table.cellWidget(r, 0)) if r >= 0 else None
         if not isinstance(sid, int) or q <= 0 or p <= 0 or not a or a["currency"] != self.ctx.base:
             return
@@ -414,7 +433,9 @@ class JournalDialog(BaseDialog):
             else:
                 parts.append(f"{s['code']} {s['name']}：目前無持股")
             q, p = cell.shares.value() or 0, cell.price.value() or 0
-            if q > 0 and p > 0:
+            if q > 0 and p > 0 and self._is_dividend_row(self.table.cellWidget(r, 0)):
+                parts.append(f"本行股利 {fmt_shares(q)} 股 × 每股 {p:,.4g} ＝ {fmt_money(q * p, s['currency'])}")
+            elif q > 0 and p > 0:
                 sell = bool(self.table.cellWidget(r, 2).value())
                 fee, tax = self.inv.fees_for(sid, "sell" if sell else "buy", q, p)
                 parts.append(f"本行 {fmt_shares(q)} 股 × {p:,.4g} ＝ {fmt_money(q * p, s['currency'])}，"
@@ -422,8 +443,9 @@ class JournalDialog(BaseDialog):
         self.inv_info.setVisible(bool(parts))
         if parts:
             self.inv_info.setText("投資連結　" + "；".join(dict.fromkeys(parts)) +
-                                  "。賣出時請貸記投資科目，系統會迴轉未實現評價損益，"
-                                  "並依平均成本自動調整處分投資損益。")
+                                  "。賣出時請貸記投資科目，系統會依平均成本自動調整處分投資損益"
+                                  "（不迴轉未實現評價損益，下次市價評價時一併調整）；"
+                                  "股利科目連結標的後，會計入該標的的股利紀錄。")
 
     def new_subject(self) -> None:
         from .dialogs_chart import SubjectDialog

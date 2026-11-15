@@ -2,8 +2,9 @@
 
 會計處理（帳上投資科目以市價表示）：
 * 買進：借 投資帳戶（成本＝股數×價格＋手續費）／貸 交割帳戶；不產生評價分錄。
-* 賣出：借 交割帳戶（淨價款）、貸 投資帳戶（平均成本）、差額記「處分投資損益」；
-        同時迴轉所售股份已認列之「未實現評價損益」，剩餘持股不重新評價。
+* 賣出：借 交割帳戶（淨價款）、貸 投資帳戶（平均成本）、差額記「處分投資損益」。
+        賣出不迴轉已認列的「未實現評價損益」（v2.5.0 起）；所售股份的評價調整留在投資科目，
+        下次市價評價時與剩餘持股一併調整（全數賣出的標的評價為 0）。
 * 現金股利：借 交割帳戶（淨額）、借 健保補充保費（如有）／貸 股利收入。
 * 股票股利：增加股數，成本不變（平均成本下降），不產生分錄。
 * 評價：只有使用者選定日期並手動輸入市價（price 事件）才產生評價分錄。
@@ -15,7 +16,8 @@
   分錄由使用者自行輸入；系統只補做後續處理：
     分錄買進：成本＝借記金額（含手續費），不產生評價分錄。
     分錄行可記錄成交單價（txn_lines.price），用來顯示成交價與推算手續費、稅。
-    分錄賣出：迴轉所售股份之未實現評價損益，並將貸記金額與平均成本之差額調整為處分投資損益。
+    分錄賣出：貸記金額與平均成本之差額調整為處分投資損益（不迴轉未實現評價損益）。
+    分錄股利：股利收入科目行可連結標的、持有股數與每股股利，計入該標的的股利紀錄，不產生分錄。
 系統分錄由系統自動產生（source = 'inv:<證券 id>'），交易變更時自該日起重新產生。
 """
 
@@ -27,7 +29,7 @@ import math
 from .database import Database, fmt_shares, money_round, voucher_no
 
 KIND_LABELS = {"buy": "買進", "sell": "賣出", "cash_div": "現金股利", "stock_div": "股票股利",
-               "price": "市價評價", "jbuy": "買進（分錄）", "jsell": "賣出（分錄）"}
+               "price": "市價評價", "jbuy": "買進（分錄）", "jsell": "賣出（分錄）", "jdiv": "股利（分錄）"}
 NHI_RATE = 0.0211       # 二代健保補充保費費率
 NHI_THRESHOLD = 20000   # 單筆股利達此金額才扣繳
 FEE_RATE = 0.001425     # 台股手續費率（未打折）
@@ -156,25 +158,22 @@ class Investments:
 
     def journal_events(self, sid: int | None = None, start: str | None = None,
                        end: str | None = None) -> list[dict]:
-        """複式分錄中連結投資標的之買進／賣出（作廢的分錄不計入）。"""
+        """複式分錄中連結投資標的之買進／賣出與股利（作廢的分錄不計入）。"""
+        where, params = "", []
+        for cond, val in ((" AND l.security_id = ?", sid), (" AND t.date >= ?", start),
+                          (" AND t.date <= ?", end)):
+            if val:
+                where += cond
+                params.append(val)
         sql = ("SELECT t.id AS txn_id, t.date, t.note, t.created_at, l.security_id, s.code,"
-               " s.name AS sec_name, s.account_id, SUM(l.orig) AS orig, MAX(l.price) AS unit_price,"
+               " s.name AS sec_name, s.account_id, a.rate, SUM(l.orig) AS orig, MAX(l.price) AS unit_price,"
                " SUM(CASE WHEN l.debit > 0 THEN l.shares ELSE -l.shares END) AS net_shares,"
                " (SELECT COALESCE(SUM(x.credit - x.debit), 0) FROM txn_lines x"
                "   WHERE x.txn_id = t.id AND x.special = 'realized') AS booked_gain"
                " FROM txn_lines l JOIN transactions t ON t.id = l.txn_id"
-               " JOIN securities s ON s.id = l.security_id"
-               " WHERE t.void = 0 AND t.type = 'journal' AND l.security_id IS NOT NULL")
-        params: list = []
-        if sid:
-            sql += " AND l.security_id = ?"
-            params.append(sid)
-        if start:
-            sql += " AND t.date >= ?"
-            params.append(start)
-        if end:
-            sql += " AND t.date <= ?"
-            params.append(end)
+               " JOIN securities s ON s.id = l.security_id JOIN accounts a ON a.id = s.account_id"
+               " WHERE t.void = 0 AND t.type = 'journal' AND l.security_id IS NOT NULL"
+               " AND l.account_id IS NOT NULL" + where)
         out = []
         for r in self.db._q(sql + " GROUP BY t.id, l.security_id", params):
             shares = abs(r["net_shares"] or 0)
@@ -186,7 +185,9 @@ class Investments:
             unit = r["unit_price"] or 0.0
             fee = tax = 0.0
             if unit > 0:
-                diff = money_round(value - shares * unit) if buy else money_round(shares * unit - value)
+                # 賣出淨價款＝貸記投資科目＋同傳票記入處分投資損益的金額（例：65,092＋19,532＝84,624）
+                net = value if buy else value + (r["booked_gain"] or 0) / (r["rate"] or 1)
+                diff = money_round(net - shares * unit) if buy else money_round(shares * unit - net)
                 if diff > 0:
                     if not buy:
                         sec = self.get_security(r["security_id"])
@@ -197,6 +198,31 @@ class Investments:
                 "date": r["date"], "kind": "jbuy" if buy else "jsell", "shares": shares,
                 "price": unit or value / shares, "fee": fee, "tax": tax, "amount": 0.0, "nhi": 0.0,
                 "value": value, "booked_gain": r["booked_gain"] or 0.0,
+                "cash_account_id": None, "cash_name": f"分錄 {voucher_no(r['txn_id'])}",
+                "note": r["note"], "created_at": r["created_at"], "code": r["code"],
+                "sec_name": r["sec_name"], "account_id": r["account_id"]})
+        out += self._journal_dividends(where, params)
+        return out
+
+    def _journal_dividends(self, where: str, params: list) -> list[dict]:
+        """複式分錄中，股利收入科目行連結的標的（股數、每股股利）。"""
+        sql = ("SELECT t.id AS txn_id, t.date, t.note, t.created_at, l.security_id, s.code,"
+               " s.name AS sec_name, s.account_id, a.rate, SUM(l.credit - l.debit) AS amount,"
+               " MAX(l.shares) AS shares, MAX(l.price) AS unit_price"
+               " FROM txn_lines l JOIN transactions t ON t.id = l.txn_id"
+               " JOIN securities s ON s.id = l.security_id JOIN accounts a ON a.id = s.account_id"
+               " WHERE t.void = 0 AND t.type = 'journal' AND l.security_id IS NOT NULL"
+               " AND l.category_id IS NOT NULL" + where + " GROUP BY t.id, l.security_id")
+        out = []
+        for r in self.db._q(sql, params):
+            amount = money_round((r["amount"] or 0) / (r["rate"] or 1))
+            if abs(amount) < 0.005:
+                continue
+            out.append({
+                "id": None, "txn_id": r["txn_id"], "security_id": r["security_id"],
+                "date": r["date"], "kind": "jdiv", "shares": r["shares"] or 0.0,
+                "price": r["unit_price"] or 0.0, "fee": 0.0, "tax": 0.0, "amount": amount, "nhi": 0.0,
+                "value": 0.0, "booked_gain": 0.0,
                 "cash_account_id": None, "cash_name": f"分錄 {voucher_no(r['txn_id'])}",
                 "note": r["note"], "created_at": r["created_at"], "code": r["code"],
                 "sec_name": r["sec_name"], "account_id": r["account_id"]})
@@ -293,21 +319,18 @@ class Investments:
                                      f"超過當時持股 {state['shares']:,.0f} 股")
                 ratio = e["shares"] / state["shares"]
                 cost_out = state["cost"] * ratio
-                adj_out = state["val_adj"] * ratio
                 proceeds = e["shares"] * e["price"] - e["fee"] - e["tax"]
                 gain = proceeds - cost_out
                 lines += [{"account": e["cash_account_id"], "amt": proceeds},
                           {"account": inv, "amt": -cost_out},
                           {"special": "realized", "gain": gain}]
-                if abs(adj_out) >= 0.005:
-                    lines += [{"account": inv, "amt": -adj_out}, {"special": "adjust", "gain": -adj_out}]
+                # 不迴轉評價：已認列的評價調整留待下次市價評價時調整
                 state["shares"] -= e["shares"]
                 state["cost"] -= cost_out
-                state["val_adj"] -= adj_out
                 if state["shares"] < 1e-9:
-                    state["shares"] = state["cost"] = state["val_adj"] = 0.0
+                    state["shares"] = state["cost"] = 0.0
                 state["realized"].append({"date": e["date"], "gain": gain, "event": e["id"],
-                                          "cost": cost_out, "proceeds": proceeds})
+                                          "shares": e["shares"], "cost": cost_out, "proceeds": proceeds})
                 note = f"賣出 {sec['name']} {e['shares']:,.0f} 股 @ {e['price']:,.2f}"
             elif k == "jbuy":
                 # 分錄已由使用者借記投資科目、貸記付款科目，這裡只累計成本與股數
@@ -319,24 +342,19 @@ class Investments:
                                      f"超過當時持股 {fmt_shares(state['shares'])} 股")
                 ratio = e["shares"] / state["shares"]
                 cost_out = state["cost"] * ratio
-                adj_out = state["val_adj"] * ratio
-                # 使用者已貸記投資科目 value；差額依平均成本調整為處分損益
+                # 使用者已貸記投資科目 value；差額依平均成本調整為處分損益（不迴轉評價）
                 diff = e["value"] - cost_out
-                if abs(adj_out) >= 0.005:
-                    lines += [{"account": inv, "amt": -adj_out}, {"special": "adjust", "gain": -adj_out}]
                 if abs(diff) >= 0.005:
                     lines += [{"account": inv, "amt": diff}, {"special": "realized", "gain": diff}]
                 gain = e["booked_gain"] / (sec["rate"] or 1) + diff
                 state["shares"] -= e["shares"]
                 state["cost"] -= cost_out
-                state["val_adj"] -= adj_out
                 if state["shares"] < 1e-9:
-                    state["shares"] = state["cost"] = state["val_adj"] = 0.0
+                    state["shares"] = state["cost"] = 0.0
                 state["realized"].append({"date": e["date"], "gain": gain, "event": None,
-                                          "txn_id": e["txn_id"], "cost": cost_out,
+                                          "txn_id": e["txn_id"], "shares": e["shares"], "cost": cost_out,
                                           "proceeds": cost_out + gain})
-                note = (f"{sec['name']} 分錄賣出：迴轉未實現評價損益，並依平均成本"
-                        f"調整處分投資損益（{voucher_no(e['txn_id'])}）")
+                note = f"{sec['name']} 分錄賣出：依平均成本調整處分投資損益（{voucher_no(e['txn_id'])}）"
             elif k == "cash_div":
                 net = e["amount"] - e["nhi"]
                 lines += [{"account": e["cash_account_id"], "amt": net},
@@ -345,11 +363,15 @@ class Investments:
                     lines.append({"category": ("expense", "健保補充保費"), "debit": e["nhi"]})
                 state["dividends"].append({"date": e["date"], "amount": e["amount"], "nhi": e["nhi"]})
                 note = f"{sec['name']} 現金股利"
+            elif k == "jdiv":
+                # 分錄已由使用者記入股利收入，這裡只計入該標的的股利
+                state["dividends"].append({"date": e["date"], "amount": e["amount"], "nhi": 0.0})
             elif k == "stock_div":
                 state["shares"] += e["shares"]
             elif k == "price":
                 state["price"], state["price_date"] = e["price"], e["date"]
-                note = f"{sec['name']} 股價更新 @ {e['price']:,.2f}"
+                note = (f"{sec['name']} 股價更新 @ {e['price']:,.2f}" if state["shares"] else
+                        f"{sec['name']} 已全數賣出：調整剩餘評價")
                 # 評價至預估淨售價：市價×股數－預估賣出手續費－預估證交稅
                 fee, tax = trade_costs(sec, "sell", state["shares"], state["price"])
                 target = state["shares"] * state["price"] - fee - tax - state["cost"] if state["shares"] else 0.0
@@ -449,8 +471,8 @@ class Investments:
         out = []
         for sec in self.list_securities(include_archived=True):
             st = self.replay(sec["id"], as_of)
-            if st["shares"] <= 1e-9 and not include_zero:
-                continue
+            if st["shares"] <= 1e-9 and not include_zero and abs(st["market_value"]) < 0.005:
+                continue   # 全數賣出、但仍有待調整的評價時保留（帳面價值＝投資科目餘額）
             row = dict(sec)
             row.update({k: st[k] for k in ("shares", "cost", "price", "price_date", "market_value",
                                            "unrealized", "avg_cost")})
@@ -485,6 +507,11 @@ class Investments:
 
     def fees_for(self, sid: int, kind: str, shares: float, price: float) -> tuple[float, float]:
         return trade_costs(self.get_security(sid), kind, shares, price)
+
+    def last_price(self, sid: int) -> float:
+        row = self.db._q1("SELECT price FROM sec_events WHERE security_id = ? AND kind = 'price'"
+                          " ORDER BY date DESC, id DESC LIMIT 1", (sid,))
+        return row["price"] if row else 0.0
 
     def last_cash_account(self, sid: int) -> int | None:
         row = self.db._q1("SELECT cash_account_id FROM sec_events WHERE security_id = ? AND"

@@ -127,7 +127,7 @@ class InvestmentsPage(Page):
             Column("類別", lambda r: KIND_LABELS[r["kind"]], align="center", width=132,
                    color=lambda r: {"buy": C.expense, "sell": C.income, "cash_div": C.gold,
                                     "stock_div": C.adjust, "jbuy": C.expense,
-                                    "jsell": C.income}.get(r["kind"], C.muted)),
+                                    "jsell": C.income, "jdiv": C.gold}.get(r["kind"], C.muted)),
             Column("股數", lambda r: fmt_shares(r["shares"]) if r["shares"] else "", align="right", width=90),
             Column("價格", lambda r: f"{r['price']:,.2f}" if r["price"] else "", align="right", width=90),
             Column("手續費／稅", lambda r: fmt_num(r["fee"] + r["tax"], base) if r["fee"] + r["tax"] else "",
@@ -140,7 +140,8 @@ class InvestmentsPage(Page):
         self.ev.rowActivated.connect(self._open_event)
         lay.addWidget(self.ev, 1)
         note = QLabel("每筆買賣、股利與市價評價都會自動產生會計分錄（收支明細中類型顯示為「投資」）。買賣不會自動評價。"
-                      "「買進／賣出（分錄）」是在複式分錄中連結標的的交易，按兩下可開啟該傳票。"
+                      "「買進／賣出／股利（分錄）」是在複式分錄中連結標的的交易，按兩下可開啟該傳票。"
+                      "賣出不迴轉未實現評價損益，所售股份的評價會在下次市價評價時一併調整。"
                       "若輸入錯誤，請刪除該筆交易（分錄請作廢該傳票），系統會自動重算之後的成本與分錄。")
         note.setObjectName("Hint")
         note.setWordWrap(True)
@@ -163,6 +164,7 @@ class InvestmentsPage(Page):
         self.real = DataTable([
             Column("賣出日期", lambda r: fmt_date(r["date"]), width=118),
             Column("標的", lambda r: f"{r['code']} {r['name']}".strip(), stretch=True),
+            Column("股數", lambda r: fmt_shares(r.get("shares") or 0), align="right", width=110),
             Column("實收金額", lambda r: fmt_num(r["proceeds"], base), align="right", width=140),
             Column("出售成本", lambda r: fmt_num(r["cost"], base), align="right", width=140),
             Column("已實現損益", lambda r: fmt_num(r["gain"], base), align="right", width=140, bold=True,
