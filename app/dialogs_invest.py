@@ -358,7 +358,8 @@ class PriceDialog(BaseDialog):
         hint = QLabel("選擇評價日期並輸入市價（留空表示這檔不評價）。按「產生評價分錄」後才會把帳面價值調整為"
                       "預估淨售價（市價×股數，扣除預估賣出手續費與證交稅），差額記為「未實現評價損益」；"
                       "同一天再次評價會取代先前的市價。"
-                      "買進、賣出不會自動評價。輸入錯誤時，可到「交易紀錄」刪除該筆市價評價。")
+                      "買進、賣出不會自動評價，賣出也不迴轉已認列的評價，所售股份的評價在這裡一併調整；"
+                      "已全數賣出的標的，剩餘評價會自動歸零。輸入錯誤時，可到「交易紀錄」刪除該筆市價評價。")
         hint.setObjectName("Hint")
         hint.setWordWrap(True)
         self.root.addWidget(hint)
@@ -379,7 +380,8 @@ class PriceDialog(BaseDialog):
         self.table.setRowCount(len(self.holdings))
         self.edits = []
         for r, h in enumerate(self.holdings):
-            last = f"{h['price']:,.2f}" if h["price"] else "尚未評價"
+            sold = h["shares"] <= 1e-9
+            last = f"{h['price']:,.2f}" if h["price"] else ("已全數賣出" if sold else "尚未評價")
             for col, text in ((0, h["code"]), (1, h["name"]), (2, fmt_shares(h["shares"])), (3, last)):
                 it = QTableWidgetItem(text)
                 it.setFlags(Qt.ItemFlag.ItemIsEnabled)
@@ -390,6 +392,9 @@ class PriceDialog(BaseDialog):
             ed.decimals = 4
             ed.setObjectName("")
             ed.setPlaceholderText("輸入市價")
+            if sold:   # 已無持股但仍有評價調整：評價時自動歸零
+                ed.setPlaceholderText(f"評價調整 {h['market_value']:,.0f} 歸零")
+                ed.setEnabled(False)
             self.table.setCellWidget(r, 4, ed)
             self.edits.append(ed)
 
@@ -418,11 +423,17 @@ class PriceDialog(BaseDialog):
 
     def save(self) -> None:
         prices = [(h["id"], ed.value()) for h, ed in zip(self.holdings, self.edits) if ed.value()]
-        if not prices:
+        sold = [h for h in self.holdings if h["shares"] <= 1e-9]
+        if not prices and not sold:
             self.show_error("請至少輸入一檔的市價")
             return
         try:
-            n = self.inv.set_prices(prices, iso(self.date.date()))
+            day = iso(self.date.date())
+            n = self.inv.set_prices(prices, day)
+            for h in sold:   # 已全數賣出、仍有評價調整的標的：評價歸零（股數為 0，價格不影響金額）
+                self.inv.add_event(h["id"], "price", day, price=self.inv.last_price(h["id"]) or 1.0,
+                                   note="已全數賣出，剩餘評價歸零")
+                n += 1
         except ValueError as e:
             self.show_error(str(e))
             return

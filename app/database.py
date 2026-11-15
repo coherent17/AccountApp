@@ -10,7 +10,8 @@
     轉帳 transfer : 轉出帳戶 -amount，轉入帳戶 +to_amount
     調整 adjust   : 帳戶 +amount（市值或餘額校正，對方科目為未實現評價損益）
     分錄 journal  : 多行借貸分錄（txn_lines），借貸以本位幣表示，帳戶行另存原幣 orig；
-                    投資科目行可連結投資標的（security_id、shares），計入投資明細帳
+                    投資科目行可連結投資標的（security_id、shares），計入投資明細帳；
+                    收入科目行（股利）也可連結標的、股數與每股股利，計入該標的的股利
 * 所有計算都透過三個檢視表（view）取得「過帳」資料，作廢的傳票一律排除：
     v_acc_post     帳戶過帳（原幣帶號增減）
     v_cat_post     收入／支出科目過帳（本位幣，收入或費用方向為正）
@@ -28,7 +29,7 @@ import shutil
 import sqlite3
 from typing import Iterable
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 ASSET_CATEGORIES = [
     "現金", "銀行存款", "定期存款", "外幣存款", "短期投資", "股票", "基金", "債券",
@@ -437,7 +438,8 @@ class Database:
 
     def _restate_investments(self, version: int) -> None:
         """依新規則重編所有投資系統分錄（含已結帳期間，以維持帳與明細一致）：
-        v4 起買賣不再自動評價；v5 起評價以預估淨售價（扣除賣出手續費與證交稅）計算。
+        v4 起買賣不再自動評價；v5 起評價以預估淨售價（扣除賣出手續費與證交稅）計算；
+        v6 起賣出不再迴轉未實現評價損益。
         重編前的資料已留在升級前備份；銀行對帳勾選與憑證附件會接回重編後的傳票。"""
         from .investments import Investments
         inv = Investments(self)
@@ -473,8 +475,10 @@ class Database:
                             self.conn.execute(
                                 "INSERT OR IGNORE INTO recon_items(recon_id, txn_id, account_id)"
                                 " VALUES (?, ?, ?)", (r["recon_id"], nid, r["account_id"]))
-            why = ("買賣不再自動評價（只保留手動輸入市價的評價）；" if version < 4 else "") + \
-                "評價改以預估淨售價（扣除賣出手續費與證交稅）計算"
+            why = "；".join(w for v, w in (
+                (4, "買賣不再自動評價（只保留手動輸入市價的評價）"),
+                (5, "評價改以預估淨售價（扣除賣出手續費與證交稅）計算"),
+                (6, "賣出不再迴轉未實現評價損益（留待下次市價評價調整）")) if version < v)
             self._log("系統升級", None, f"已重編投資系統分錄：{why}")
             self.refresh_year_closings()
             self.conn.commit()
@@ -921,7 +925,9 @@ class Database:
                     "security_id": ln.get("security_id") or None, "shares": 0.0, "price": 0.0}
             if item["security_id"]:
                 sec = self._q1("SELECT * FROM securities WHERE id = ?", (item["security_id"],))
-                if not sec or sec["account_id"] != item["account_id"]:
+                cat = self.get_category(item["category_id"]) if item["category_id"] else None
+                dividend = bool(sec and cat and cat["kind"] == "income")
+                if not sec or (sec["account_id"] != item["account_id"] and not dividend):
                     raise ValueError("投資標的與會計科目不符，請重新選擇標的")
                 shares = float(ln.get("shares") or 0)
                 if shares <= 0:
@@ -929,7 +935,7 @@ class Database:
                 item["shares"] = round(shares, 4)
                 price = float(ln.get("price") or 0)
                 if price < 0:
-                    raise ValueError(f"「{sec['name']}」的成交單價不可為負數")
+                    raise ValueError(f"「{sec['name']}」的{'每股股利' if dividend else '成交單價'}不可為負數")
                 item["price"] = round(price, 4)
             if item["account_id"]:
                 acc = self.get_account(item["account_id"])
@@ -1087,14 +1093,14 @@ class Database:
             if ln["kind"] == "account":
                 item["account_id"] = ln["id"]
                 item["orig"] = -ln["orig"]
-                if ln.get("security_id"):
-                    item["security_id"] = ln["security_id"]
-                    item["shares"] = ln["shares"]
-                    item["price"] = ln["price"]
             elif ln["kind"] == "category":
                 item["category_id"] = ln["id"]
             else:
                 item["special"] = ln["id"]
+            if ln.get("security_id") and ln["kind"] in ("account", "category"):   # 投資標的與股利連結一併保留
+                item["security_id"] = ln["security_id"]
+                item["shares"] = ln["shares"]
+                item["price"] = ln["price"]
             lines.append(item)
         note = f"迴轉 {voucher_no(txn_id)}" + (f"：{t['note']}" if t["note"] else "")
         new_id = self.add_journal(date, note, lines, log="迴轉")

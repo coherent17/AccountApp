@@ -298,6 +298,63 @@ win.go("investments", animate=False)
 ip.refresh()
 assert any(e.get("txn_id") for e in ip.ev.model_.rows)
 
+# 1151115 Q4：股利科目可連結標的、股數與每股股利，金額自動帶入
+div_cat = db.find_category("income", "股利")
+jd = JournalDialog(ctx, parent=win)
+jd.table.setRowCount(0)
+jd.add_row(("account", bank["id"]), 450)
+jd.add_row(("category", div_cat["id"]))
+cell = jd.table.cellWidget(1, 3)
+assert cell.sec.isEnabled() and cell.sec.findData(sec_id) > 0 and cell.sec.findData("new") < 0
+assert not jd.table.cellWidget(0, 3).sec.isEnabled()
+cell.sec.setCurrentIndex(cell.sec.findData(sec_id))
+jd._sec_chosen(cell, jd.table.cellWidget(1, 0))
+assert cell.shares.isEnabled() and cell.price.placeholderText() == "每股股利"
+cell.shares.setValue(100)
+cell.price.setValue(4.5)
+assert jd.table.cellWidget(1, 2).value() == 450, jd.table.cellWidget(1, 2).value()
+assert "股利" in jd.inv_info.text(), jd.inv_info.text()
+jd.note.setText("中華電 配息")
+jd.save()
+assert jd.saved, jd.msg.text()
+ip.refresh()
+ev = next(e for e in ip.ev.model_.rows if e["kind"] == "jdiv")
+assert ev["amount"] == 450 and ev["shares"] == 100 and ev["price"] == 4.5
+# 重新開啟傳票，連結仍在
+jd2 = JournalDialog(ctx, db.get_transaction(ev["txn_id"]), parent=win)
+c2_ = next(jd2.table.cellWidget(r, 3) for r in range(jd2.table.rowCount())
+           if jd2.table.cellWidget(r, 3).sec.currentData() == sec_id)
+assert c2_.shares.value() == 100 and c2_.price.value() == 4.5
+jd2.reject()
+
+# 1151115 Q1–Q3：分錄全數賣出：手續費／稅依淨價款推算、不產生迴轉評價傳票、已實現損益列出股數
+from PySide6.QtCore import Qt as _Qt  # noqa: E402
+_dtm = __import__("datetime")
+today = (_dtm.date.today() + _dtm.timedelta(days=1)).isoformat()   # 在今天的市價評價之後
+n_inv = db.conn.execute("SELECT COUNT(*) FROM transactions WHERE source LIKE 'inv:%'").fetchone()[0]
+db.add_journal(today, "賣出中華電", [
+    {"account_id": bank["id"], "debit": 13839},
+    {"account_id": lt["id"], "credit": 12500, "security_id": sec_id, "shares": 100, "price": 139},
+    {"special": "realized", "credit": 1339}])
+assert db.conn.execute("SELECT COUNT(*) FROM transactions WHERE source LIKE 'inv:%'").fetchone()[0] == n_inv
+ip.refresh()
+sell = next(e for e in ip.ev.model_.rows if e["kind"] == "jsell" and e["security_id"] == sec_id)
+assert (sell["fee"], sell["tax"]) == (20, 41), sell          # 13,900 − 13,839 ＝ 61 ＝ 20＋41（不是 1,400）
+ip.year.setCurrentText(today[:4])
+ip.load_realized()
+heads = [ip.real.model_.headerData(i, _Qt.Orientation.Horizontal) for i in range(ip.real.model_.columnCount())]
+assert "股數" in heads, heads
+assert any(r["code"] == "2412" and r["shares"] == 100 for r in ip.real.model_.rows)
+gone = next(h for h in inv.holdings() if h["id"] == sec_id)
+assert gone["shares"] == 0 and gone["market_value"] == 13000 - 20 - 39 - 12500
+pd = PriceDialog(ctx, win)
+pd.date.setDate(QDate.fromString(today, "yyyy-MM-dd"))
+row = next(i for i, h in enumerate(pd.holdings) if h["id"] == sec_id)
+assert not pd.edits[row].isEnabled() and "歸零" in pd.edits[row].placeholderText()
+pd.save()
+assert not any(h["id"] == sec_id for h in inv.holdings())
+assert next(a for a in db.account_summaries() if a["id"] == lt["id"])["balance"] == 0
+
 # Q1 日期可直接輸入（西元、民國、無分隔、只打月日）
 from PySide6.QtCore import QDate, Qt as _Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402

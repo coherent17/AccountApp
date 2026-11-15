@@ -143,7 +143,8 @@ def test_journal_linked_investment():
     ps = inv.period_summary("2026-01-01", "2026-12-31")
     assert abs(ps["realized"] - 1500) < 0.01, ps
     assert abs(db.realized_totals("2026-01-01", "2026-12-31") - 1500) < 0.01
-    assert abs(db.adjust_totals("2026-01-01", "2026-12-31") - 984) < 0.01
+    # 賣出不迴轉已認列的評價（v2.5.0）：評價仍為 1,968，留待下次市價評價調整
+    assert abs(db.adjust_totals("2026-01-01", "2026-12-31") - 1968) < 0.01
     assert balanced(db.trial_balance("2026-01-01", "2026-12-31"))
     for e in db.journal("2026-01-01", "2026-12-31"):
         assert balanced(e["lines"]), e
@@ -206,6 +207,155 @@ def test_trades_never_auto_value():
     assert balanced(db.trial_balance("2026-01-01", "2026-12-31"))
 
 
+def _feedback_1151115_ledger():
+    """回饋 1151115 的強茂（2481）買賣：買 1,000 股 @65（手續費 92），賣 1,000 股 @85。"""
+    db, inv, bank, st, _ = _plain_ledger()
+    sid = inv.add_security(st, "2481", "強茂")
+    db.add_journal("2025-09-03", "買入 強茂", [
+        {"account_id": st, "debit": 65092, "security_id": sid, "shares": 1000, "price": 65},
+        {"account_id": bank, "credit": 65092}])
+    return db, inv, bank, st, sid
+
+
+def test_journal_sell_fee_and_tax_from_net_proceeds():
+    """Q1：分錄賣出的手續費／稅＝成交金額－淨價款（貸記投資科目＋處分投資損益），不是成交金額－成本。"""
+    db, inv, bank, st, sid = _feedback_1151115_ledger()
+    db.add_journal("2026-01-15", "賣出 強茂", [
+        {"account_id": bank, "debit": 84624},
+        {"account_id": st, "credit": 65092, "security_id": sid, "shares": 1000, "price": 85},
+        {"special": "realized", "credit": 19532}])
+    sell = next(e for e in inv.events(sid) if e["kind"] == "jsell")
+    assert (sell["fee"], sell["tax"]) == (121, 255), sell
+    buy = next(e for e in inv.events(sid) if e["kind"] == "jbuy")
+    assert (buy["fee"], buy["tax"]) == (92, 0), buy
+    # Q2：已實現損益含股數
+    row = inv.period_summary("2026-01-01", "2026-12-31")["realized_rows"][0]
+    assert row["shares"] == 1000 and abs(row["proceeds"] - 84624) < 0.01 and abs(row["gain"] - 19532) < 0.01
+    assert abs(row["cost"] - 65092) < 0.01
+    # 分錄已依成本貸記，系統不需要任何調整傳票
+    assert not db._q("SELECT id FROM transactions WHERE source LIKE 'inv:%'")
+    # 只貸記投資科目淨價款（不另列處分損益）的寫法，手續費／稅一樣是 121＋255
+    db2, inv2, bank2, st2, sid2 = _feedback_1151115_ledger()
+    db2.add_journal("2026-01-15", "賣出 強茂", [
+        {"account_id": bank2, "debit": 84624},
+        {"account_id": st2, "credit": 84624, "security_id": sid2, "shares": 1000, "price": 85}])
+    sell = next(e for e in inv2.events(sid2) if e["kind"] == "jsell")
+    assert (sell["fee"], sell["tax"]) == (121, 255), sell
+    assert abs(inv2.period_summary("2026-01-01", "2026-12-31")["realized"] - 19532) < 0.01
+    assert investment_accounts_match(db2)
+
+
+def test_sale_keeps_valuation_until_next_valuation():
+    """Q3：賣出不產生迴轉未實現評價損益的傳票；下次市價評價時再一併調整，全數賣出的評價歸零。"""
+    db, inv, bank, st, sid = _feedback_1151115_ledger()
+    db.add_journal("2025-09-04", "買入 強茂", [
+        {"account_id": st, "debit": 65092, "security_id": sid, "shares": 1000, "price": 65},
+        {"account_id": bank, "credit": 65092}])
+    inv.set_prices([(sid, 70)], "2025-12-31")
+    # 2,000 股 × 70 ＝ 140,000 − 手續費 199 − 證交稅 420 − 成本 130,184 ＝ 9,197
+    assert abs(db.adjust_totals("2025-01-01", "2025-12-31") - 9197) < 0.01
+    db.add_journal("2026-01-15", "賣出 強茂", [
+        {"account_id": bank, "debit": 84624},
+        {"account_id": st, "credit": 65092, "security_id": sid, "shares": 1000, "price": 85},
+        {"special": "realized", "credit": 19532}])
+    assert not db._q("SELECT id FROM transactions WHERE source LIKE 'inv:%' AND date >= '2026-01-01'")
+    assert abs(db.adjust_totals("2026-01-01", "2026-12-31")) < 0.01
+    h = inv.holdings()[0]
+    assert h["shares"] == 1000 and abs(h["unrealized"] - 9197) < 0.01   # 尚未重新評價
+    assert investment_accounts_match(db)
+    assert abs(db.realized_totals("2026-01-01", "2026-12-31") - 19532) < 0.01
+    # 下次評價：剩餘 1,000 股 × 80 − 手續費 114 − 證交稅 240 − 成本 65,092 ＝ 14,554，差額 5,357 記入評價損益
+    inv.set_prices([(sid, 80)], "2026-03-31")
+    assert abs(inv.holdings()[0]["unrealized"] - 14554) < 0.01
+    assert abs(db.adjust_totals("2026-01-01", "2026-12-31") - (14554 - 9197)) < 0.01
+    # 全數賣出後仍保留評價調整，持股表與投資科目一致；市價評價時歸零
+    db.add_journal("2026-04-15", "賣出 強茂", [
+        {"account_id": bank, "debit": 90000},
+        {"account_id": st, "credit": 65092, "security_id": sid, "shares": 1000},
+        {"special": "realized", "credit": 24908}])
+    h = inv.holdings()
+    assert len(h) == 1 and h[0]["shares"] == 0 and abs(h[0]["market_value"] - 14554) < 0.01
+    assert investment_accounts_match(db)
+    inv.add_event(sid, "price", "2026-06-30", price=inv.last_price(sid), note="已全數賣出，剩餘評價歸零")
+    assert not inv.holdings() and investment_accounts_match(db)
+    assert abs(db.adjust_totals("2026-01-01", "2026-12-31") + 9197) < 0.01
+    assert abs(next(a for a in db.account_summaries() if a["id"] == st)["balance"]) < 0.01
+    check_books(db)
+
+
+def test_dividend_journal_linked_to_security():
+    """Q4：複式分錄的股利科目可連結標的、股數與每股股利，計入該標的股利。"""
+    db, inv, bank, st, sid = _plain_ledger()
+    sid56 = inv.add_security(st, "0056", "元大高股息")
+    fee = db.find_category("expense", "郵電費") or db.list_categories("expense")[0]
+    div = db.find_category("income", "股利")
+    j = db.add_journal("2025-11-14", "0056 配息", [
+        {"account_id": bank, "debit": 4320},
+        {"category_id": fee["id"], "debit": 10},
+        {"category_id": div["id"], "credit": 4330, "security_id": sid56, "shares": 2165, "price": 2}])
+    ev = [e for e in inv.events(sid56) if e["kind"] == "jdiv"]
+    assert len(ev) == 1 and ev[0]["amount"] == 4330 and ev[0]["shares"] == 2165 and ev[0]["price"] == 2, ev
+    assert inv.period_summary("2025-01-01", "2025-12-31")["dividends"] == 4330
+    assert db.income_expense_totals("2025-01-01", "2025-12-31")["income"] == 4330   # 不重複入帳
+    assert not db._q("SELECT id FROM transactions WHERE source LIKE 'inv:%'")
+    assert not inv.holdings()                                   # 股利不影響持股
+    t = db.get_transaction(j)
+    assert any(ln.get("security_id") == sid56 and ln["shares"] == 2165 for ln in db.txn_lines_of(t))
+    # 作廢後不計入；迴轉產生反向股利
+    db.void_transactions([j], "test")
+    assert inv.period_summary("2025-01-01", "2025-12-31")["dividends"] == 0
+    db.unvoid_transaction(j)
+    db.reverse_transaction(j, "2025-12-01")
+    assert inv.period_summary("2025-01-01", "2025-12-31")["dividends"] == 0
+    # 費用科目不可連結標的
+    try:
+        db.add_journal("2025-11-20", "x", [
+            {"account_id": bank, "credit": 10},
+            {"category_id": fee["id"], "debit": 10, "security_id": sid56, "shares": 1}])
+        raise AssertionError("expense link")
+    except ValueError as e:
+        assert "不符" in str(e)
+    check_books(db)
+
+
+def test_migration_v5_drops_sale_reversals():
+    """v6 升級：舊版在賣出時產生的「迴轉未實現評價損益」傳票被移除，帳與明細一致。"""
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "v5.db")
+    db = Database(path)
+    bank = db.add_account("銀行", "asset", "銀行存款", opening_balance=200000, opening_date="2025-01-01")
+    st = db.add_account("短期投資", "asset", "短期投資", opening_date="2025-01-01")
+    inv = Investments(db)
+    sid = inv.add_security(st, "1717", "長興")
+    db.add_journal("2025-09-03", "買入 長興", [
+        {"account_id": st, "debit": 92000, "security_id": sid, "shares": 2000},
+        {"account_id": bank, "credit": 92000}])
+    inv.set_prices([(sid, 47)], "2025-12-31")
+    sale = db.add_journal("2026-01-15", "賣出 長興", [
+        {"account_id": bank, "debit": 59237},
+        {"account_id": st, "credit": 46000, "security_id": sid, "shares": 1000},
+        {"special": "realized", "credit": 13237}])
+    adj = db.adjust_totals("2025-01-01", "2025-12-31")
+    # 舊版（v5）會在賣出日產生的迴轉傳票
+    rid = db.add_journal("2026-01-15", f"長興 分錄賣出：迴轉未實現評價損益，並依平均成本調整處分投資損益（V{sale:06d}）",
+                         [{"account_id": st, "credit": adj / 2}, {"special": "adjust", "debit": adj / 2}],
+                         source=f"inv:{sid}")
+    db.conn.execute("INSERT INTO attachments(txn_id, name, path, added_at) VALUES (?, 'a', 'a', 'x')", (sale,))
+    db.set_setting("closed_until", "2025-12-31")
+    db.conn.execute("PRAGMA user_version = 5")
+    db.conn.commit()
+    db.close()
+    db = Database(path)
+    assert db.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    assert os.path.exists(os.path.join(d, "v5_升級前備份_v5.db"))
+    assert not db.get_transaction(rid)
+    assert not db._q("SELECT id FROM transactions WHERE source LIKE 'inv:%' AND date >= '2026-01-01'")
+    assert abs(db.adjust_totals("2025-01-01", "2025-12-31") - adj) < 0.01      # 已結帳年度的評價不變
+    assert db.get_transaction(sale) and db._q("SELECT 1 FROM attachments WHERE txn_id = ?", (sale,))
+    assert db.get_setting("closed_until") == "2025-12-31"
+    check_books(db)
+
+
 def test_manual_valuation_on_chosen_date():
     db, inv, bank, st, sid = _plain_ledger()
     inv.add_event(sid, "buy", "2026-02-01", shares=100, price=100, cash_account_id=bank)
@@ -223,9 +373,10 @@ def test_manual_valuation_on_chosen_date():
     # 同一天重新評價取代先前市價
     inv.set_prices([(sid, 120)], "2026-03-31")
     assert abs(db.adjust_totals("2026-01-01", "2026-12-31") - 1968) < 0.01
-    # 賣出迴轉所售股份的評價，剩餘持股不重新評價
+    # 賣出不迴轉評價（v2.5.0）：已認列的 1,968 留在帳上，下次市價評價時一併調整
     inv.add_event(sid, "sell", "2026-06-01", shares=100, price=200, cash_account_id=bank)
-    assert abs(inv.holdings()[0]["unrealized"] - 984) < 0.01
+    assert abs(inv.holdings()[0]["unrealized"] - 1968) < 0.01
+    assert abs(db.adjust_totals("2026-01-01", "2026-12-31") - 1968) < 0.01
     assert investment_accounts_match(db)
     # 刪除評價後，分錄一併消失
     e = next(x for x in inv.events(sid) if x["kind"] == "price")
@@ -485,6 +636,7 @@ def random_operations(seed, steps=60):
     acc_of = {secs[0]: st, secs[1]: st, secs[2]: etf}
     cat_e = db.list_categories("expense")[0]["id"]
     cat_i = db.list_categories("income")[0]["id"]
+    cat_div = db.find_category("income", "股利")["id"]
     journals = []
 
     def day():
@@ -493,8 +645,8 @@ def random_operations(seed, steps=60):
         return (base + _dt.timedelta(days=rnd.randint(0, 200))).isoformat()
 
     for step in range(steps):
-        op = rnd.choice(["exp", "inc", "jbuy", "jbuy", "jsell", "buy", "sell", "div", "sdiv", "price",
-                         "price", "void", "reverse", "edit", "rate", "close"])
+        op = rnd.choice(["exp", "inc", "jbuy", "jbuy", "jsell", "jsell", "buy", "sell", "div", "jdiv", "sdiv",
+                         "price", "price", "void", "reverse", "edit", "rate", "close"])
         try:
             sid = rnd.choice(secs)
             q = rnd.choice([100, 500, 1000, 1500])
@@ -513,12 +665,18 @@ def random_operations(seed, steps=60):
             elif op == "jsell":
                 held = inv.replay(sid)["shares"]
                 if held:
-                    q = min(q, held)
+                    q = held if rnd.random() < .3 else min(q, held)   # 有時全數賣出
                     fee, tax = inv.fees_for(sid, "sell", q, p)
                     amt = money_round(q * p - fee - tax)
                     journals.append(db.add_journal(day(), "分錄賣出", [
                         {"account_id": bank, "debit": amt},
                         {"account_id": acc_of[sid], "credit": amt, "security_id": sid, "shares": q, "price": p}]))
+            elif op == "jdiv":
+                unit = rnd.choice([0.5, 1.2, 2.0])
+                journals.append(db.add_journal(day(), "分錄股利", [
+                    {"account_id": bank, "debit": money_round(q * unit)},
+                    {"category_id": cat_div, "credit": money_round(q * unit), "security_id": sid, "shares": q,
+                     "price": unit}]))
             elif op in ("buy", "sell"):
                 fee, tax = inv.fees_for(sid, op, q, p)
                 if op == "sell":
@@ -661,7 +819,8 @@ def test_rebuild_keeps_voucher_numbers_and_reconciliation():
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 # 經她要求、可以讓投資科目餘額改變的升級（其他帳務都必須完全相同）
-APPROVED_INVESTMENT_CHANGES = {3: "v4 買賣不再自動評價", 4: "v5 評價改以預估淨售價"}
+APPROVED_INVESTMENT_CHANGES = {3: "v4 買賣不再自動評價", 4: "v5 評價改以預估淨售價",
+                               5: "v6 賣出不再迴轉未實現評價損益"}
 
 
 def old_ledgers():
@@ -720,7 +879,12 @@ def test_journal_linked_void_and_reverse():
     assert inv.holdings()[0]["market_value"] == 10969
     assert investment_accounts_match(db)
     db.reverse_transaction(j, "2026-03-15")
-    assert not inv.holdings()
+    # 迴轉買進＝全數賣出：評價 969 留待下次市價評價歸零（v2.5.0 起賣出不迴轉評價）
+    h = inv.holdings()
+    assert len(h) == 1 and h[0]["shares"] == 0 and h[0]["market_value"] == 969, h
+    assert investment_accounts_match(db)
+    inv.add_event(sid, "price", "2026-03-31", price=110)
+    assert not inv.holdings() and db.account_summaries()[1]["balance"] == 0
     assert investment_accounts_match(db)
     assert balanced(db.trial_balance("2026-01-01", "2026-12-31"))
 
