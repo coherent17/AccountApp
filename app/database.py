@@ -29,7 +29,7 @@ import shutil
 import sqlite3
 from typing import Iterable
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 ASSET_CATEGORIES = [
     "現金", "銀行存款", "定期存款", "外幣存款", "短期投資", "股票", "基金", "債券",
@@ -439,7 +439,7 @@ class Database:
     def _restate_investments(self, version: int) -> None:
         """依新規則重編所有投資系統分錄（含已結帳期間，以維持帳與明細一致）：
         v4 起買賣不再自動評價；v5 起評價以預估淨售價（扣除賣出手續費與證交稅）計算；
-        v6 起賣出不再迴轉未實現評價損益。
+        v6 起賣出不再迴轉未實現評價損益；v7 起分錄賣出不產生任何系統分錄（以使用者貸記金額為出售成本）。
         重編前的資料已留在升級前備份；銀行對帳勾選與憑證附件會接回重編後的傳票。"""
         from .investments import Investments
         inv = Investments(self)

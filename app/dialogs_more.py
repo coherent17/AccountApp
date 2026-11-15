@@ -15,7 +15,7 @@ from .context import AppContext
 from .database import (CLOSING, CLOSING_SOURCE, INVESTMENT_CATEGORIES, TYPE_LABELS, fmt_shares, money_round,
                        voucher_no)
 from .dialogs import BaseDialog, fill_account_combo, open_path
-from .investments import Investments
+from .investments import KIND_LABELS, Investments
 from .theme import C, fmt_date, fmt_money, fmt_num, icon
 from .widgets import (AmountEdit, Column, DataTable, ask, button, error, info, iso,
                       make_date_edit, section_title)
@@ -210,6 +210,11 @@ class JournalDialog(BaseDialog):
             void = button("作廢這張傳票", "Danger", icon("trash", C.expense))
             void.clicked.connect(self.void)
             bar.addWidget(void)
+        if txn and not txn["void"] and txn["source"].startswith("inv:"):
+            self.del_sys = button("刪除這張傳票", "Danger", icon("trash", C.expense),
+                                  tooltip="一併刪除產生這張傳票的投資管理交易")
+            self.del_sys.clicked.connect(self.delete_system_voucher)
+            bar.addWidget(self.del_sys)
         if txn:
             pr = button("列印傳票", icon=icon("list"))
             pr.clicked.connect(self.print_voucher)
@@ -244,7 +249,7 @@ class JournalDialog(BaseDialog):
             why = ("此傳票已作廢。" if txn["void"] else
                    "這是年度結帳分錄：損益科目結轉本期損益，只記錄於日記簿、不影響報表金額。"
                    "如需更正該年度，請先到「設定」解除結帳。" if self.closing else
-                   "此傳票由「投資管理」自動產生，請到投資管理修改交易。")
+                   "此傳票由「投資管理」自動產生，不能修改；可按「刪除這張傳票」連同該筆投資交易一併刪除。")
             self.show_error(why)
         self.update_totals()
 
@@ -616,6 +621,23 @@ class JournalDialog(BaseDialog):
         self.ctx.toast.emit("傳票已作廢")
         self.accept()
 
+    def delete_system_voucher(self) -> None:
+        ev = self.inv.voucher_event(self.txn["id"])
+        what = ""
+        if ev:
+            sec = self.inv.get_security(ev["security_id"])
+            what = f"（{fmt_date(ev['date'])} {sec['name']} {KIND_LABELS.get(ev['kind'], ev['kind'])}）"
+        if not ask(self, f"刪除 {voucher_no(self.txn['id'])} 會一併刪除產生它的投資管理交易{what}，"
+                         "系統會重算之後的成本與分錄。確定要刪除嗎？", yes="刪除", danger=True):
+            return
+        try:
+            self.inv.delete_vouchers([self.txn["id"]])
+        except ValueError as e:
+            self.show_error(str(e))
+            return
+        self.ctx.changed()
+        self.ctx.toast.emit(f"已刪除 {voucher_no(self.txn['id'])}")
+        self.accept()
 
 # ====================================================================== 分錄範本
 class TemplateEditDialog(BaseDialog):

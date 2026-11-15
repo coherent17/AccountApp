@@ -189,7 +189,8 @@ class TransactionsPage(Page):
         fl.addWidget(exp)
         foot.lay.addLayout(fl)
         tip = QLabel("小技巧：按兩下即可修改；按右鍵可複製、迴轉、作廢或設為定期交易。"
-                     "作廢的傳票保留在帳上並留有修改紀錄，不會真的刪除。")
+                     "作廢的傳票保留在帳上並留有修改紀錄，不會真的刪除。"
+                     "「投資」類型的傳票由投資管理自動產生，選取後按「作廢」即可刪除（一併刪除該筆投資交易）。")
         tip.setObjectName("Hint")
         foot.lay.addWidget(tip)
         b.addWidget(foot)
@@ -324,6 +325,13 @@ class TransactionsPage(Page):
         rows = [r for r in self.table.selected_rows() if not r["void"]]
         if not rows:
             return
+        sys_rows = [r for r in rows if r["source"].startswith("inv:")]
+        if sys_rows:
+            if len(sys_rows) < len(rows):
+                info(self, "「投資」類型的傳票是刪除而不是作廢，請將它們與其他傳票分開選取。")
+                return
+            self.delete_inv_vouchers(sys_rows)
+            return
         reason = ask_void_reason(self.window(), len(rows))
         if reason is None:
             return
@@ -334,6 +342,32 @@ class TransactionsPage(Page):
             return
         self.ctx.changed()
         self.ctx.toast.emit(f"已作廢 {len(rows)} 筆傳票")
+
+    def delete_inv_vouchers(self, rows: list[dict]) -> None:
+        """投資管理自動產生的傳票：刪除產生它的投資交易，之後的成本與分錄自動重算。"""
+        from ..investments import KIND_LABELS, Investments
+        from ..widgets import ask
+        inv = Investments(self.db)
+        desc = []
+        for r in rows:
+            ev = inv.voucher_event(r["id"])
+            if ev:
+                sec = inv.get_security(ev["security_id"])
+                desc.append(f"{voucher_no(r['id'])}：{fmt_date(ev['date'])} {sec['name']} "
+                            f"{KIND_LABELS.get(ev['kind'], ev['kind'])}")
+            else:
+                desc.append(f"{voucher_no(r['id'])}：{r['note']}")
+        if not ask(self, "這是「投資管理」自動產生的傳票。刪除後，產生它的投資交易也會一併刪除，"
+                         "系統會重算之後的成本與分錄：\n\n" + "\n".join(desc) + "\n\n確定要刪除嗎？",
+                   yes="刪除", danger=True):
+            return
+        try:
+            n = inv.delete_vouchers([r["id"] for r in rows])
+        except ValueError as e:
+            error(self, str(e))
+            return
+        self.ctx.changed()
+        self.ctx.toast.emit(f"已刪除 {n} 筆投資交易及其傳票")
 
     def unvoid(self, row: dict) -> None:
         try:
@@ -383,8 +417,11 @@ class TransactionsPage(Page):
                       ("複製一筆（日期改為今天）", "copy", lambda: self.copy_txn(row))]
             if row["type"] in ("income", "expense", "transfer"):
                 items.append(("設為定期交易…", "restore", lambda: self.make_recurring(row)))
-            items += [None, ("迴轉（產生反向分錄）", "refresh", lambda: self.reverse(row)),
-                      ("作廢", "trash", self.void_selected)]
+            if row["source"].startswith("inv:"):
+                items += [None, ("刪除（一併刪除投資管理的交易）", "trash", self.void_selected)]
+            else:
+                items += [None, ("迴轉（產生反向分錄）", "refresh", lambda: self.reverse(row)),
+                          ("作廢", "trash", self.void_selected)]
         items += [None, ("修改紀錄", "eye", lambda: AuditDialog(self.ctx, row["id"], self.window()).exec())]
         for it in items:
             if it is None:
