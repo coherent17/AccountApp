@@ -112,6 +112,10 @@ class MainWindow(QMainWindow):
         exp.clicked.connect(self.export)
         sl.addWidget(exp)
         sl.addSpacing(10)
+        from .netstatus import NetStatus
+        self.net = NetStatus()
+        self.net.changed.connect(self._net_changed)
+        sl.addWidget(self.net)
         foot = QLabel(f"版本 {APP_VERSION}\n資料僅存於本機")
         foot.setObjectName("SidebarFoot")
         sl.addWidget(foot)
@@ -166,6 +170,14 @@ class MainWindow(QMainWindow):
     def export(self) -> None:
         ExportDialog(self.ctx, self).exec()
 
+    def _net_changed(self, online: bool) -> None:
+        """連上網路時，若今天還沒自動檢查新版本（且已開啟），就在背景檢查一次。"""
+        if not online:
+            return
+        from .dialogs_update import auto_check_due, check_for_updates
+        if auto_check_due(self.ctx):
+            check_for_updates(self.ctx, self, silent=True)
+
     def open_search(self) -> None:
         from .dialogs_search import SearchDialog
         if self._search is None:
@@ -179,6 +191,7 @@ class MainWindow(QMainWindow):
         apply_theme(QApplication.instance(), self.ctx)
 
     def closeEvent(self, e):
+        self.net.stop()
         self.ctx.db.close()
         super().closeEvent(e)
 
@@ -264,6 +277,7 @@ def main() -> int:
     win.show()
     shot_dir = os.environ.get("MY_LEDGER_SMOKE_DIR")
     if shot_dir:
+        win.net.start(0)
         _smoke_test(app, ctx, win, shot_dir)
         return app.exec()
     if ctx.db.get_setting("first_run_done") != "1" and not ctx.db.list_accounts(include_archived=True):
@@ -282,7 +296,5 @@ def main() -> int:
             from PySide6.QtCore import QTimer as _T
             from .dialogs_more import DueRecurringDialog
             _T.singleShot(600, lambda: DueRecurringDialog(ctx, due, win).exec())
-    from .dialogs_update import auto_check_due, check_for_updates
-    if auto_check_due(ctx):
-        QTimer.singleShot(4000, lambda: check_for_updates(ctx, win, silent=True))
+    win.net.start()      # 網路狀態：開啟後檢查一次，之後每 5 分鐘；連上時順便做每日的新版本檢查
     return app.exec()

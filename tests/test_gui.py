@@ -889,6 +889,37 @@ try:
 except OSError:
     pass
 assert open(exe_p, "rb").read() == b"new"                                            # 失敗時原程式不變
+
+# 網路狀態燈號：離線／已連線；連上網路時若今天尚未自動檢查新版本，會在背景檢查一次
+from app import netstatus  # noqa: E402
+
+
+def _probe_once(result):
+    netstatus.probe = lambda timeout=4.0: result
+    win.net.check_now()
+    win.net._job.wait(5000)
+    for _ in range(5):
+        app.processEvents()
+
+
+assert "檢查中" in win.net.text() and win.net.online is None
+_orig_probe, _orig_cfu = netstatus.probe, dialogs_update.check_for_updates
+calls = []
+dialogs_update.check_for_updates = lambda c, p, silent=False: calls.append(silent)
+db.set_setting("update_auto", "1")
+db.set_setting("update_last_check", "")
+_probe_once(False)
+assert win.net.online is False and "離線" in win.net.text() and "照常使用" in win.net.toolTip() and calls == []
+_probe_once(True)
+assert win.net.online is True and "已連線" in win.net.text() and calls == [True]
+_probe_once(True)
+assert calls == [True]                                   # 狀態沒變就不重複檢查
+db.set_setting("update_auto", "0")
+_probe_once(False)
+_probe_once(True)
+assert calls == [True]                                   # 未開啟自動檢查時不連線查版本
+netstatus.probe, dialogs_update.check_for_updates = _orig_probe, _orig_cfu
+assert win.net._timer.interval() == 5 * 60 * 1000
 print("SEARCH / UPDATE GUI TESTS PASSED")
 
 
