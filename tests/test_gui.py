@@ -340,7 +340,7 @@ assert db.conn.execute("SELECT COUNT(*) FROM transactions WHERE source LIKE 'inv
 ip.refresh()
 sell = next(e for e in ip.ev.model_.rows if e["kind"] == "jsell" and e["security_id"] == sec_id)
 assert (sell["fee"], sell["tax"]) == (20, 41), sell          # 13,900 − 13,839 ＝ 61 ＝ 20＋41（不是 1,400）
-ip.year.setCurrentText(today[:4])
+ip.real_period.preset.setCurrentText("全部")
 ip.load_realized()
 heads = [ip.real.model_.headerData(i, _Qt.Orientation.Horizontal) for i in range(ip.real.model_.columnCount())]
 assert "股數" in heads, heads
@@ -359,14 +359,14 @@ assert next(a for a in db.account_summaries() if a["id"] == lt["id"])["balance"]
 held = next(h for h in inv.holdings() if h["shares"] > 0)
 d2 = (_dtm.date.today() + _dtm.timedelta(days=2)).isoformat()
 inv.set_prices([(held["id"], round(held["avg_cost"] * 1.2, 2) or 10)], d2)
-vid = db._q1("SELECT id FROM transactions WHERE source = ? AND date = ?", (f"inv:{held['id']}", d2))["id"]
+vid = db._q1("SELECT id FROM transactions WHERE source = 'inv:val' AND date = ?", (d2,))["id"]
 jd3 = JournalDialog(ctx, db.get_transaction(vid), parent=win)
 assert jd3.readonly and jd3.del_sys.isEnabled() and "刪除這張傳票" in jd3.msg.text()
 jd3.delete_system_voucher()
 assert not db.get_transaction(vid), jd3.msg.text()
 assert not any(e["kind"] == "price" and e["date"] == d2 for e in inv.events(held["id"]))
 inv.set_prices([(held["id"], round(held["avg_cost"] * 1.3, 2) or 10)], d2)
-vid = db._q1("SELECT id FROM transactions WHERE source = ? AND date = ?", (f"inv:{held['id']}", d2))["id"]
+vid = db._q1("SELECT id FROM transactions WHERE source = 'inv:val' AND date = ?", (d2,))["id"]
 tp = win.pages["transactions"]
 tp.clear_filters()
 tp.d1.setDate(QDate.fromString(d2, "yyyy-MM-dd"))
@@ -381,6 +381,89 @@ assert not db.get_transaction(vid)
 _acc = held["account_id"]
 assert abs(next(a for a in db.account_summaries() if a["id"] == _acc)["balance"]
            - sum(h["market_value"] for h in inv.holdings() if h["account_id"] == _acc)) < 0.01
+
+# 1151121 Q1：持股明細至少完整顯示 5 檔；持股比重區域縮小
+assert ip.hold.minimumHeight() >= 5 * 44 + 50 and ip.donut.parentWidget().maximumHeight() <= 240
+# Q5：單價可輸入到小數第 3 位（0.866 不會變成 0.87）
+jd5 = JournalDialog(ctx, parent=win)
+c5 = jd5.table.cellWidget(0, 3)
+c5.price.setText("0.866")
+c5.price._normalize()
+assert c5.price.value() == 0.866 and c5.price.text() == "0.866", c5.price.text()
+c5.shares.setText("1234.5678")
+c5.shares._normalize()
+assert c5.shares.value() == 1234.5678, c5.shares.value()
+jd5.reject()
+# Q2：交易紀錄單價顯示到小數第 3 位
+ip.refresh()
+price_col = next(i for i in range(ip.ev.model_.columnCount())
+                 if ip.ev.model_.headerData(i, _Qt.Orientation.Horizontal) == "價格")
+txt = [ip.ev.model_.data(ip.ev.model_.index(i, price_col)) for i in range(ip.ev.model_.rowCount())]
+assert any(t and t.count(".") == 1 and len(t.split(".")[1]) == 3 for t in txt), txt[:5]
+# Q6：交易紀錄、已實現損益依期間篩選；持股明細可選截至日期
+ip.ev_period.d1.setDate(QDate(2000, 1, 1))
+ip.ev_period.d2.setDate(QDate(2000, 12, 31))
+assert ip.ev_period.preset.currentText() == "自訂期間" and ip.ev.model_.rowCount() == 0
+ip.ev_period.preset.setCurrentText("全部")
+assert ip.ev.model_.rowCount() > 0
+ip.real_period.d1.setDate(QDate(2000, 1, 1))
+ip.real_period.d2.setDate(QDate(2000, 12, 31))
+assert ip.real.model_.rowCount() == 0 and "2000" in ip.real_sum.text()
+ip.real_period.preset.setCurrentText("全部")
+ip.as_of.setDate(QDate(2000, 1, 1))
+assert ip.hold.model_.rowCount() == 0
+ip._as_of_latest()
+assert ip.hold.model_.rowCount() == len(inv.holdings())
+# Q3／Q4：標的設定列出所有標的；類型可新增、修改，標的選類型帶入費率
+from app.dialogs_invest import SecurityDialog, SecurityListDialog, SecurityTypesDialog  # noqa: E402
+sl = SecurityListDialog(ctx, win)
+assert sl.table.model_.rowCount() == len(inv.list_securities(include_archived=True))
+sl.reject()
+td = SecurityTypesDialog(ctx, win)
+n_types = td.table.rowCount()
+td.add_row()
+td.table.cellWidget(n_types, 0).setText("股票 6 折")
+td.table.cellWidget(n_types, 1).setValue(0.0855)
+td.table.cellWidget(n_types, 3).setValue(0.3)
+td.save()
+assert "股票 6 折" in [t["name"] for t in inv.security_types()], td.msg.text()
+sd = SecurityDialog(ctx, inv.get_security(held["id"]), win)
+sd.kind.setCurrentIndex(sd.kind.findData("股票 6 折"))
+sd._kind_chosen()
+assert abs(sd.fee_rate.value() - 0.0855) < 1e-9 and abs(sd.tax_rate.value() - 0.3) < 1e-9
+sd.fee_min.setValue(1)
+assert sd.kind.currentData() == ""        # 改了費率 → 自訂
+sd.kind.setCurrentIndex(sd.kind.findData("股票 6 折"))
+sd._kind_chosen()
+sd.save()
+hs = inv.get_security(held["id"])
+assert hs["type_name"] == "股票 6 折" and hs["fee_rate"] == 0.000855, dict(hs)
+# Q7：外幣科目輸入原幣金額與匯率，自動換算本位幣，原幣累計到科目
+jpy = db.add_account("台銀活存 JPY", "asset", "外幣存款", currency="JPY", rate=0.21, opening_balance=0,
+                     opening_date="2026-01-01")
+inc = db.list_categories("income")[0]
+jd7 = JournalDialog(ctx, parent=win)
+jd7.table.setRowCount(0)
+jd7.add_row(("account", jpy))
+jd7.add_row(("category", inc["id"]))
+c7 = jd7.table.cellWidget(0, 3)
+assert c7.fx_on and c7.fx_orig.isVisibleTo(jd7) and not c7.sec.isVisibleTo(jd7) and c7.fx_cur.text() == "JPY"
+assert c7.fx_rate.value() == 0.21
+c7.fx_orig.setText("500")
+c7.fx_orig.textEdited.emit("500")
+c7.fx_rate.setText("0.211")
+c7.fx_rate.textEdited.emit("0.211")
+assert jd7.table.cellWidget(0, 1).value() == 105.5, jd7.table.cellWidget(0, 1).value()
+jd7.auto_balance()
+jd7.note.setText("JPY 活存利息")
+jd7.save()
+assert jd7.saved, jd7.msg.text()
+assert next(a for a in db.account_summaries() if a["id"] == jpy)["balance"] == 500
+tid7 = db._q1("SELECT id FROM transactions WHERE note = 'JPY 活存利息'")["id"]
+jd8 = JournalDialog(ctx, db.get_transaction(tid7), parent=win)
+c8 = jd8.table.cellWidget(0, 3)
+assert c8.fx_orig.value() == 500 and abs(c8.fx_rate.value() - 0.211) < 1e-9
+jd8.reject()
 
 # Q1 日期可直接輸入（西元、民國、無分隔、只打月日）
 from PySide6.QtCore import QDate, Qt as _Qt  # noqa: E402

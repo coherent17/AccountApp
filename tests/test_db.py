@@ -427,7 +427,7 @@ def test_delete_system_vouchers():
     v = adjust_vouchers(db)
     assert len(v) == 2
     n_events = len(db._q("SELECT id FROM sec_events"))
-    assert inv.voucher_event(v[0]["id"])["date"] == "2025-12-31"
+    assert [e["date"] for e in inv.voucher_events(v[0]["id"])] == ["2025-12-31"]
     assert inv.delete_vouchers([v[0]["id"]]) == 1
     assert len(db._q("SELECT id FROM sec_events")) == n_events - 1
     left = adjust_vouchers(db)
@@ -486,6 +486,100 @@ def test_migration_v6_drops_journal_sell_adjustments():
     assert not db._q("SELECT id FROM transactions WHERE source LIKE 'inv:%'")
     assert inv.holdings()[0]["cost"] == 46716 and investment_accounts_match(db)
     assert abs(db.realized_totals("2026-01-01", "2026-12-31") - 13172) < 0.01
+    check_books(db)
+
+
+def test_valuations_share_one_voucher_per_day():
+    """1151121 Q8：同一天的市價評價，所有標的合併在同一張傳票（每行備註為標的與市價）。"""
+    db, inv, bank, st, sid = _plain_ledger()
+    s2 = inv.add_security(st, "2330", "台積電")
+    s3 = inv.add_security(st, "0056", "元大高股息")
+    for x, price in ((sid, 50), (s2, 900), (s3, 35)):
+        inv.add_event(x, "buy", "2026-02-01", shares=1000, price=price, cash_account_id=bank)
+    inv.set_prices([(sid, 55), (s2, 1000), (s3, 36)], "2026-03-31")
+    vals = db._q("SELECT * FROM transactions WHERE source = 'inv:val'")
+    assert len(vals) == 1 and vals[0]["date"] == "2026-03-31" and "3 檔" in vals[0]["note"], vals
+    memos = {ln["memo"] for ln in db.get_lines(vals[0]["id"])}
+    assert any("台積電" in m for m in memos) and any("元大高股息" in m for m in memos), memos
+    assert investment_accounts_match(db) and balanced(db.get_lines(vals[0]["id"]))
+    unreal = sum(h["unrealized"] for h in inv.holdings())
+    assert abs(db.adjust_totals("2026-01-01", "2026-12-31") - unreal) < 0.01
+    # 之後只改一檔的市價：同一張傳票、號碼不變
+    inv.set_prices([(s2, 1010)], "2026-03-31")
+    again = db._q("SELECT * FROM transactions WHERE source = 'inv:val'")
+    assert [v["id"] for v in again] == [vals[0]["id"]] and investment_accounts_match(db)
+    # 另一天的評價是另一張傳票
+    inv.set_prices([(sid, 60)], "2026-04-30")
+    assert len(db._q("SELECT id FROM transactions WHERE source = 'inv:val'")) == 2
+    # 刪除合併傳票＝刪除當天所有標的的市價評價
+    assert inv.delete_vouchers([vals[0]["id"]]) == 3
+    assert not db._q("SELECT id FROM sec_events WHERE kind = 'price' AND date = '2026-03-31'")
+    assert investment_accounts_match(db)
+    check_books(db)
+
+
+def test_migration_v7_combines_valuations_and_types():
+    """v8 升級：v2.6.0 帳本中各標的分開的評價傳票合併為一張；既有標的依費率歸入類型。"""
+    import shutil
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "理財帳本.db")
+    shutil.copy(os.path.join(FIXTURES, "ledger_v2.6.0.db"), path)
+    old = sqlite3.connect(path)
+    before = old.execute("SELECT id FROM transactions WHERE source LIKE 'inv:%' AND date = '2025-11-28'").fetchall()
+    old.close()
+    assert len(before) == 3, before
+    db = Database(path)
+    inv = Investments(db)
+    vals = db._q("SELECT id, source FROM transactions WHERE source LIKE 'inv:%' AND date = '2025-11-28'")
+    assert len(vals) == 1 and vals[0]["source"] == "inv:val" and vals[0]["id"] == min(r[0] for r in before)
+    types = {s["code"]: s["type_name"] for s in inv.list_securities(include_archived=True)}
+    assert types["3715"] == "股票" and types["0050"] == "ETF", types
+    assert investment_accounts_match(db)
+    check_books(db)
+
+
+def test_security_types_editable():
+    """1151121 Q3／Q4：類型可新增、修改；屬於該類型的標的改用新費率，評價依新費率重算。"""
+    db, inv, bank, st, sid = _plain_ledger()
+    s2 = inv.add_security(st, "2330", "台積電", type_name="股票")
+    inv.add_event(s2, "buy", "2026-02-01", shares=1000, price=100, cash_account_id=bank)
+    inv.set_prices([(s2, 130.5)], "2026-03-31")
+    assert [t["name"] for t in inv.security_types()] == ["股票", "ETF", "債券 ETF"]
+    rows = [dict(t, old=t["name"]) for t in inv.security_types()]
+    rows[0].update(name="股票（6 折）", fee_rate=0.000855)
+    rows.append({"name": "美股", "old": "", "fee_rate": 0.001, "fee_min": 0, "tax_rate": 0})
+    assert inv.save_security_types(rows) == []
+    sec = inv.get_security(s2)
+    assert sec["type_name"] == "股票（6 折）" and sec["fee_rate"] == 0.000855, dict(sec)
+    # 130,500 − 手續費 111（6 折）− 證交稅 391
+    assert inv.holdings()[0]["market_value"] == 130500 - 111 - 391
+    assert investment_accounts_match(db)
+    assert [t["name"] for t in inv.security_types()][-1] == "美股"
+    # 刪除類型：標的改為自訂，費率保留
+    inv.save_security_types([dict(t, old=t["name"]) for t in inv.security_types() if t["name"] != "股票（6 折）"])
+    sec = inv.get_security(s2)
+    assert sec["type_name"] == "" and sec["fee_rate"] == 0.000855
+    for bad in ([{"name": "", "old": "", "fee_rate": 0, "fee_min": 0, "tax_rate": 0}],
+                [{"name": "A", "old": "", "fee_rate": 0, "fee_min": 0, "tax_rate": 0}] * 2,
+                [{"name": "A", "old": "", "fee_rate": 0.5, "fee_min": 0, "tax_rate": 0}]):
+        try:
+            inv.save_security_types(bad)
+            raise AssertionError(bad)
+        except ValueError:
+            pass
+
+
+def test_journal_foreign_currency_original_amount():
+    """1151121 Q7：複式分錄的外幣科目可輸入原幣金額（匯率＝本位幣÷原幣），原幣累計到科目原幣餘額。"""
+    db, inv, bank, st, sid = _plain_ledger()
+    jpy = db.add_account("台銀活存 JPY", "asset", "外幣存款", currency="JPY", rate=0.21,
+                         opening_balance=10000, opening_date="2026-01-01")
+    interest = db.find_category("income", "利息") or db.list_categories("income")[0]
+    db.add_journal("2026-02-22", "JPY 活存利息", [
+        {"account_id": jpy, "debit": 105.5, "orig": 500},
+        {"category_id": interest["id"], "credit": 105.5}])
+    acc = next(a for a in db.account_summaries() if a["id"] == jpy)
+    assert abs(acc["balance"] - 10500) < 0.01, acc
     check_books(db)
 
 
@@ -927,8 +1021,7 @@ def test_rebuild_keeps_voucher_numbers_and_reconciliation():
     e1 = inv.add_event(sid, "buy", "2026-02-01", shares=100, price=100, fee=20, cash_account_id=bank)
     inv.add_event(sid, "buy", "2026-03-01", shares=100, price=110, fee=20, cash_account_id=bank)
     inv.set_prices([(sid, 120)], "2026-03-31")
-    ids = {t["date"]: t["id"] for t in db._q("SELECT id, date FROM transactions WHERE source = ?",
-                                              (f"inv:{sid}",))}
+    ids = {t["date"]: t["id"] for t in db._q("SELECT id, date FROM transactions WHERE source LIKE 'inv:%'")}
     rid = db.conn.execute("INSERT INTO reconciliations(account_id, statement_date, statement_balance, created_at)"
                           " VALUES (?, '2026-03-31', 0, 'x')", (bank,)).lastrowid
     db.conn.execute("INSERT INTO recon_items VALUES (?, ?, ?)", (rid, ids["2026-03-01"], bank))
@@ -936,16 +1029,14 @@ def test_rebuild_keeps_voucher_numbers_and_reconciliation():
     # 在最前面補一筆交易、並改評價市價：之後的傳票號碼與對帳勾選都不變
     inv.add_event(sid, "buy", "2026-01-15", shares=50, price=90, fee=20, cash_account_id=bank)
     inv.set_prices([(sid, 125)], "2026-03-31")
-    now = {t["date"]: t["id"] for t in db._q("SELECT id, date FROM transactions WHERE source = ?",
-                                              (f"inv:{sid}",))}
+    now = {t["date"]: t["id"] for t in db._q("SELECT id, date FROM transactions WHERE source LIKE 'inv:%'")}
     for d in ("2026-02-01", "2026-03-01", "2026-03-31"):
         assert now[d] == ids[d], (d, now[d], ids[d])
     assert "2026-01-15" in now and now["2026-01-15"] > max(ids.values())
     assert [r["txn_id"] for r in db._q("SELECT txn_id FROM recon_items")] == [ids["2026-03-01"]]
     # 刪除交易：該傳票消失，其餘號碼不變
     inv.delete_event(e1)
-    left = {t["date"]: t["id"] for t in db._q("SELECT id, date FROM transactions WHERE source = ?",
-                                               (f"inv:{sid}",))}
+    left = {t["date"]: t["id"] for t in db._q("SELECT id, date FROM transactions WHERE source LIKE 'inv:%'")}
     assert "2026-02-01" not in left and left["2026-03-01"] == ids["2026-03-01"]
     assert investment_accounts_match(db)
 
