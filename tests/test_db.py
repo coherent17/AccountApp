@@ -1340,6 +1340,51 @@ def test_month_keys():
     assert month_keys("2025-11-15", "2026-02-01") == ["2025-11", "2025-12", "2026-01", "2026-02"]
 
 
+def test_global_search():
+    """全域搜尋：文字、金額、傳票號碼、日期（含民國）、科目代號、標的、附件與定期交易，多個關鍵字為 AND。"""
+    from app.search import search
+    db, inv, bank, st, sid = _plain_ledger()
+    food = db.find_category("expense", "餐飲")
+    t1 = db.add_transaction(date="2026-03-05", type="expense", account_id=bank, amount=1500, category_id=food["id"], note="全聯採買")
+    t2 = db.add_transaction(date="2026-04-10", type="expense", account_id=bank, amount=320, category_id=food["id"], note="早餐")
+    db.add_journal("2026-03-20", "買進元大", [
+        {"account_id": st, "debit": 50000, "security_id": sid, "shares": 400, "price": 0.866},
+        {"account_id": bank, "credit": 50000}])
+    folder = tempfile.mkdtemp()
+    src = os.path.join(folder, "發票掃描.pdf")
+    with open(src, "wb") as fh:
+        fh.write(b"x")
+    db.add_attachment(t2, src, os.path.join(folder, "att"))
+    db.save_recurring(None, "月退休金", {"type": "income", "account_id": bank, "amount": 42000,
+                                      "category_id": db.list_categories("income")[0]["id"], "note": ""},
+                      "monthly", 5, "2026-01-01")
+    db.void_transactions([t2], "打錯")
+
+    def refs(q, group="傳票"):
+        return [r["ref"] if group != "傳票" else r["id"] for r in search(db, q)["rows"] if r["group"] == group]
+
+    assert refs("全聯") == [t1]
+    assert refs("1,500") == [t1] and refs("1500") == [t1]
+    assert refs(f"V{t1:06d}") == [t1] and refs(f"v{t1}") == [t1]
+    assert set(refs("2026-03")) == {t1, t1 + 2} and set(refs("115/3")) == set(refs("2026-03"))
+    assert refs("2026/03/05") == [t1]
+    assert refs("全聯 2026-04") == []                        # AND
+    assert refs("餐飲 2026-03") == [t1]
+    assert refs("0.866") and refs("0050") and refs("元大")    # 單價、標的代號、名稱
+    assert refs("發票掃描") == [t2] and refs("打錯") == [t2]    # 附件檔名、作廢原因
+    assert next(r for r in search(db, "早餐")["rows"])["void"]
+    code = db.account_codes()[st]
+    assert code in refs(code, "科目") and t1 + 2 in refs(code)
+    assert refs("0050", "投資標的") == ["0050"]
+    assert len(refs("退休金", "定期交易")) == 1 and len(refs("42000", "定期交易")) == 1
+    assert search(db, "  ")["rows"] == []
+    assert not search(db, "不存在的東西")["rows"]
+    # 只讀取：搜尋不改變任何資料
+    before = db._q1("SELECT COUNT(*) n FROM audit_log")["n"]
+    search(db, "全聯 1500 V1 2026-03")
+    assert db._q1("SELECT COUNT(*) n FROM audit_log")["n"] == before
+
+
 if __name__ == "__main__":
     failed = 0
     for k, f in list(globals().items()):

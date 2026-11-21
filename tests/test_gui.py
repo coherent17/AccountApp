@@ -5,12 +5,12 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import dialogs_chart, dialogs_more, widgets  # noqa: E402
+from app import dialogs_chart, dialogs_more, dialogs_search, dialogs_update, widgets  # noqa: E402
 from app.pages import accounts as p_acc, investments as p_inv, settings as p_set  # noqa: E402
 from app.pages import transactions as p_txn  # noqa: E402
 
 p_txn.ask_void_reason = lambda *a, **k: "測試作廢"
-for mod in (widgets, p_acc, p_set, p_txn, p_inv, dialogs_more, dialogs_chart):
+for mod in (widgets, p_acc, p_set, p_txn, p_inv, dialogs_more, dialogs_chart, dialogs_search, dialogs_update):
     for name in ("ask",):
         if hasattr(mod, name):
             setattr(mod, name, lambda *a, **k: True)
@@ -754,6 +754,144 @@ if year:
     assert year not in db.year_closings() and db.closed_until == ""
 
 
+# ---- 全域搜尋（Ctrl+F）與檢查新版本
+win.open_search()
+app.processEvents()
+sd = win._search
+assert sd.isVisible() and not sd.isModal()
+sd.box.setText("GUI 測試")
+sd.run()
+rows = sd.table.model_.rows
+assert rows and all(r["group"] == "傳票" for r in rows) and "傳票" in sd.summary.text(), rows
+opened = []
+_orig_open_voucher = dialogs_search.open_voucher
+dialogs_search.open_voucher = lambda c, i, p=None: opened.append(i)
+sd.open_row(rows[0])
+assert opened == [rows[0]["id"]]
+dialogs_search.open_voucher = _orig_open_voucher
+sd.box.setText("中信活存")
+sd.run()
+sd.scope.setCurrentText("科目")
+rows = sd.table.model_.rows
+assert rows and all(r["group"] == "科目" for r in rows)
+sd.open_row(next(r for r in rows if r["kind"] == "account"))
+app.processEvents()
+assert not sd.isVisible() and win._current_key == "reports"
+assert win.pages["reports"].ledger_acc.currentData() == acc["id"]
+win.open_search()                                # 再按 Ctrl+F：保留剛才的搜尋
+assert sd.isVisible() and sd.box.text() == "中信活存"
+sd.scope.setCurrentText("全部")
+sec0 = Investments(db).list_securities(include_archived=True)[0]
+sd.box.setText(sec0["code"] or sec0["name"])
+sd.run()
+srow = next(r for r in sd.table.model_.rows if r["kind"] == "security")
+sd.open_row(srow)
+app.processEvents()
+ipg = win.pages["investments"]
+assert win._current_key == "investments" and ipg.tabs.currentIndex() == 1
+assert ipg.ev_filter.currentData() == sec0["id"] and ipg.ev_period.preset.currentText() == "全部"
+win.open_search()
+sd.box.setText("處分投資損益")
+sd.run()
+sd.open_row(next(r for r in sd.table.model_.rows if r["kind"] == "special"))
+assert sd.scope.currentText() == "傳票"
+sd.scope.setCurrentText("全部")
+sd.box.setText("搜尋即時更新測試")
+sd.run()
+assert not sd.table.model_.rows and "找不到" in sd.summary.text()
+db.add_transaction(date="2026-01-05", type="expense", account_id=acc["id"], amount=77,
+                   category_id=db.list_categories("expense")[0]["id"], note="搜尋即時更新測試")
+ctx.changed()
+assert len(sd.table.model_.rows) == 1
+sd.box.setText("V000001")
+sd.box.returnPressed.emit()
+assert sd.table.hasFocus() or sd.table.current_row() is not None
+sd.close()
+
+from app import online  # noqa: E402
+from app.context import APP_VERSION  # noqa: E402
+assert online.is_newer("2.10.0", "2.9.9") and online.is_newer("v2.8.0", "2.7.0")
+assert not online.is_newer("2.7.0", "2.7.0") and not online.is_newer("2.6.9", "2.7.0")
+assert not online.is_newer("abc", "2.7.0") and online.parse_version("v2.7.0") == (2, 7, 0)
+rel = online.parse_release({"tag_name": "v99.0.0", "body": "## 新功能\n- 測試", "published_at": "2026-12-01T00:00:00Z",
+                            "html_url": "https://github.com/x", "assets": [
+                                {"name": "MyLedger.exe", "browser_download_url": "https://x/MyLedger.exe",
+                                 "size": 123, "digest": "sha256:ABCDEF"}]})
+assert rel["version"] == "99.0.0" and rel["sha256"] == "abcdef" and rel["size"] == 123
+try:
+    online.parse_release({"tag_name": "", "assets": []})
+    raise AssertionError("bad release accepted")
+except online.OfflineError:
+    pass
+shown, msgs = [], []
+_orig = (online.run_background, online.fetch_latest_release, dialogs_update.UpdateDialog.exec,
+         dialogs_update.info, dialogs_update.error)
+online.run_background = lambda owner, fn, ok, fail: ok(fn())
+dialogs_update.UpdateDialog.exec = lambda self: shown.append(self.rel["version"]) or 0
+dialogs_update.info = lambda *a, **k: msgs.append(("info", a[1]))
+dialogs_update.error = lambda *a, **k: msgs.append(("error", a[1]))
+online.fetch_latest_release = lambda: rel
+spg = win.pages["settings"]
+spg.refresh()
+assert not spg.update_auto.isChecked() and not dialogs_update.auto_check_due(ctx)   # 預設關閉
+spg.update_auto.setChecked(True)
+assert db.get_setting("update_auto") == "1" and dialogs_update.auto_check_due(ctx)
+spg.check_update()
+assert shown == ["99.0.0"] and not dialogs_update.auto_check_due(ctx)              # 今天已檢查
+db.set_setting("update_skip", "99.0.0")
+dialogs_update.check_for_updates(ctx, win, silent=True)
+assert shown == ["99.0.0"]                                                           # 已略過的版本不再自動提醒
+spg.check_update()
+assert shown == ["99.0.0", "99.0.0"]                                                 # 手動檢查仍會顯示
+online.fetch_latest_release = lambda: dict(rel, version=APP_VERSION)
+spg.check_update()
+assert msgs[-1][0] == "info" and "最新版本" in msgs[-1][1]
+
+
+def _offline():
+    raise online.OfflineError("無法連線")
+
+
+online.run_background = lambda owner, fn, ok, fail: _run_safe(fn, ok, fail)
+
+
+def _run_safe(fn, ok, fail):
+    try:
+        ok(fn())
+    except online.OfflineError as e:
+        fail(str(e))
+
+
+online.fetch_latest_release = _offline
+n = len(msgs)
+dialogs_update.check_for_updates(ctx, win, silent=True)
+assert len(msgs) == n                                                                # 自動檢查失敗不打擾
+spg.check_update()
+assert msgs[-1] == ("error", "無法連線")
+ud = dialogs_update.UpdateDialog(ctx, dict(rel, version="98.0.0"), win)
+assert not ud.now.isVisible() and not dialogs_update.can_self_update()               # 開發環境只提供瀏覽器下載
+ud.skip_version()
+assert db.get_setting("update_skip") == "98.0.0"
+(online.run_background, online.fetch_latest_release, dialogs_update.UpdateDialog.exec,
+ dialogs_update.info, dialogs_update.error) = _orig
+spg.update_auto.setChecked(False)
+# 換檔：目前的程式改名為 .old，新檔換上原檔名；失敗時還原
+ex_dir = tempfile.mkdtemp()
+exe_p, new_p = os.path.join(ex_dir, "MyLedger.exe"), os.path.join(ex_dir, "MyLedger_new.exe")
+for path_, data_ in ((exe_p, b"old"), (new_p, b"new"), (exe_p + ".old", b"older")):
+    with open(path_, "wb") as fh_:
+        fh_.write(data_)
+dialogs_update.install(new_p, exe_p)
+assert open(exe_p, "rb").read() == b"new" and open(exe_p + ".old", "rb").read() == b"old"
+try:
+    dialogs_update.install(os.path.join(ex_dir, "missing.exe"), exe_p)
+    raise AssertionError("install of a missing file succeeded")
+except OSError:
+    pass
+assert open(exe_p, "rb").read() == b"new"                                            # 失敗時原程式不變
+print("SEARCH / UPDATE GUI TESTS PASSED")
+
+
 # ---- 每個已發行版本建立的帳本：以目前程式開啟主視窗、所有頁面與分頁、匯出與列印都不出錯
 import shutil  # noqa: E402
 from app.context import AppContext  # noqa: E402
@@ -775,6 +913,11 @@ for name in sorted(f for f in os.listdir(FIX) if f.startswith("ledger_v") and f.
         for i2 in range(tabs.count()):
             tabs.setCurrentIndex(i2)
             app.processEvents()
+    w2.open_search()
+    w2._search.box.setText("2025")
+    w2._search.run()
+    assert w2._search.table.model_.rows, name
+    w2._search.close()
     export_workbook(c2.db, os.path.join(d, "old.xlsx"), "2025-01-01", "2025-12-31")
     Report(c2.db).build([k for k, _ in _REPORTS], "2025-01-01", "2025-12-31")
     w2.close()
