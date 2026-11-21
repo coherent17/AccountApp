@@ -324,6 +324,14 @@ class InvestmentsPage(Page):
         self.tabs.setCurrentIndex(1)
         self.ev_filter.setCurrentIndex(max(0, self.ev_filter.findData(sid)))
 
+    def apply_filter(self, security_id=None, **_):
+        """由全域搜尋開啟：顯示該標的的全部交易紀錄。"""
+        if security_id is None:
+            return
+        self.refresh()
+        self.ev_period.preset.setCurrentText("全部")
+        self.show_events(security_id)
+
     def add_security(self) -> None:
         SecurityDialog(self.ctx, parent=self.window()).exec()
 

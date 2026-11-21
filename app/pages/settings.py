@@ -170,10 +170,22 @@ class SettingsPage(Page):
         gl.addWidget(self.online, 1, 1, 1, 3)
         oh = QLabel("開啟後，「市價評價」與「更新匯率」會多一個「從網路取得」按鈕。只會下載公開資料、不會上傳任何個人資料；"
                     "股價來源為臺灣證券交易所與櫃買中心官方開放資料，匯率為 ExchangeRate-API 國際參考匯率。"
-                    "沒有網路時仍可手動輸入，所有功能都不受影響。關閉時程式完全不連網。")
+                    "沒有網路時仍可手動輸入，所有功能都不受影響。關閉時不會連網取得匯率與股價。")
         oh.setObjectName("Hint")
         oh.setWordWrap(True)
         gl.addWidget(oh, 2, 1, 1, 3)
+        gl.addWidget(QLabel("版本更新"), 3, 0)
+        self.update_auto = QCheckBox("開啟程式時自動檢查是否有新版本（一天最多一次）")
+        self.update_auto.toggled.connect(self.set_update_auto)
+        gl.addWidget(self.update_auto, 3, 1, 1, 2)
+        chk = button("立即檢查新版本", icon=icon("refresh"))
+        chk.clicked.connect(self.check_update)
+        gl.addWidget(chk, 3, 3)
+        uh = QLabel(f"目前版本 {APP_VERSION}。檢查時只會向 GitHub 查詢最新版本號碼；有新版本時會顯示更新內容，"
+                    "按「立即更新」就會自動下載、換成新版並重新開啟，帳本資料不會變動（更新前會先備份）。")
+        uh.setObjectName("Hint")
+        uh.setWordWrap(True)
+        gl.addWidget(uh, 4, 1, 1, 3)
         gl.setColumnStretch(1, 1)
         b.addWidget(g)
 
@@ -233,6 +245,9 @@ class SettingsPage(Page):
         self.online.blockSignals(True)
         self.online.setChecked(db.get_setting("online_updates", "0") == "1")
         self.online.blockSignals(False)
+        self.update_auto.blockSignals(True)
+        self.update_auto.setChecked(db.get_setting("update_auto", "0") == "1")
+        self.update_auto.blockSignals(False)
         self.anim_switch.blockSignals(True)
         self.anim_switch.setChecked(db.get_setting("animations", "1") == "1")
         self.anim_switch.blockSignals(False)
@@ -257,6 +272,14 @@ class SettingsPage(Page):
     def set_online(self, on: bool) -> None:
         self.db.set_setting("online_updates", "1" if on else "0")
         self.ctx.toast.emit("已開啟網路更新（選用）" if on else "已關閉網路更新，程式不會連線")
+
+    def set_update_auto(self, on: bool) -> None:
+        self.db.set_setting("update_auto", "1" if on else "0")
+        self.ctx.toast.emit("開啟程式時會自動檢查新版本" if on else "已關閉自動檢查新版本")
+
+    def check_update(self) -> None:
+        from ..dialogs_update import check_for_updates
+        check_for_updates(self.ctx, self.window())
 
     def set_tax_tag(self, kind: str) -> None:
         r = self._sel(kind)

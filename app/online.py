@@ -3,6 +3,7 @@
 資料來源（皆為公開資料，只下載、不上傳任何個人資料）：
 * 股價：臺灣證券交易所 OpenAPI（上市）、證券櫃檯買賣中心 OpenAPI（上櫃）— 官方開放資料。
 * 匯率：ExchangeRate-API（open.er-api.com）國際市場參考匯率（中價），與銀行牌告可能略有差異。
+* 新版本：GitHub Releases（本程式的發行頁），只讀取最新版本號碼與說明、下載新版程式。
 
 所有連線皆使用 HTTPS 並驗證憑證；無網路或逾時時拋出 OfflineError，由介面提示改用手動輸入。
 """
@@ -80,6 +81,96 @@ def fetch_tw_prices() -> dict[str, tuple[str, float]]:
     if not out:
         raise OfflineError(errors[0] if errors else "暫時無法取得股價資料，請改用手動輸入。")
     return out
+
+
+# ---------------------------------------------------------------- 新版本檢查
+REPO = "coherent17/AccountApp"
+RELEASE_API = f"https://api.github.com/repos/{REPO}/releases/latest"
+RELEASE_PAGE = f"https://github.com/{REPO}/releases/latest"
+ASSET_NAME = "MyLedger.exe"
+
+
+def parse_version(text: str) -> tuple[int, ...]:
+    """'v2.7.0' -> (2, 7, 0)；無法解析時回傳 ()。"""
+    nums = []
+    for part in (text or "").strip().lstrip("vV").split("."):
+        digits = "".join(ch for ch in part if ch.isdigit())
+        if not digits:
+            break
+        nums.append(int(digits))
+    return tuple(nums)
+
+
+def is_newer(latest: str, current: str) -> bool:
+    a, b = parse_version(latest), parse_version(current)
+    if not a or not b:
+        return False
+    n = max(len(a), len(b))
+    return a + (0,) * (n - len(a)) > b + (0,) * (n - len(b))
+
+
+def parse_release(data: dict) -> dict:
+    """GitHub API 的最新版本資料 -> 本程式需要的欄位。"""
+    tag = data.get("tag_name") or ""
+    if not parse_version(tag):
+        raise OfflineError("無法讀取最新版本資訊，請稍後再試。")
+    asset = next((a for a in data.get("assets") or [] if a.get("name") == ASSET_NAME), None)
+    digest = (asset or {}).get("digest") or ""
+    return {"version": ".".join(map(str, parse_version(tag))), "tag": tag,
+            "notes": data.get("body") or "",
+            "published": (data.get("published_at") or "")[:10],
+            "url": (asset or {}).get("browser_download_url") or "",
+            "size": int((asset or {}).get("size") or 0),
+            "sha256": digest.split(":", 1)[1].lower() if digest.startswith("sha256:") else "",
+            "page": data.get("html_url") or RELEASE_PAGE}
+
+
+def fetch_latest_release() -> dict:
+    """查詢 GitHub 上的最新版本（只下載公開的版本資訊）。"""
+    try:
+        data = json.loads(_get(RELEASE_API))
+    except ValueError as e:
+        raise OfflineError("版本資訊格式錯誤，請稍後再試。") from e
+    return parse_release(data)
+
+
+def download(url: str, dest: str, size: int = 0, sha256: str = "", progress=None) -> str:
+    """下載檔案到 dest，並以 SHA-256（或檔案大小）確認完整；失敗時刪除不完整的檔案。"""
+    import hashlib
+    import os
+    req = urllib.request.Request(url, headers=UA)
+    ctx = ssl.create_default_context()
+    h = hashlib.sha256()
+    got = 0
+    tmp = dest + ".part"
+    try:
+        with urllib.request.urlopen(req, timeout=60, context=ctx) as r, open(tmp, "wb") as fh:
+            total = size or int(r.headers.get("Content-Length") or 0)
+            while True:
+                chunk = r.read(256 * 1024)
+                if not chunk:
+                    break
+                fh.write(chunk)
+                h.update(chunk)
+                got += len(chunk)
+                if progress:
+                    progress(got, total)
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        _remove(tmp)
+        raise OfflineError("下載中斷，請確認網路後再試。") from e
+    if (sha256 and h.hexdigest() != sha256) or (size and got != size) or got == 0:
+        _remove(tmp)
+        raise OfflineError("下載的檔案不完整，已刪除，請再試一次。")
+    os.replace(tmp, dest)
+    return dest
+
+
+def _remove(path: str) -> None:
+    import os
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 class _Worker(QObject):

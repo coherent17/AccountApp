@@ -91,6 +91,14 @@ class MainWindow(QMainWindow):
             self.pages[key] = page
             self.stack.addWidget(page)
         sl.addStretch()
+        find = QPushButton("  搜尋　Ctrl+F")
+        find.setObjectName("NavButton")
+        find.setIcon(icon("search", "#C3CDE2"))
+        find.setIconSize(find.iconSize() * 1.3)
+        find.setCursor(Qt.CursorShape.PointingHandCursor)
+        find.setToolTip("一次搜尋傳票、會計科目、投資標的與定期交易（摘要、金額、傳票號碼、代號、日期…）")
+        find.clicked.connect(self.open_search)
+        sl.addWidget(find)
         quick = QPushButton("＋ 記一筆　Ctrl+N")
         quick.setObjectName("NavButton")
         quick.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -104,6 +112,10 @@ class MainWindow(QMainWindow):
         exp.clicked.connect(self.export)
         sl.addWidget(exp)
         sl.addSpacing(10)
+        from .netstatus import NetStatus
+        self.net = NetStatus()
+        self.net.changed.connect(self._net_changed)
+        sl.addWidget(self.net)
         foot = QLabel(f"版本 {APP_VERSION}\n資料僅存於本機")
         foot.setObjectName("SidebarFoot")
         sl.addWidget(foot)
@@ -119,6 +131,8 @@ class MainWindow(QMainWindow):
         ctx.settingsChanged.connect(self.apply_theme)
         QShortcut(QKeySequence("Ctrl+N"), self, activated=self.quick_add)
         QShortcut(QKeySequence("Ctrl+E"), self, activated=self.export)
+        QShortcut(QKeySequence("Ctrl+F"), self, activated=self.open_search)
+        self._search = None
         for i, (key, *_rest) in enumerate(NAV, 1):
             QShortcut(QKeySequence(f"Ctrl+{i}"), self, activated=lambda k=key: self.go(k))
         self.go("dashboard", animate=False)
@@ -156,10 +170,28 @@ class MainWindow(QMainWindow):
     def export(self) -> None:
         ExportDialog(self.ctx, self).exec()
 
+    def _net_changed(self, online: bool) -> None:
+        """連上網路時，若今天還沒自動檢查新版本（且已開啟），就在背景檢查一次。"""
+        if not online:
+            return
+        from .dialogs_update import auto_check_due, check_for_updates
+        if auto_check_due(self.ctx):
+            check_for_updates(self.ctx, self, silent=True)
+
+    def open_search(self) -> None:
+        from .dialogs_search import SearchDialog
+        if self._search is None:
+            self._search = SearchDialog(self.ctx, self)
+        self._search.show()
+        self._search.raise_()
+        self._search.activateWindow()
+        self._search.focus_box()
+
     def apply_theme(self) -> None:
         apply_theme(QApplication.instance(), self.ctx)
 
     def closeEvent(self, e):
+        self.net.stop()
         self.ctx.db.close()
         super().closeEvent(e)
 
@@ -210,6 +242,8 @@ def create_app(argv=None, db_path: str | None = None):
     app.installEventFilter(app._ripple)
     ctx = AppContext(db_path)
     _install_excepthook(ctx.folder)
+    from .dialogs_update import cleanup_old_exe
+    cleanup_old_exe()
     apply_theme(app, ctx)
     try:
         ctx.db.auto_backup(ctx.backup_dir)
@@ -243,6 +277,7 @@ def main() -> int:
     win.show()
     shot_dir = os.environ.get("MY_LEDGER_SMOKE_DIR")
     if shot_dir:
+        win.net.start(0)
         _smoke_test(app, ctx, win, shot_dir)
         return app.exec()
     if ctx.db.get_setting("first_run_done") != "1" and not ctx.db.list_accounts(include_archived=True):
@@ -261,4 +296,5 @@ def main() -> int:
             from PySide6.QtCore import QTimer as _T
             from .dialogs_more import DueRecurringDialog
             _T.singleShot(600, lambda: DueRecurringDialog(ctx, due, win).exec())
+    win.net.start()      # 網路狀態：開啟後檢查一次，之後每 5 分鐘；連上時順便做每日的新版本檢查
     return app.exec()
