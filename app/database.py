@@ -29,7 +29,7 @@ import shutil
 import sqlite3
 from typing import Iterable
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 ASSET_CATEGORIES = [
     "現金", "銀行存款", "定期存款", "外幣存款", "短期投資", "股票", "基金", "債券",
@@ -257,7 +257,8 @@ CREATE TABLE IF NOT EXISTS securities (
     archived   INTEGER NOT NULL DEFAULT 0,
     fee_rate   REAL    NOT NULL DEFAULT 0.001425,
     fee_min    REAL    NOT NULL DEFAULT 20,
-    tax_rate   REAL    NOT NULL DEFAULT 0.003
+    tax_rate   REAL    NOT NULL DEFAULT 0.003,
+    type_name  TEXT    NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS sec_events (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -387,6 +388,8 @@ class Database:
             self._migrate_v2_to_v3()
         if has_tables and version < 5:
             self._migrate_v4_to_v5()
+        if has_tables and version < 8:
+            self._migrate_v7_to_v8()
         self.conn.executescript(_TABLES)
         self.conn.executescript(_VIEWS)
         # 結構已升級；投資分錄重編完成才標記為新版本，中途失敗時下次開啟只重做重編
@@ -436,6 +439,20 @@ class Database:
             c.execute("UPDATE securities SET tax_rate = 0.001 WHERE code LIKE '00%'")
         c.commit()
 
+    def _migrate_v7_to_v8(self) -> None:
+        """第 8 版：投資標的記錄所屬「類型」（類型有自己的手續費率、最低手續費與證交稅率）。
+        既有標的的費率與預設類型完全相同時歸入該類型，其餘為「自訂」（空白）；費率本身不變。"""
+        c = self.conn
+        cols = {r[1] for r in c.execute("PRAGMA table_info(securities)")}
+        if cols and "type_name" not in cols:
+            c.execute("ALTER TABLE securities ADD COLUMN type_name TEXT NOT NULL DEFAULT ''")
+            for name, fee_rate, fee_min, tax_rate in (("股票", 0.001425, 20, 0.003), ("ETF", 0.001425, 20, 0.001),
+                                                      ("債券 ETF", 0.001425, 20, 0.0)):
+                c.execute("UPDATE securities SET type_name = ? WHERE abs(fee_rate - ?) < 1e-9"
+                          " AND abs(fee_min - ?) < 1e-9 AND abs(tax_rate - ?) < 1e-9",
+                          (name, fee_rate, fee_min, tax_rate))
+        c.commit()
+
     def _restate_investments(self, version: int) -> None:
         """依新規則重編所有投資系統分錄（含已結帳期間，以維持帳與明細一致）：
         v4 起買賣不再自動評價；v5 起評價以預估淨售價（扣除賣出手續費與證交稅）計算；
@@ -475,10 +492,16 @@ class Database:
                             self.conn.execute(
                                 "INSERT OR IGNORE INTO recon_items(recon_id, txn_id, account_id)"
                                 " VALUES (?, ?, ?)", (r["recon_id"], nid, r["account_id"]))
+            # 市價評價傳票：同一天所有標的合併為一張（v8）
+            first = self._q1("SELECT MIN(date) AS d FROM sec_events WHERE kind = 'price'")["d"]
+            if first:
+                inv._rebuild_valuations(first)
             why = "；".join(w for v, w in (
                 (4, "買賣不再自動評價（只保留手動輸入市價的評價）"),
                 (5, "評價改以預估淨售價（扣除賣出手續費與證交稅）計算"),
-                (6, "賣出不再迴轉未實現評價損益（留待下次市價評價調整）")) if version < v)
+                (6, "賣出不再迴轉未實現評價損益（留待下次市價評價調整）"),
+                (7, "分錄已列處分投資損益時，賣出不再產生系統分錄"),
+                (8, "同一天的市價評價合併為一張傳票")) if version < v)
             self._log("系統升級", None, f"已重編投資系統分錄：{why}")
             self.refresh_year_closings()
             self.conn.commit()

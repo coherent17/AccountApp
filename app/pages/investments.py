@@ -2,22 +2,83 @@ from __future__ import annotations
 
 import datetime as dt
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QMenu, QTabWidget, QVBoxLayout, QWidget
 
 from ..charts import DonutChart
 from ..database import INVESTMENT_CATEGORIES, fmt_shares
-from ..dialogs_invest import PriceDialog, SecurityDialog, TradeDialog
+from ..dialogs_invest import PriceDialog, SecurityDialog, SecurityListDialog, TradeDialog
 from ..investments import KIND_LABELS, Investments
 from ..theme import C, fmt_date, fmt_money, fmt_num, icon
-from ..widgets import (Card, Column, DataTable, StatCard, ask, button, error, info, page_header,
-                       section_title)
+from ..widgets import (PERIOD_PRESETS, Card, Column, DataTable, StatCard, ask, button, error, info, iso,
+                       make_date_edit, page_header, preset_range, qdate, section_title)
 from .base import Page
 
 
 def _pct(v):
     return "—" if v is None else f"{v:+.2%}"
+
+
+class PeriodBar(QWidget):
+    """期間選擇：常用期間＋起訖日期（自行輸入日期時自動改為「自訂期間」）。"""
+    changed = Signal()
+
+    def __init__(self, preset: str, data_range, label: str = "期間", parent=None):
+        super().__init__(parent)
+        self.data_range = data_range
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)
+        lay.addWidget(QLabel(label))
+        self.preset = QComboBox()
+        self.preset.addItems(PERIOD_PRESETS)
+        self.d1 = make_date_edit()
+        self.d2 = make_date_edit()
+        lay.addWidget(self.preset)
+        lay.addWidget(self.d1)
+        lay.addWidget(QLabel("～"))
+        lay.addWidget(self.d2)
+        self._busy = False
+        self.preset.currentTextChanged.connect(self._preset_changed)
+        self.d1.dateChanged.connect(self._dates_changed)
+        self.d2.dateChanged.connect(self._dates_changed)
+        self.preset.setCurrentText(preset)
+        self._preset_changed(preset)
+
+    def _preset_changed(self, name: str) -> None:
+        if name == "自訂期間":
+            return
+        a, b = preset_range(name, self.data_range())
+        self._busy = True
+        self.d1.setDate(qdate(a))
+        self.d2.setDate(qdate(b))
+        self._busy = False
+        self.changed.emit()
+
+    def _dates_changed(self) -> None:
+        if self._busy:
+            return
+        self.preset.blockSignals(True)
+        self.preset.setCurrentText("自訂期間")
+        self.preset.blockSignals(False)
+        self.changed.emit()
+
+    def range(self) -> tuple[str, str]:
+        name = self.preset.currentText()
+        if name != "自訂期間":     # 常用期間每次重新計算（例如「全部」包含新輸入的交易）
+            a, b = preset_range(name, self.data_range())
+            self._busy = True
+            self.d1.setDate(qdate(a))
+            self.d2.setDate(qdate(b))
+            self._busy = False
+            return a, b
+        a, b = iso(self.d1.date()), iso(self.d2.date())
+        return (a, b) if a <= b else (b, a)
+
+    def label(self) -> str:
+        a, b = self.range()
+        return f"{fmt_date(a)}～{fmt_date(b)}"
 
 
 class InvestmentsPage(Page):
@@ -45,9 +106,10 @@ class InvestmentsPage(Page):
         price = button("市價評價", "Primary", icon("refresh", "#FFFFFF"))
         price.setMinimumHeight(44)
         price.clicked.connect(self.prices)
-        add = button("新增標的", icon=icon("plus"))
+        add = button("標的設定", icon=icon("edit"))
+        add.setToolTip("新增投資標的，或選擇已設定的標的修改內容、類型、費率與稅率")
         add.setMinimumHeight(44)
-        add.clicked.connect(self.add_security)
+        add.clicked.connect(self.manage_securities)
         hl.addWidget(price)
         hl.addWidget(add)
         b.addWidget(head)
@@ -72,6 +134,17 @@ class InvestmentsPage(Page):
         lay.setContentsMargins(0, 12, 0, 0)
         lay.setSpacing(16)
         base = ctx.base
+        top = QHBoxLayout()
+        top.addWidget(QLabel("持股截至"))
+        self.as_of = make_date_edit()
+        self._as_of_manual = False
+        self.as_of.dateChanged.connect(self._as_of_changed)
+        top.addWidget(self.as_of)
+        latest = button("最新", tooltip="顯示包含所有交易的最新持股")
+        latest.clicked.connect(self._as_of_latest)
+        top.addWidget(latest)
+        top.addStretch()
+        lay.addLayout(top)
         self.hold = DataTable([
             Column("代號", lambda r: r["code"], align="center", width=80, bold=True),
             Column("名稱", lambda r: r["name"], width=170, bold=True),
@@ -93,8 +166,8 @@ class InvestmentsPage(Page):
         self.hold.rowActivated.connect(lambda r: self.show_events(r["id"]))
         self.hold.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.hold.customContextMenuRequested.connect(self.hold_menu)
-        self.hold.setMinimumHeight(5 * 44 + 50)   # 至少顯示 5 檔持股
-        lay.addWidget(self.hold, 3)
+        self.hold.setMinimumHeight(5 * 44 + 56)   # 至少完整顯示 5 檔持股（回饋 1151121 Q1）
+        lay.addWidget(self.hold, 5)
         cc = Card()
         # 說明文字放在持股比重標題列，不夾在持股明細中間（回饋 1151115-2 Q7）；完整說明以滑鼠提示顯示
         title_row = QHBoxLayout()
@@ -106,9 +179,10 @@ class InvestmentsPage(Page):
                       "成本已含買進手續費，因此未實現損益已包含買賣的手續費與稅。費率可在「編輯標的」設定。")
         title_row.addWidget(hh)
         cc.lay.addLayout(title_row)
-        self.donut = DonutChart(height=240)
+        self.donut = DonutChart(height=150)
         cc.lay.addWidget(self.donut)
-        lay.addWidget(cc, 2)
+        cc.setMaximumHeight(230)
+        lay.addWidget(cc, 1)
         self.tabs.addTab(w, "持股明細")
 
         w = QWidget()
@@ -120,6 +194,10 @@ class InvestmentsPage(Page):
         self.ev_filter.setMinimumWidth(240)
         self.ev_filter.currentIndexChanged.connect(self.load_events)
         top.addWidget(self.ev_filter)
+        top.addSpacing(16)
+        self.ev_period = PeriodBar("全部", self._data_range)
+        self.ev_period.changed.connect(self.load_events)
+        top.addWidget(self.ev_period)
         top.addStretch()
         delete = button("刪除選取交易", "Danger", icon("trash", C.expense))
         delete.clicked.connect(self.delete_event)
@@ -133,7 +211,7 @@ class InvestmentsPage(Page):
                                     "stock_div": C.adjust, "jbuy": C.expense,
                                     "jsell": C.income, "jdiv": C.gold}.get(r["kind"], C.muted)),
             Column("股數", lambda r: fmt_shares(r["shares"]) if r["shares"] else "", align="right", width=90),
-            Column("價格", lambda r: f"{r['price']:,.2f}" if r["price"] else "", align="right", width=90),
+            Column("價格", lambda r: f"{r['price']:,.3f}" if r["price"] else "", align="right", width=100),
             Column("手續費／稅", lambda r: fmt_num(r["fee"] + r["tax"], base) if r["fee"] + r["tax"] else "",
                    align="right", width=110),
             Column("股利", lambda r: fmt_num(r["amount"], base) if r["amount"] else "", align="right", width=90),
@@ -158,10 +236,9 @@ class InvestmentsPage(Page):
         lay = QVBoxLayout(w)
         lay.setContentsMargins(0, 12, 0, 0)
         top = QHBoxLayout()
-        top.addWidget(QLabel("年度"))
-        self.year = QComboBox()
-        self.year.currentIndexChanged.connect(self.load_realized)
-        top.addWidget(self.year)
+        self.real_period = PeriodBar("今年", self._data_range, "賣出期間")
+        self.real_period.changed.connect(self.load_realized)
+        top.addWidget(self.real_period)
         top.addStretch()
         self.real_sum = QLabel()
         self.real_sum.setStyleSheet("font-weight:700;")
@@ -181,9 +258,29 @@ class InvestmentsPage(Page):
         self.tabs.currentChanged.connect(lambda _: self.refresh())
 
     # ------------------------------------------------------------------
+    def _data_range(self) -> tuple[str, str]:
+        dates = [e["date"] for e in self.inv.events()]
+        today = dt.date.today().isoformat()
+        return (min(dates) if dates else today), max(dates + [today])
+
+    def _as_of_changed(self, *_) -> None:
+        if getattr(self, "_as_of_busy", False):
+            return
+        self._as_of_manual = True
+        self.refresh()
+
+    def _as_of_latest(self) -> None:
+        self._as_of_manual = False
+        self.refresh()
+
     def refresh(self) -> None:
         base = self.ctx.base
-        hold = self.inv.holdings()
+        if not self._as_of_manual:   # 預設顯示最新持股（含今天以後日期的交易）
+            self._as_of_busy = True
+            self.as_of.setDate(qdate(self._data_range()[1]))
+            self._as_of_busy = False
+        as_of = iso(self.as_of.date())
+        hold = self.inv.holdings(as_of)
         rates = {a["id"]: a["rate"] for a in self.db.list_accounts(include_archived=True)}
         mv = sum(h["market_value"] * rates.get(h["account_id"], 1) for h in hold)
         cost = sum(h["cost"] * rates.get(h["account_id"], 1) for h in hold)
@@ -208,27 +305,19 @@ class InvestmentsPage(Page):
         self.ev_filter.setCurrentIndex(max(0, self.ev_filter.findData(cur)))
         self.ev_filter.blockSignals(False)
         self.load_events()
-        years = sorted({e["date"][:4] for e in self.inv.events()} | {str(y)}, reverse=True)
-        cy = self.year.currentText()
-        self.year.blockSignals(True)
-        self.year.clear()
-        self.year.addItems(years)
-        if cy in years:
-            self.year.setCurrentText(cy)
-        self.year.blockSignals(False)
         self.load_realized()
 
     def load_events(self) -> None:
-        rows = self.inv.events(self.ev_filter.currentData())
+        a, b = self.ev_period.range()
+        rows = [e for e in self.inv.events(self.ev_filter.currentData()) if a <= e["date"] <= b]
         self.ev.set_rows(list(reversed(rows)))
 
     def load_realized(self) -> None:
-        y = self.year.currentText()
-        if not y:
-            return
-        ps = self.inv.period_summary(f"{y}-01-01", f"{y}-12-31")
+        a, b = self.real_period.range()
+        ps = self.inv.period_summary(a, b)
         self.real.set_rows(ps["realized_rows"])
-        self.real_sum.setText(f"{y} 年已實現損益合計 {fmt_money(ps['realized'], self.ctx.base, signed=True)}"
+        self.real_sum.setText(f"{self.real_period.label()} 已實現損益合計 "
+                              f"{fmt_money(ps['realized'], self.ctx.base, signed=True)}"
                               f"　｜　股利 {fmt_money(ps['dividends'], self.ctx.base)}")
 
     def show_events(self, sid: int) -> None:
@@ -237,6 +326,9 @@ class InvestmentsPage(Page):
 
     def add_security(self) -> None:
         SecurityDialog(self.ctx, parent=self.window()).exec()
+
+    def manage_securities(self) -> None:
+        SecurityListDialog(self.ctx, self.window()).exec()
 
     def trade(self, kind: str) -> None:
         if not self.inv.list_securities():

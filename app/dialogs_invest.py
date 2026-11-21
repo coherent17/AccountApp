@@ -44,26 +44,32 @@ class SecurityDialog(BaseDialog):
         f.addRow("代號", self.code)
         f.addRow("名稱", self.name)
         f.addRow("備註", self.note)
-        # 手續費與證交稅：用於自動帶入費用，以及評價時估算淨售價
+        # 手續費與證交稅：用於自動帶入費用，以及評價時估算淨售價；「類型」帶入該類型的費率
         self.kind = QComboBox()
-        for text, rate in (("股票（證交稅 0.3%）", STOCK_TAX), ("ETF（證交稅 0.1%）", ETF_TAX),
-                           ("債券 ETF（免證交稅）", 0.0), ("自訂", None)):
-            self.kind.addItem(text, rate)
-        self.fee_rate = self._pct_box(4, 2.0)
+        self.kind.setMinimumWidth(220)
+        self.fee_rate = self._pct_box(4, 4.9)
         self.fee_min = QDoubleSpinBox()
         self.fee_min.setRange(0, 9999)
         self.fee_min.setDecimals(0)
         self.fee_min.setSuffix(" 元")
-        self.tax_rate = self._pct_box(3, 2.0)
+        self.tax_rate = self._pct_box(3, 4.9)
         self.fee_rate.setValue((sec["fee_rate"] if sec else FEE_RATE) * 100)
         self.fee_min.setValue(sec["fee_min"] if sec else FEE_MIN)
         self.tax_rate.setValue((sec["tax_rate"] if sec else default_tax_rate(self.code.text())) * 100)
-        self._match_kind()
+        self._fill_kinds(sec["type_name"] if sec else ("ETF" if self.tax_rate.value() == ETF_TAX * 100 else "股票"))
+        if not sec:
+            self._kind_chosen()
         self.kind.activated.connect(self._kind_chosen)
-        self.tax_rate.valueChanged.connect(self._match_kind)
+        for w in (self.fee_rate, self.fee_min, self.tax_rate):
+            w.valueChanged.connect(self._rates_edited)
         if not sec:
             self.code.textEdited.connect(self._code_typed)
-        f.addRow("類型", self.kind)
+        kind_row = QHBoxLayout()
+        kind_row.addWidget(self.kind, 1)
+        manage = button("管理類型…", tooltip="新增或修改類型（每個類型有自己的手續費率、最低手續費與證交稅率）")
+        manage.clicked.connect(self.manage_kinds)
+        kind_row.addWidget(manage)
+        f.addRow("類型", kind_row)
         f.addRow("手續費率", self.fee_rate)
         f.addRow("最低手續費", self.fee_min)
         f.addRow("證券交易稅率", self.tax_rate)
@@ -99,22 +105,55 @@ class SecurityDialog(BaseDialog):
         w.setSuffix(" %")
         return w
 
-    def _match_kind(self) -> None:
-        i = self.kind.findData(round(self.tax_rate.value() / 100, 6))
+    def _fill_kinds(self, select: str) -> None:
+        self.types = self.inv.security_types()
+        self.kind.blockSignals(True)
+        self.kind.clear()
+        for t in self.types:
+            self.kind.addItem(f"{t['name']}（手續費 {t['fee_rate'] * 100:.4g}%、證交稅 {t['tax_rate'] * 100:.3g}%）",
+                              t["name"])
+        self.kind.addItem("自訂（只用於這個標的）", "")
+        i = self.kind.findData(select) if select else -1
         self.kind.setCurrentIndex(i if i >= 0 else self.kind.count() - 1)
+        self.kind.blockSignals(False)
+
+    def _type(self) -> dict | None:
+        return next((t for t in self.types if t["name"] == self.kind.currentData()), None)
 
     def _kind_chosen(self) -> None:
-        rate = self.kind.currentData()
-        if rate is not None:
-            self.tax_rate.setValue(rate * 100)
+        t = self._type()
+        if t:
+            for w, v in ((self.fee_rate, t["fee_rate"] * 100), (self.fee_min, t["fee_min"]),
+                         (self.tax_rate, t["tax_rate"] * 100)):
+                w.blockSignals(True)
+                w.setValue(v)
+                w.blockSignals(False)
+
+    def _rates_edited(self) -> None:
+        """手動改了費率、與所選類型不同時，改為「自訂」。"""
+        t = self._type()
+        if t and (abs(self.fee_rate.value() - t["fee_rate"] * 100) > 1e-7 or self.fee_min.value() != t["fee_min"]
+                  or abs(self.tax_rate.value() - t["tax_rate"] * 100) > 1e-7):
+            self.kind.setCurrentIndex(self.kind.count() - 1)
 
     def _code_typed(self, code: str) -> None:
-        if self.kind.currentData() in (STOCK_TAX, ETF_TAX):
-            self.tax_rate.setValue(default_tax_rate(code) * 100)
+        if self.kind.currentData() in ("股票", "ETF"):
+            want = "ETF" if default_tax_rate(code) == ETF_TAX else "股票"
+            i = self.kind.findData(want)
+            if i >= 0 and i != self.kind.currentIndex():
+                self.kind.setCurrentIndex(i)
+                self._kind_chosen()
+
+    def manage_kinds(self) -> None:
+        cur = self.kind.currentData()
+        dlg = SecurityTypesDialog(self.ctx, self)
+        if dlg.exec():
+            self._fill_kinds(dlg.renamed.get(cur, cur))
+            self._kind_chosen()
 
     def save(self) -> None:
         rates = {"fee_rate": round(self.fee_rate.value() / 100, 6), "fee_min": self.fee_min.value(),
-                 "tax_rate": round(self.tax_rate.value() / 100, 6)}
+                 "tax_rate": round(self.tax_rate.value() / 100, 6), "type_name": self.kind.currentData() or ""}
         try:
             if self.sec:
                 self.inv.update_security(self.sec["id"], self.code.text(), self.name.text(),
@@ -130,6 +169,182 @@ class SecurityDialog(BaseDialog):
         self.ctx.changed()
         self.ctx.toast.emit(f"已儲存投資標的：{self.name.text()}")
         self.accept()
+
+
+class SecurityTypesDialog(BaseDialog):
+    """新增、修改、刪除標的類型；每個類型有自己的手續費率、最低手續費與證交稅率。"""
+
+    def __init__(self, ctx: AppContext, parent=None):
+        super().__init__("管理標的類型", parent, width=760)
+        self.ctx = ctx
+        self.inv = Investments(ctx.db)
+        self.renamed: dict[str, str] = {}
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["類型名稱", "手續費率", "最低手續費", "證券交易稅率"])
+        self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(46)
+        h = self.table.horizontalHeader()
+        h.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for i in (1, 2, 3):
+            h.setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
+            self.table.setColumnWidth(i, 150)
+        self.table.setMinimumHeight(260)
+        for t in self.inv.security_types():
+            self.add_row(t)
+        self.root.addWidget(self.table)
+        tools = QHBoxLayout()
+        add = button("新增類型", icon=icon("plus"))
+        add.clicked.connect(lambda: self.add_row())
+        rem = button("刪除選取類型", icon=icon("trash"))
+        rem.clicked.connect(self.remove_row)
+        tools.addWidget(add)
+        tools.addWidget(rem)
+        tools.addStretch()
+        self.root.addLayout(tools)
+        hint = QLabel("每個標的可選擇一個類型，新增或編輯標的時會帶入該類型的費率。"
+                      "修改類型的費率後，屬於該類型的標的會一併改用新費率，市價評價分錄也會依新費率重算"
+                      "（已結帳期間有評價的標的不會變更）。刪除類型時，原屬該類型的標的保留目前費率，改為「自訂」。")
+        hint.setObjectName("Hint")
+        hint.setWordWrap(True)
+        self.root.addWidget(hint)
+        self.root.addWidget(self.msg)
+        bar = QHBoxLayout()
+        bar.addStretch()
+        c = button("取消")
+        c.clicked.connect(self.reject)
+        ok = button("儲存", "Primary")
+        ok.clicked.connect(self.save)
+        bar.addWidget(c)
+        bar.addWidget(ok)
+        self.root.addLayout(bar)
+
+    def add_row(self, t: dict | None = None) -> None:
+        r = self.table.rowCount()
+        self.table.insertRow(r)
+        name = QLineEdit(t["name"] if t else "")
+        name.setPlaceholderText("例如 股票（6 折）")
+        name.setProperty("old", t["name"] if t else "")
+        fee = SecurityDialog._pct_box(4, 4.9)
+        fee.setValue((t["fee_rate"] if t else FEE_RATE) * 100)
+        mn = QDoubleSpinBox()
+        mn.setRange(0, 9999)
+        mn.setDecimals(0)
+        mn.setSuffix(" 元")
+        mn.setValue(t["fee_min"] if t else FEE_MIN)
+        tax = SecurityDialog._pct_box(3, 4.9)
+        tax.setValue((t["tax_rate"] if t else STOCK_TAX) * 100)
+        for col, w in enumerate((name, fee, mn, tax)):
+            self.table.setCellWidget(r, col, w)
+        if not t:
+            name.setFocus()
+
+    def remove_row(self) -> None:
+        rows = sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True)
+        if not rows:
+            self.show_error("請先點選要刪除的類型")
+            return
+        for r in rows:
+            self.table.removeRow(r)
+
+    def rows(self) -> list[dict]:
+        out = []
+        for r in range(self.table.rowCount()):
+            name, fee, mn, tax = (self.table.cellWidget(r, c) for c in range(4))
+            out.append({"name": name.text(), "old": name.property("old") or "",
+                        "fee_rate": round(fee.value() / 100, 6), "fee_min": mn.value(),
+                        "tax_rate": round(tax.value() / 100, 6)})
+        return out
+
+    def save(self) -> None:
+        rows = self.rows()
+        try:
+            problems = self.inv.save_security_types(rows)
+        except ValueError as e:
+            self.show_error(str(e))
+            return
+        self.renamed = {r["old"]: r["name"].strip() for r in rows if r["old"]}
+        self.ctx.changed()
+        if problems:
+            from .widgets import info
+            info(self, "類型已儲存，但下列標的無法變更費率：\n" + "\n".join(problems))
+        self.ctx.toast.emit("已儲存標的類型")
+        self.accept()
+
+
+class SecurityListDialog(BaseDialog):
+    """標的設定：列出所有投資標的（含已無持股、已封存），可選擇並修改內容、費率與稅率。"""
+
+    def __init__(self, ctx: AppContext, parent=None):
+        super().__init__("標的設定", parent, width=980)
+        self.ctx = ctx
+        self.inv = Investments(ctx.db)
+        from .widgets import Column, DataTable
+        self.table = DataTable([
+            Column("代號", lambda r: r["code"], align="center", width=80, bold=True),
+            Column("名稱", lambda r: r["name"] + ("（已封存）" if r["archived"] else ""), width=180, bold=True),
+            Column("投資科目", lambda r: r["account_name"], width=170),
+            Column("類型", lambda r: r["type_name"] or "自訂", width=110),
+            Column("手續費率", lambda r: f"{r['fee_rate'] * 100:.4g}%", align="right", width=95),
+            Column("最低手續費", lambda r: f"{r['fee_min']:,.0f} 元", align="right", width=100),
+            Column("證交稅率", lambda r: f"{r['tax_rate'] * 100:.3g}%", align="right", width=95),
+            Column("備註", lambda r: r["note"], stretch=True),
+        ], sortable=False)
+        self.table.setMinimumHeight(380)
+        self.table.rowActivated.connect(self.edit)
+        self.root.addWidget(self.table)
+        bar = QHBoxLayout()
+        for text, fn, ic in (("新增標的", self.add, "plus"), ("編輯選取標的", lambda: self.edit(self.table.current_row()),
+                                                             "edit"),
+                             ("管理類型", self.kinds, "list")):
+            b = button(text, icon=icon(ic))
+            b.clicked.connect(fn)
+            bar.addWidget(b)
+        self.archive_btn = button("封存／取消封存")
+        self.archive_btn.setToolTip("封存後不再出現在選單中（資料保留）；已無持股的標的才可封存")
+        self.archive_btn.clicked.connect(self.toggle_archive)
+        bar.addWidget(self.archive_btn)
+        bar.addStretch()
+        close = button("關閉", "Primary")
+        close.clicked.connect(self.accept)
+        bar.addWidget(close)
+        hint = QLabel("按兩下或點選後按「編輯選取標的」，可修改代號、名稱、類型、手續費率、最低手續費與證交稅率。"
+                      "費率改變時，該標的的市價評價分錄會依新費率重新計算。")
+        hint.setObjectName("Hint")
+        hint.setWordWrap(True)
+        self.root.addWidget(hint)
+        self.root.addWidget(self.msg)
+        self.root.addLayout(bar)
+        self.load()
+
+    def load(self) -> None:
+        self.table.set_rows(self.inv.list_securities(include_archived=True))
+
+    def add(self) -> None:
+        if SecurityDialog(self.ctx, parent=self).exec():
+            self.load()
+
+    def edit(self, r: dict | None) -> None:
+        if not r:
+            self.show_error("請先點選一個標的")
+            return
+        if SecurityDialog(self.ctx, self.inv.get_security(r["id"]), parent=self).exec():
+            self.load()
+
+    def kinds(self) -> None:
+        if SecurityTypesDialog(self.ctx, self).exec():
+            self.load()
+
+    def toggle_archive(self) -> None:
+        r = self.table.current_row()
+        if not r:
+            self.show_error("請先點選一個標的")
+            return
+        if not r["archived"] and abs(self.inv.replay(r["id"])["shares"]) > 1e-9:
+            self.show_error(f"「{r['name']}」還有持股，無法封存")
+            return
+        self.inv.archive_security(r["id"], not r["archived"])
+        self.ctx.changed()
+        self.load()
 
 
 class TradeDialog(BaseDialog):

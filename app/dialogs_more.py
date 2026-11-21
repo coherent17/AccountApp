@@ -156,7 +156,7 @@ class JournalDialog(BaseDialog):
         self.root.addLayout(top)
 
         self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["會計科目", "借方金額", "貸方金額", "投資標的／股數／單價",
+        self.table.setHorizontalHeaderLabels(["會計科目", "借方金額", "貸方金額", "投資標的／股數／單價（外幣：原幣／匯率）",
                                               "行備註"])
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(50)
@@ -195,7 +195,7 @@ class JournalDialog(BaseDialog):
         self.inv_info.setVisible(False)
         self.root.addWidget(self.inv_info)
         hint = QLabel("借方：資產增加、費用發生、負債減少；貸方：資產減少、收入發生、負債增加。"
-                      "外幣帳戶請以新台幣（本位幣）金額輸入，系統會依匯率換算。"
+                      "外幣科目請在右側輸入原幣金額與匯率，借貸金額（新台幣）會自動換算，原幣累計到該科目的原幣餘額。"
                       "投資科目（短期投資、長期投資等）請選擇投資標的並填股數與成交單價，"
                       "金額空白時會自動帶入含手續費的成本（賣出為扣除手續費與證交稅後的實收金額）；"
                       "股利科目可選擇標的並填持有股數與每股股利；"
@@ -235,11 +235,11 @@ class JournalDialog(BaseDialog):
                 key = ("account", ln["account_id"]) if ln["account_id"] else \
                     ("category", ln["category_id"]) if ln["category_id"] else ("special", ln["special"])
                 self.add_row(key, ln["debit"], ln["credit"], ln["memo"], ln["security_id"], ln["shares"],
-                             ln["price"])
+                             ln["price"], ln["orig"])
         elif prefill:
             for p in prefill:
                 self.add_row(p.get("key"), p.get("debit"), p.get("credit"), p.get("memo", ""),
-                             p.get("security_id"), p.get("shares"), p.get("price"))
+                             p.get("security_id"), p.get("shares"), p.get("price"), p.get("orig"))
         while self.table.rowCount() < 3:
             self.add_row()
         if self.readonly:
@@ -272,7 +272,7 @@ class JournalDialog(BaseDialog):
         cb.blockSignals(False)
 
     def add_row(self, key=None, debit=None, credit=None, memo: str = "", security_id=None,
-                shares=None, price=None) -> None:
+                shares=None, price=None, orig=None) -> None:
         r = self.table.rowCount()
         self.table.insertRow(r)
         cb = subject_combo(self.chart, key)
@@ -299,7 +299,7 @@ class JournalDialog(BaseDialog):
         sh.setFixedWidth(84)
         if shares:
             sh.setValue(shares)
-        pr = AmountEdit(decimals=4)
+        pr = AmountEdit(decimals=3)
         pr.setStyleSheet("font-size: inherit; font-weight: 400;")
         pr.setObjectName("")
         pr.setPlaceholderText("單價")
@@ -310,7 +310,27 @@ class JournalDialog(BaseDialog):
         cl.addWidget(sec, 1)
         cl.addWidget(sh)
         cl.addWidget(pr)
+        # 外幣科目：原幣金額 × 匯率 ＝ 本位幣金額（原幣累計到該科目的原幣餘額）
+        fx_cur = QLabel()
+        fx_cur.setMinimumWidth(36)
+        fx_orig = AmountEdit()
+        fx_orig.setStyleSheet("font-size: inherit; font-weight: 400;")
+        fx_orig.setObjectName("")
+        fx_orig.setPlaceholderText("原幣金額")
+        fx_orig.setToolTip("外幣科目的原幣金額，會累計到該科目的原幣餘額")
+        fx_rate = AmountEdit(decimals=6)
+        fx_rate.setStyleSheet("font-size: inherit; font-weight: 400;")
+        fx_rate.setObjectName("")
+        fx_rate.setPlaceholderText("匯率")
+        fx_rate.setToolTip("1 單位外幣折合本位幣的匯率；本位幣金額＝原幣金額×匯率")
+        fx_rate.setFixedWidth(110)
+        for w in (fx_cur, fx_orig, fx_rate):
+            cl.addWidget(w)
+            w.hide()
+        cl.setStretchFactor(fx_orig, 1)
         cell.sec, cell.shares, cell.price = sec, sh, pr
+        cell.fx_cur, cell.fx_orig, cell.fx_rate = fx_cur, fx_orig, fx_rate
+        cell.fx_on = False
         self.table.setCellWidget(r, 3, cell)
         m = QLineEdit(memo or "")
         self.table.setCellWidget(r, 4, m)
@@ -322,7 +342,14 @@ class JournalDialog(BaseDialog):
         for w in (sh, pr):
             w.valueChanged.connect(lambda _=0, c=cell: self._auto_amount(c))
         pr.valueChanged.connect(self._update_inv_info)
+        for w in (fx_orig, fx_rate):
+            w.textEdited.connect(lambda _=0, c=cell: self._fx_amount(c))
         self._refresh_sec(cell, cb, security_id)
+        if orig and cell.fx_on:
+            base = (debit or 0) or (credit or 0)
+            fx_orig.setValue(abs(orig))
+            if base:
+                fx_rate.setValue(round(base / abs(orig), 6))
 
     def _row_account(self, cb: QComboBox) -> dict | None:
         a = self.chart_by_key.get(cb.currentData() or "")
@@ -356,6 +383,20 @@ class JournalDialog(BaseDialog):
         else:
             sec.addItem("—", None)
         sec.blockSignals(False)
+        acc = self.db.get_account(a["key"][1]) if a else None
+        fx = bool(acc and acc["currency"] != self.ctx.base and not a["investment"])
+        cell.fx_on = fx
+        for w in (sec, sh, pr):
+            w.setVisible(not fx)
+        for w in (cell.fx_cur, cell.fx_orig, cell.fx_rate):
+            w.setVisible(fx)
+            w.setEnabled(not self.readonly)
+        if fx:
+            cell.fx_cur.setText(acc["currency"])
+            if not cell.fx_rate.value():
+                cell.fx_rate.setValue(acc["rate"])
+        else:
+            cell.fx_orig.setValue(None)
         pr.setPlaceholderText("每股股利" if div else "單價")
         sec.setEnabled(on and not self.readonly)
         sh.setEnabled(on and not self.readonly and sec.currentData() not in (None, "new"))
@@ -384,6 +425,17 @@ class JournalDialog(BaseDialog):
             cell.shares.setValue(None)
             cell.price.setValue(None)
         self._update_inv_info()
+
+    def _fx_amount(self, cell: QWidget) -> None:
+        """外幣科目輸入原幣金額與匯率後，本位幣金額自動帶入（已輸入貸方時帶入貸方，否則借方）。"""
+        r = self._row_of(cell)
+        q, rate = cell.fx_orig.value() or 0, cell.fx_rate.value() or 0
+        if r < 0 or q <= 0 or rate <= 0:
+            return
+        d, c = self.table.cellWidget(r, 1), self.table.cellWidget(r, 2)
+        target = c if c.value() and not d.value() else d
+        target.setValue(money_round(q * rate))
+        target.setProperty("auto", True)
 
     def _row_of(self, cell: QWidget) -> int:
         for r in range(self.table.rowCount()):
@@ -448,8 +500,7 @@ class JournalDialog(BaseDialog):
         self.inv_info.setVisible(bool(parts))
         if parts:
             self.inv_info.setText("投資連結　" + "；".join(dict.fromkeys(parts)) +
-                                  "。賣出時請貸記投資科目，系統會依平均成本自動調整處分投資損益"
-                                  "（不迴轉未實現評價損益，下次市價評價時一併調整）；"
+                                  "。賣出時請貸記投資科目的出售成本，並自行列出處分投資損益（系統不另產生分錄）；"
                                   "股利科目連結標的後，會計入該標的的股利紀錄。")
 
     def new_subject(self) -> None:
@@ -536,6 +587,11 @@ class JournalDialog(BaseDialog):
             item.update({"debit": d, "credit": c, "memo": memo})
             cell = self.table.cellWidget(r, 3)
             sid = cell.sec.currentData()
+            if cell.fx_on and (d or c) and cell.fx_orig.value():
+                q = cell.fx_orig.value()
+                if q <= 0:
+                    raise ValueError(f"第 {r + 1} 行的原幣金額必須大於 0")
+                item["orig"] = q if d else -q
             if isinstance(sid, int) and (d or c):
                 item["security_id"] = sid
                 item["shares"] = cell.shares.value() or 0
@@ -622,11 +678,12 @@ class JournalDialog(BaseDialog):
         self.accept()
 
     def delete_system_voucher(self) -> None:
-        ev = self.inv.voucher_event(self.txn["id"])
+        evs = self.inv.voucher_events(self.txn["id"])
         what = ""
-        if ev:
-            sec = self.inv.get_security(ev["security_id"])
-            what = f"（{fmt_date(ev['date'])} {sec['name']} {KIND_LABELS.get(ev['kind'], ev['kind'])}）"
+        if evs:
+            names = "、".join(f"{self.inv.get_security(ev['security_id'])['name']} "
+                             f"{KIND_LABELS.get(ev['kind'], ev['kind'])}" for ev in evs)
+            what = f"（{fmt_date(evs[0]['date'])} {names}）"
         if not ask(self, f"刪除 {voucher_no(self.txn['id'])} 會一併刪除產生它的投資管理交易{what}，"
                          "系統會重算之後的成本與分錄。確定要刪除嗎？", yes="刪除", danger=True):
             return

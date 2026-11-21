@@ -316,7 +316,8 @@ class TransactionsPage(Page):
             for ln in self.db.get_lines(row["id"]):
                 key = ("account", ln["account_id"]) if ln["account_id"] else \
                     ("category", ln["category_id"]) if ln["category_id"] else ("special", ln["special"])
-                prefill.append({"key": key, "debit": ln["debit"], "credit": ln["credit"], "memo": ln["memo"]})
+                prefill.append({"key": key, "debit": ln["debit"], "credit": ln["credit"], "memo": ln["memo"],
+                                "orig": ln["orig"]})
             JournalDialog(self.ctx, prefill=prefill, note=txn["note"], parent=self.window()).exec()
             return
         TransactionDialog(self.ctx, txn=txn, copy=True, parent=self.window()).exec()
@@ -350,12 +351,12 @@ class TransactionsPage(Page):
         inv = Investments(self.db)
         desc = []
         for r in rows:
-            ev = inv.voucher_event(r["id"])
-            if ev:
+            evs = inv.voucher_events(r["id"])
+            for ev in evs:
                 sec = inv.get_security(ev["security_id"])
                 desc.append(f"{voucher_no(r['id'])}：{fmt_date(ev['date'])} {sec['name']} "
                             f"{KIND_LABELS.get(ev['kind'], ev['kind'])}")
-            else:
+            if not evs:
                 desc.append(f"{voucher_no(r['id'])}：{r['note']}")
         if not ask(self, "這是「投資管理」自動產生的傳票。刪除後，產生它的投資交易也會一併刪除，"
                          "系統會重算之後的成本與分錄：\n\n" + "\n".join(desc) + "\n\n確定要刪除嗎？",

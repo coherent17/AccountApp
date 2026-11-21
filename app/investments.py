@@ -30,6 +30,7 @@ import math
 
 from .database import Database, fmt_shares, money_round, voucher_no
 
+VAL_SOURCE = "inv:val"   # 市價評價傳票：同一天所有標的合併為一張
 KIND_LABELS = {"buy": "買進", "sell": "賣出", "cash_div": "現金股利", "stock_div": "股票股利",
                "price": "市價評價", "jbuy": "買進（分錄）", "jsell": "賣出（分錄）", "jdiv": "股利（分錄）"}
 NHI_RATE = 0.0211       # 二代健保補充保費費率
@@ -38,6 +39,13 @@ FEE_RATE = 0.001425     # 台股手續費率（未打折）
 FEE_MIN = 20.0          # 最低手續費
 STOCK_TAX = 0.003       # 股票證交稅
 ETF_TAX = 0.001         # ETF 證交稅
+
+
+DEFAULT_SECURITY_TYPES = [
+    {"name": "股票", "fee_rate": FEE_RATE, "fee_min": FEE_MIN, "tax_rate": STOCK_TAX},
+    {"name": "ETF", "fee_rate": FEE_RATE, "fee_min": FEE_MIN, "tax_rate": ETF_TAX},
+    {"name": "債券 ETF", "fee_rate": FEE_RATE, "fee_min": FEE_MIN, "tax_rate": 0.0},
+]
 
 
 def default_tax_rate(code: str) -> float:
@@ -81,7 +89,7 @@ class Investments:
 
     def add_security(self, account_id: int, code: str, name: str, note: str = "",
                      fee_rate: float | None = None, fee_min: float | None = None,
-                     tax_rate: float | None = None) -> int:
+                     tax_rate: float | None = None, type_name: str = "") -> int:
         if not name.strip():
             raise ValueError("請輸入標的名稱")
         acc = self.db.get_account(account_id)
@@ -90,9 +98,13 @@ class Investments:
         rates = self._check_rates(FEE_RATE if fee_rate is None else fee_rate,
                                   FEE_MIN if fee_min is None else fee_min,
                                   default_tax_rate(code) if tax_rate is None else tax_rate)
+        if not type_name:   # 未指定類型時，費率與某類型完全相同就歸入該類型
+            type_name = next((t["name"] for t in self.security_types()
+                              if (t["fee_rate"], t["fee_min"], t["tax_rate"]) == rates), "")
         cur = self.db.conn.execute(
-            "INSERT INTO securities(account_id, code, name, note, fee_rate, fee_min, tax_rate)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)", (account_id, code.strip(), name.strip(), note.strip(), *rates))
+            "INSERT INTO securities(account_id, code, name, note, fee_rate, fee_min, tax_rate, type_name)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (account_id, code.strip(), name.strip(), note.strip(), *rates, type_name.strip()))
         self.db.conn.commit()
         return cur.lastrowid
 
@@ -104,8 +116,9 @@ class Investments:
 
     def update_security(self, sid: int, code: str, name: str, note: str = "",
                         fee_rate: float | None = None, fee_min: float | None = None,
-                        tax_rate: float | None = None) -> None:
+                        tax_rate: float | None = None, type_name: str | None = None) -> None:
         sec = self.get_security(sid)
+        type_name = sec["type_name"] if type_name is None else type_name.strip()
         rates = self._check_rates(sec["fee_rate"] if fee_rate is None else fee_rate,
                                   sec["fee_min"] if fee_min is None else fee_min,
                                   sec["tax_rate"] if tax_rate is None else tax_rate)
@@ -121,11 +134,64 @@ class Investments:
                 raise ValueError(f"此標的在已結帳期間（{c.replace('-', '/')} 以前）有評價分錄，無法變更費率；"
                                  "請先到「設定」解除結帳。")
         self.db.conn.execute("UPDATE securities SET code = ?, name = ?, note = ?, fee_rate = ?, fee_min = ?,"
-                             " tax_rate = ? WHERE id = ?",
-                             (code.strip(), name.strip(), note.strip(), *rates, sid))
+                             " tax_rate = ?, type_name = ? WHERE id = ?",
+                             (code.strip(), name.strip(), note.strip(), *rates, type_name, sid))
         if first:
             self.rebuild(sid, first)
         self.db.conn.commit()
+
+    # ------------------------------------------------------------------ 類型
+    def security_types(self) -> list[dict]:
+        """標的類型（股票、ETF…），各有手續費率、最低手續費與證交稅率；可在「標的設定」新增與修改。"""
+        import json
+        raw = self.db.get_setting("security_types", "")
+        try:
+            types = json.loads(raw) if raw else None
+        except ValueError:
+            types = None
+        return [dict(t) for t in (types or DEFAULT_SECURITY_TYPES)]
+
+    def save_security_types(self, rows: list[dict], apply: bool = True) -> list[str]:
+        """儲存類型。rows 每筆含 name、fee_rate、fee_min、tax_rate，以及原名稱 old（新增的類型為空白）。
+        改名時屬於該類型的標的一併改名；刪除的類型，其標的改為「自訂」（費率不變）。
+        apply 為 True 時，屬於該類型的標的改用新費率（已結帳期間有評價者無法變更，傳回其訊息）。"""
+        import json
+        names = [r["name"].strip() for r in rows]
+        if any(not n for n in names):
+            raise ValueError("類型名稱不可空白")
+        if len(set(names)) != len(names):
+            raise ValueError("類型名稱不可重複")
+        clean = []
+        for r in rows:
+            fee_rate, fee_min, tax_rate = self._check_rates(r["fee_rate"], r["fee_min"], r["tax_rate"])
+            clean.append({"name": r["name"].strip(), "fee_rate": fee_rate, "fee_min": fee_min,
+                          "tax_rate": tax_rate})
+        kept = {r.get("old") for r in rows if r.get("old")}
+        for t in self.security_types():
+            if t["name"] not in kept:
+                self.db.conn.execute("UPDATE securities SET type_name = '' WHERE type_name = ?", (t["name"],))
+        for r, c in zip(rows, clean):
+            if r.get("old") and r["old"] != c["name"]:
+                self.db.conn.execute("UPDATE securities SET type_name = ? WHERE type_name = ?",
+                                     (c["name"], r["old"]))
+        self.db.set_setting("security_types", json.dumps(clean, ensure_ascii=False))
+        self.db._log("修改標的類型", None, "、".join(
+            f"{c['name']}（手續費 {c['fee_rate']:.4%}、最低 {c['fee_min']:,.0f} 元、證交稅 {c['tax_rate']:.3%}）"
+            for c in clean))
+        self.db.conn.commit()
+        problems = []
+        if apply:
+            for c in clean:
+                for sec in self.db._q("SELECT * FROM securities WHERE type_name = ?", (c["name"],)):
+                    if (sec["fee_rate"], sec["fee_min"], sec["tax_rate"]) == (c["fee_rate"], c["fee_min"],
+                                                                             c["tax_rate"]):
+                        continue
+                    try:
+                        self.update_security(sec["id"], sec["code"], sec["name"], sec["note"],
+                                             c["fee_rate"], c["fee_min"], c["tax_rate"])
+                    except ValueError as e:
+                        problems.append(f"{sec['name']}：{e}")
+        return problems
 
     def archive_security(self, sid: int, archived: bool = True) -> None:
         self.db.conn.execute("UPDATE securities SET archived = ? WHERE id = ?", (int(archived), sid))
@@ -401,7 +467,7 @@ class Investments:
                 state["price"], state["price_date"] = 0.0, ""
             if lines:
                 state["vouchers"].append({"event": e["id"], "date": e["date"], "note": note,
-                                          "lines": lines})
+                                          "lines": lines, "kind": k})
         state["market_value"] = money_round(state["cost"] + state["val_adj"])
         state["unrealized"] = money_round(state["market_value"] - state["cost"])
         state["avg_cost"] = state["cost"] / state["shares"] if state["shares"] else 0.0
@@ -456,7 +522,8 @@ class Investments:
             db.conn.execute("DELETE FROM txn_lines WHERE txn_id = ?", (r["id"],))
             db.conn.execute("DELETE FROM transactions WHERE id = ?", (r["id"],))
         state = self.replay(sid)
-        todo = [v for v in state["vouchers"] if v["date"] >= from_date]
+        # 市價評價分錄另行彙總：同一天所有標的合併為一張傳票（_rebuild_valuations）
+        todo = [v for v in state["vouchers"] if v["date"] >= from_date and v.get("kind") != "price"]
         todo = [(v, ln) for v in todo for ln in [self._lines_to_journal(sec, v["lines"])]
                 if len([x for x in ln if x.get("debit") or x.get("credit")]) >= 2]
         reuse, free = self._match_vouchers(old, [v for v, _ in todo])
@@ -471,7 +538,56 @@ class Investments:
                             " (SELECT account_id FROM txn_lines WHERE txn_id = ? AND account_id IS NOT NULL)",
                             (tid, tid))
         db._log("投資分錄產生", None, f"{sec['name']}：自 {from_date.replace('-', '/')} 起重新產生 {n} 張傳票")
+        # 舊版（v2.6.0 以前）各標的的評價傳票，號碼可由合併後的評價傳票沿用
+        self._rebuild_valuations(from_date, [o for o in free if "股價更新" in o["note"] or "已全數賣出" in o["note"]])
         db.conn.commit()
+
+    def _rebuild_valuations(self, from_date: str, spare: list[dict] | None = None) -> None:
+        """重新產生 from_date 起的市價評價傳票：同一天所有標的的評價合併成一張傳票
+        （source = 'inv:val'，每一行的行備註為標的名稱與市價）。
+        沿用該日原有評價傳票（或 spare 中舊版各標的評價傳票）最小的號碼，其他傳票的附件移到這張。"""
+        db = self.db
+        old = db._q("SELECT id, date, note FROM transactions WHERE source = ? AND date >= ? ORDER BY id",
+                    (VAL_SOURCE, from_date))
+        for r in old:
+            db.conn.execute("DELETE FROM txn_lines WHERE txn_id = ?", (r["id"],))
+            db.conn.execute("DELETE FROM transactions WHERE id = ?", (r["id"],))
+        days: dict[str, list[dict]] = {}
+        count: dict[str, int] = {}
+        for sec in self.list_securities(include_archived=True):
+            if not db._q1("SELECT 1 FROM sec_events WHERE security_id = ? AND kind = 'price' AND date >= ?",
+                          (sec["id"], from_date)):
+                continue
+            sec = self.get_security(sec["id"])
+            try:
+                state = self.replay(sec["id"])
+            except ValueError:
+                continue
+            for v in state["vouchers"]:
+                if v.get("kind") != "price" or v["date"] < from_date:
+                    continue
+                lines = self._lines_to_journal(sec, v["lines"])
+                if len([x for x in lines if x.get("debit") or x.get("credit")]) < 2:
+                    continue
+                memo = v["note"]
+                for ln in lines:
+                    ln["memo"] = memo
+                days.setdefault(v["date"], []).extend(lines)
+                count[v["date"]] = count.get(v["date"], 0) + 1
+        pool = list(old) + [o for o in (spare or []) if o["date"] >= from_date]
+        for date in sorted(days):
+            cands = sorted(o["id"] for o in pool if o["date"] == date)
+            tid = cands[0] if cands else None
+            pool = [o for o in pool if o["date"] != date]
+            note = f"市價評價（{count[date]} 檔）"
+            tid = db.add_journal(date, note, days[date], source=VAL_SOURCE, log="", txn_id=tid)
+            for other in cands[1:]:
+                db.conn.execute("UPDATE attachments SET txn_id = ? WHERE txn_id = ?", (tid, other))
+            db.conn.execute("DELETE FROM recon_items WHERE txn_id = ? AND account_id NOT IN"
+                            " (SELECT account_id FROM txn_lines WHERE txn_id = ? AND account_id IS NOT NULL)",
+                            (tid, tid))
+        for o in pool:
+            db.conn.execute("DELETE FROM recon_items WHERE txn_id = ?", (o["id"],))
 
     @staticmethod
     def _match_vouchers(old: list[dict], todo: list[dict]) -> tuple[list[int | None], list[dict]]:
@@ -491,32 +607,35 @@ class Investments:
                     free.remove(hit)
         return reuse, free
 
-    def voucher_event(self, txn_id: int) -> dict | None:
-        """系統傳票是由投資管理的哪一筆交易產生（找不到時傳回 None）。"""
+    def voucher_events(self, txn_id: int) -> list[dict]:
+        """系統傳票是由投資管理的哪些交易產生（找不到時傳回空清單）。
+        合併的市價評價傳票對應當天所有標的的市價評價。"""
         t = self.db.get_transaction(txn_id)
         if not t or not t["source"].startswith("inv:"):
-            return None
+            return []
+        if t["source"] == VAL_SOURCE:
+            return self.db._q("SELECT * FROM sec_events WHERE kind = 'price' AND date = ? ORDER BY id", (t["date"],))
         sid = int(t["source"][4:])
         sec = self.get_security(sid)
         if not sec:
-            return None
+            return []
         old = self.db._q("SELECT id, date, note FROM transactions WHERE source = ? ORDER BY id", (t["source"],))
-        todo = [v for v in self.replay(sid)["vouchers"]
-                if len([x for x in self._lines_to_journal(sec, v["lines"]) if x.get("debit") or x.get("credit")]) >= 2]
+        todo = [v for v in self.replay(sid)["vouchers"] if v.get("kind") != "price"
+                and len([x for x in self._lines_to_journal(sec, v["lines"]) if x.get("debit") or x.get("credit")]) >= 2]
         reuse, _ = self._match_vouchers(old, todo)
         for v, tid in zip(todo, reuse):
             if tid == txn_id and v["event"]:
-                return self.db._q1("SELECT * FROM sec_events WHERE id = ?", (v["event"],))
-        return None
+                return self.db._q("SELECT * FROM sec_events WHERE id = ?", (v["event"],))
+        return []
 
     def delete_vouchers(self, txn_ids: list[int]) -> int:
         """刪除系統傳票＝刪除產生它的投資管理交易（之後的成本與分錄自動重算）。傳回刪除的交易筆數。"""
         events, missing = {}, []
         for tid in txn_ids:
-            ev = self.voucher_event(tid)
-            if ev:
+            evs = self.voucher_events(tid)
+            for ev in evs:
                 events[ev["id"]] = ev
-            else:
+            if not evs:
                 missing.append(voucher_no(tid))
         if missing:
             raise ValueError(f"{'、'.join(missing)} 是依您的分錄賣出計算的處分投資損益（該分錄只貸記淨價款）。"

@@ -25,8 +25,8 @@ _OPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
         ast.Div: operator.truediv}
 
 
-def safe_eval(expr: str) -> float | None:
-    """計算簡單算式（加減乘除與括號），失敗回傳 None。"""
+def safe_eval(expr: str, digits: int = 2) -> float | None:
+    """計算簡單算式（加減乘除與括號），四捨五入至 digits 位小數，失敗回傳 None。"""
     expr = (expr.replace(",", "").replace("，", "").replace("＋", "+").replace("－", "-")
             .replace("×", "*").replace("÷", "/").replace("x", "*").replace("X", "*").strip())
     if not expr:
@@ -45,7 +45,7 @@ def safe_eval(expr: str) -> float | None:
         raise ValueError
 
     try:
-        return round(ev(ast.parse(expr, mode="eval")), 2)
+        return round(ev(ast.parse(expr, mode="eval")), digits)
     except (ValueError, SyntaxError, ZeroDivisionError, TypeError, RecursionError):
         return None
 
@@ -67,7 +67,7 @@ class AmountEdit(QLineEdit):
         self.textChanged.connect(lambda _: self.valueChanged.emit())
 
     def _normalize(self) -> None:
-        v = safe_eval(self.text())
+        v = safe_eval(self.text(), self.decimals)
         if v is not None:
             self.blockSignals(True)
             self.setText(self._fmt(v))
@@ -77,10 +77,13 @@ class AmountEdit(QLineEdit):
     def _fmt(self, v: float) -> str:
         if self.decimals == 0 or float(v).is_integer():
             return f"{v:,.0f}"
+        if self.decimals > 2:   # 股數、單價：顯示到需要的位數（0.866，不顯示成 0.8660）
+            text = f"{v:,.{self.decimals}f}".rstrip("0")
+            return text + "0" * max(0, 2 - len(text.split(".")[1])) if "." in text else text
         return f"{v:,.{self.decimals}f}"
 
     def value(self) -> float | None:
-        return safe_eval(self.text())
+        return safe_eval(self.text(), max(self.decimals, 2))
 
     def setValue(self, v: float | None) -> None:
         self.setText("" if v is None else self._fmt(v))
