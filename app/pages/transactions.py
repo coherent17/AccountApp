@@ -4,14 +4,14 @@ import datetime as dt
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
-from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QMenu
+from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QMenu, QWidget
 
 from ..database import TYPE_LABELS, voucher_no
 from ..dialogs import AdjustDialog, ExportDialog, TransactionDialog, open_voucher
 from ..dialogs_more import (AuditDialog, ImportDialog, JournalDialog, RecurringEditDialog,
                             RecurringManagerDialog, ask_void_reason)
 from ..theme import TYPE_COLORS, C, fmt_date, fmt_money, icon
-from ..widgets import (PERIOD_PRESETS, Card, Column, DataTable, button, error, info, iso,
+from ..widgets import (PERIOD_PRESETS, Card, Column, DataTable, ResponsiveRow, button, error, info, iso,
                        make_date_edit, page_header, preset_range, qdate)
 from .base import Page
 
@@ -93,8 +93,6 @@ class TransactionsPage(Page):
 
         # 篩選
         fc = Card(padding=14)
-        f1 = QHBoxLayout()
-        f1.setSpacing(10)
         self.period = QComboBox()
         self.period.addItems(PERIOD_PRESETS)
         self.d1 = make_date_edit()
@@ -116,28 +114,14 @@ class TransactionsPage(Page):
         clear.clicked.connect(self.clear_filters)
         lbl = QLabel("期間")
         lbl.setObjectName("Muted")
-        f1.addWidget(lbl)
-        f1.addWidget(self.period)
-        f1.addWidget(self.d1)
-        f1.addWidget(QLabel("～"))
-        f1.addWidget(self.d2)
-        f1.addStretch()
-        f1.addWidget(self.show_void)
-        f2 = QHBoxLayout()
-        f2.setSpacing(10)
         lbl2 = QLabel("篩選")
         lbl2.setObjectName("Muted")
-        f2.addWidget(lbl2)
-        f2.addWidget(self.ttype)
-        f2.addWidget(self.account)
-        f2.addWidget(self.category)
-        f2.addWidget(self.keyword, 1)
-        f2.addWidget(clear)
         self.keyword.setMinimumWidth(240)
-        for d in (self.d1, self.d2):
-            d.setMinimumWidth(200)
-        fc.lay.addLayout(f1)
-        fc.lay.addLayout(f2)
+        # 視窗較窄或字型較大時自動分成兩列，日期與篩選欄位不會被壓縮
+        fc.lay.addWidget(ResponsiveRow([lbl, self.period, self.d1, QLabel("～"), self.d2], [self.show_void],
+                                       spacing=10))
+        fc.lay.addWidget(ResponsiveRow([lbl2, self.ttype, self.account, self.category],
+                                       [(self.keyword, 1), clear], spacing=10))
         b.addWidget(fc)
 
         # 表格
@@ -163,35 +147,36 @@ class TransactionsPage(Page):
 
         # 合計
         foot = Card(padding=12)
-        fl = QHBoxLayout()
         self.f_count = QLabel()
         self.f_inc = QLabel()
         self.f_exp = QLabel()
         self.f_net = QLabel()
         for w in (self.f_inc, self.f_exp, self.f_net):
             w.setStyleSheet("font-weight:700;")
-        fl.addWidget(self.f_count)
-        fl.addStretch()
-        fl.addWidget(self.f_inc)
-        fl.addSpacing(18)
-        fl.addWidget(self.f_exp)
-        fl.addSpacing(18)
-        fl.addWidget(self.f_net)
-        fl.addSpacing(18)
         edit = button("編輯", icon=icon("edit"))
         edit.clicked.connect(lambda: self.edit_txn(self.table.current_row()))
         dele = button("作廢", "Danger", icon("trash", C.expense))
         dele.clicked.connect(self.void_selected)
         exp = button("匯出 Excel", "Income", icon("download", "#FFFFFF"))
         exp.clicked.connect(self.export)
-        fl.addWidget(edit)
-        fl.addWidget(dele)
-        fl.addWidget(exp)
-        foot.lay.addLayout(fl)
+        # 視窗較窄或字型較大時，按鈕換到第二列，合計金額不會被截斷
+        sums = QWidget()
+        sl = QHBoxLayout(sums)
+        sl.setContentsMargins(0, 0, 0, 0)
+        sl.setSpacing(18)
+        for w in (self.f_inc, self.f_exp, self.f_net):
+            sl.addWidget(w)
+        btns = QWidget()
+        bl = QHBoxLayout(btns)
+        bl.setContentsMargins(0, 0, 0, 0)
+        for w in (edit, dele, exp):
+            bl.addWidget(w)
+        foot.lay.addWidget(ResponsiveRow([self.f_count, "stretch", sums], [btns]))
         tip = QLabel("小技巧：按兩下即可修改；按右鍵可複製、迴轉、作廢或設為定期交易。"
                      "作廢的傳票保留在帳上並留有修改紀錄，不會真的刪除。"
                      "「投資」類型的傳票由投資管理自動產生，選取後按「作廢」即可刪除（一併刪除該筆投資交易）。")
         tip.setObjectName("Hint")
+        tip.setWordWrap(True)
         foot.lay.addWidget(tip)
         b.addWidget(foot)
 

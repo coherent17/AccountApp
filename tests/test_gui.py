@@ -217,7 +217,8 @@ for key in ("dashboard", "transactions", "accounts", "investments", "reports", "
     win.go(key, animate=False)
     app.processEvents()
 rp = win.pages["reports"]
-rp.compare.setChecked(True)
+rp.is_cmp.setCurrentIndex(rp.is_cmp.findData("prior_year"))
+rp.bs_cmp.setCurrentIndex(rp.bs_cmp.findData("prior_period"))
 for i in range(rp.tabs.count()):
     rp.tabs.setCurrentIndex(i)
     app.processEvents()
@@ -730,6 +731,115 @@ save_pdf(Report(db).build(["vouchers"], lo, hi), vp)
 n_v = len(db.query_transactions(start=lo, end=hi))
 assert pdf_pages(vp) >= n_v, (pdf_pages(vp), n_v)   # 每張傳票一頁
 
+# 比較財務報表（v2.9.0）：畫面、列印、財務比率、報酬分析
+from app import statements as stm  # noqa: E402
+for mode in ("prior_period", "prior_year"):
+    for key in ("bs", "is", "ratios"):
+        out = os.path.join(tmp, f"c_{key}_{mode}.pdf")
+        html = Report(db).build([key], "2026-07-01", hi, mode)
+        save_pdf(html, out)
+        assert pdf_pages(out) >= 1, (key, mode)
+    assert "比較資產負債表" in Report(db).build(["bs"], "2026-07-01", hi, mode)
+    assert "比較收支損益表" in Report(db).build(["is"], "2026-07-01", hi, mode)
+assert "比較" not in Report(db).build(["bs", "is"], lo, hi).split("<body>")[1][:200]
+rp.tabs.setCurrentIndex(rp._tab_index("資產負債表"))
+rp.bs_cmp.setCurrentIndex(rp.bs_cmp.findData("prior_period"))
+app.processEvents()
+assert not rp.bs.isColumnHidden(4) and db.get_setting("report_compare_bs") == "prior_period"
+texts = [rp.bs.topLevelItem(i).text(0).strip() for i in range(rp.bs.topLevelItemCount())]
+assert "資產總計" in texts and "投資組合年化報酬率" in texts and "本期儲蓄率" in texts, texts
+tot = next(rp.bs.topLevelItem(i) for i in range(rp.bs.topLevelItemCount())
+           if rp.bs.topLevelItem(i).text(0).strip() == "資產總計")
+a0, b0 = rp.range()
+cd = stm.compare_date("prior_period", a0, b0)
+from app.theme import fmt_num as _fmt  # noqa: E402
+assert tot.text(4) == _fmt(db.balance_sheet(cd)["assets"], ctx.base), (tot.text(4), cd)
+rp.bs_cmp.setCurrentIndex(0)
+app.processEvents()
+assert rp.bs.isColumnHidden(4) and rp.bs.isColumnHidden(6)
+rp.tabs.setCurrentIndex(rp._tab_index("收支損益表"))
+rp.is_cmp.setCurrentIndex(rp.is_cmp.findData("prior_period"))
+app.processEvents()
+assert not rp.is_.isColumnHidden(5) and "～" in rp.is_.headerItem().text(4)
+rp.is_cmp.setCurrentIndex(0)
+pd_ = PrintDialog(ctx, lo, hi, win)
+pd_.compare.setCurrentIndex(pd_.compare.findData("prior_year"))
+for k, cb in pd_.boxes.items():
+    cb.setChecked(k in ("bs", "is", "ratios"))
+assert pd_.export_pdf(os.path.join(tmp, "比較.pdf"))
+assert db.get_setting("print_compare") == "prior_year"
+pd_.close()
+ipg2 = win.pages["investments"]
+win.go("investments", animate=False)
+ipg2.tabs.setCurrentIndex(3)
+app.processEvents()
+prow = ipg2.perf.model_.rows
+assert prow and prow[-1]["name"] == "投資組合合計", prow
+assert abs(prow[-1]["gain"] - (prow[-1]["realized"] + prow[-1]["dividends"] + prow[-1]["unrealized"])) < 0.1
+assert "總報酬率" in ipg2.perf_sum.text()
+ipg2.tabs.setCurrentIndex(0)
+# 字型大小變更後，表格欄寬依新字型重新計算（不截斷）
+from app.main import apply_theme  # noqa: E402
+from app.widgets import DataTable as _DT  # noqa: E402
+for scale_ in ("xlarge", "large"):
+    db.set_setting("font_scale", scale_)
+    apply_theme(app, ctx)
+    for _ in range(5):
+        app.processEvents()
+    t_ = win.pages["transactions"].table
+    win.go("transactions", animate=False)
+    app.processEvents()
+    assert t_.columnWidth(0) >= t_.sizeHintForColumn(0), (scale_, t_.columnWidth(0), t_.sizeHintForColumn(0))
+# 視窗大小與位置：關閉時記住，下次開啟恢復
+win.resize(1234, 777)
+app.processEvents()
+win.save_geometry()
+assert db.get_setting("window_geometry")
+w3 = MainWindow(ctx)
+assert (w3.width(), w3.height()) == (1234, 777), (w3.width(), w3.height())
+w3.deleteLater()
+db.set_setting("window_geometry", "壞掉的資料")
+w4 = MainWindow(ctx)          # 資料損壞時改用預設大小，不會出錯
+assert w4.width() >= 1100 and w4.height() >= 700
+w4.deleteLater()
+win.resize(1380, 900)
+# 背景下載的完成處理一律在主執行緒執行（v2.8.0 自動檢查新版本在背景執行緒寫入資料庫而出錯）
+import threading  # noqa: E402
+import time as _time  # noqa: E402
+from app import online as _online  # noqa: E402
+_seen = []
+_online.run_background(win, lambda: threading.get_ident(),
+                       lambda worker_tid: _seen.append((worker_tid, threading.get_ident())),
+                       lambda text: _seen.append(("fail", text)))
+_t0 = _time.time()
+while not _seen and _time.time() - _t0 < 10:
+    app.processEvents()
+    _time.sleep(0.01)
+assert _seen and _seen[0][1] == threading.main_thread().ident and _seen[0][0] != _seen[0][1], _seen
+_seen.clear()
+_online.run_background(win, lambda: (_ for _ in ()).throw(_online.OfflineError("離線")), _seen.append,
+                       lambda text: _seen.append((text, threading.get_ident())))
+_t0 = _time.time()
+while not _seen and _time.time() - _t0 < 10:
+    app.processEvents()
+    _time.sleep(0.01)
+assert _seen == [("離線", threading.main_thread().ident)], _seen
+# 真正在背景執行的自動檢查新版本：結果寫入設定（主執行緒），不會出錯
+from app import dialogs_update as _du  # noqa: E402
+_orig_fetch = _online.fetch_latest_release
+_online.fetch_latest_release = lambda: {"version": "0.0.1", "tag": "v0.0.1", "notes": "", "published": "",
+                                        "url": "", "size": 0, "sha256": "", "page": ""}
+db.set_setting("update_last_check", "")
+_du.check_for_updates(ctx, win, silent=True)
+_t0 = _time.time()
+while db.get_setting("update_last_check", "") == "" and _time.time() - _t0 < 10:
+    app.processEvents()
+    _time.sleep(0.01)
+assert db.get_setting("update_last_check") == __import__("datetime").date.today().isoformat()
+_online.fetch_latest_release = _orig_fetch
+db.set_setting("update_last_check", "")
+print("COMPARE / PERFORMANCE / LAYOUT GUI TESTS PASSED")
+
 # 年度結帳：預覽、確認、檢視結帳分錄（唯讀）、解除結帳
 first = db.first_year()
 year = __import__("datetime").date.today().year - 1
@@ -833,7 +943,9 @@ dialogs_update.error = lambda *a, **k: msgs.append(("error", a[1]))
 online.fetch_latest_release = lambda: rel
 spg = win.pages["settings"]
 spg.refresh()
-assert not spg.update_auto.isChecked() and not dialogs_update.auto_check_due(ctx)   # 預設關閉
+assert spg.update_auto.isChecked() and dialogs_update.auto_check_due(ctx)   # v2.9.0 起預設開啟
+spg.update_auto.setChecked(False)
+assert db.get_setting("update_auto") == "0" and not dialogs_update.auto_check_due(ctx)
 spg.update_auto.setChecked(True)
 assert db.get_setting("update_auto") == "1" and dialogs_update.auto_check_due(ctx)
 spg.check_update()
@@ -951,6 +1063,19 @@ for name in sorted(f for f in os.listdir(FIX) if f.startswith("ledger_v") and f.
     w2._search.close()
     export_workbook(c2.db, os.path.join(d, "old.xlsx"), "2025-01-01", "2025-12-31")
     Report(c2.db).build([k for k, _ in _REPORTS], "2025-01-01", "2025-12-31")
+    for mode_ in ("prior_period", "prior_year"):
+        Report(c2.db).build(["bs", "is", "ratios"], "2025-01-01", "2025-12-31", mode_)
+    from app.investments import Investments as _Inv  # noqa: E402
+    from app.performance import portfolio_performance as _pp  # noqa: E402
+    _r = _pp(_Inv(c2.db))
+    for _x in _r["rows"] + [_r["total"]]:
+        assert abs(_x["gain"] - (_x["realized"] + _x["dividends"] + _x["unrealized"])) < 0.1, (name, _x)
+    w2.pages["reports"].bs_cmp.setCurrentIndex(1)
+    w2.pages["reports"].is_cmp.setCurrentIndex(2)
+    w2.go("reports", animate=False)
+    for i2 in range(2):
+        w2.pages["reports"].tabs.setCurrentIndex(i2)
+        app.processEvents()
     w2.close()
     c2.db.close()
     print("OLD LEDGER OK", name)

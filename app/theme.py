@@ -78,6 +78,8 @@ def stylesheet(pt: float, arrow: str = "") -> str:
     }}
     #NavButton:hover {{ background: {C.sidebar_hover}; color: white; }}
     #NavButton:checked {{ background: {C.sidebar_active}; color: white; font-weight: 700; }}
+    #Sidebar QLabel#NavText {{ font-size: {big}pt; }}
+    #Sidebar QLabel#NavKey {{ color: {C.faint}; font-size: {s * 0.85}pt; }}
     #SidebarExport {{
         background: {C.income}; color: white; border: none; border-radius: 10px;
         padding: 12px 14px; font-weight: 700; font-size: {s}pt;

@@ -168,6 +168,12 @@ class JournalDialog(BaseDialog):
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setMinimumHeight(300)
         self.root.addWidget(self.table)
+        # 字型「特大」時視窗跟著放寬，科目名稱（含餘額）不會被截斷；不超過螢幕寬度
+        from PySide6.QtWidgets import QApplication as _QA
+        scale = max(1.0, _QA.font().pointSizeF() / 12.5)
+        scr = _QA.primaryScreen()
+        limit = scr.availableGeometry().width() - 40 if scr else 1600
+        self.setMinimumWidth(min(limit, int(1260 * scale)))
 
         tools = QHBoxLayout()
         add = button("新增一行", icon=icon("plus"))
@@ -1403,7 +1409,7 @@ class ReconcileDialog(BaseDialog):
         self.table.verticalHeader().setDefaultSectionSize(42)
         h = self.table.horizontalHeader()
         h.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        for i, w in ((0, 50), (1, 120), (2, 110), (4, 140), (5, 140)):
+        for i, w in ((0, 50), (1, 132), (2, 110), (4, 140), (5, 140)):
             self.table.setColumnWidth(i, w)
         self.table.setMinimumHeight(340)
         self.table.itemChanged.connect(lambda _: self.update_sum())

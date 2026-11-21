@@ -61,7 +61,7 @@ for i in range(1, inv_page.tabs.count()):
     inv_page.tabs.setCurrentIndex(i)
     pump(40); time.sleep(0.5); pump(20)
     snap(f"investments_{i}")
-rep.compare.setChecked(True)
+rep.is_cmp.setCurrentIndex(rep.is_cmp.findData("prior_year"))
 win.go("reports", animate=False)
 rep.tabs.setCurrentIndex(1)
 pump(40); time.sleep(0.5)

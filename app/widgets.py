@@ -11,12 +11,12 @@ from typing import Any, Callable
 
 from PySide6.QtCore import (QAbstractTableModel, QDate, QEvent, QModelIndex, QPoint,
                             QSortFilterProxyModel, Qt, QTimer, Signal)
-from PySide6.QtGui import QBrush, QColor, QFont
+from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCalendarWidget, QComboBox, QFrame,
                                QGraphicsDropShadowEffect, QGridLayout, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton,
                                QSizePolicy, QStyle, QStyledItemDelegate, QTableView,
-                               QVBoxLayout, QWidget)
+                               QTabWidget, QVBoxLayout, QWidget)
 
 from .theme import C, fmt_num
 
@@ -155,6 +155,12 @@ class DateEdit(QComboBox):
         else:
             self._show_date()
 
+    def minimumSizeHint(self):
+        # 版面變窄時也要完整顯示「2026/12/31（週四）」，不可被壓縮成「/31（週四）」
+        h = super().minimumSizeHint()
+        h.setWidth(self.fontMetrics().horizontalAdvance("2026/12/31") + 48)   # 窄時省略星期
+        return h
+
     def calendarWidget(self) -> QCalendarWidget:
         if self._calendar is None:
             cal = QCalendarWidget(self)
@@ -206,12 +212,26 @@ class DateEdit(QComboBox):
         self.hidePopup()
         self.setDate(d)
 
+    SHORT_FORMAT = "yyyy/MM/dd"
+
+    def _fmt(self) -> str:
+        return self.SHORT_FORMAT if getattr(self, "_short", False) else self.FORMAT
+
     def _show_date(self) -> None:
-        self.lineEdit().setText(self.locale().toString(self._date, self.FORMAT))
+        self.lineEdit().setText(self.locale().toString(self._date, self._fmt()))
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        # 欄位太窄時省略星期，日期本身不會被截斷
+        short = self.width() < self.fontMetrics().horizontalAdvance("2026/12/31（週四）") + 44
+        if short != getattr(self, "_short", False) and not self.lineEdit().hasFocus():
+            self._commit()
+            self._short = short
+            self._show_date()
 
     def _commit(self) -> None:
         text = self.lineEdit().text()
-        if text == self.locale().toString(self._date, self.FORMAT):
+        if text == self.locale().toString(self._date, self._fmt()):
             return
         d = parse_date_text(text)
         if d is None:
@@ -246,6 +266,180 @@ class Card(QFrame):
         shadow(self)
 
 
+class FitLabel(QLabel):
+    """單行文字放不下時自動縮小字型（最小到原本的 60%），不會被截斷。"""
+    autoshrink = True
+
+    def minimumSizeHint(self):
+        h = super().minimumSizeHint()
+        h.setWidth(0)
+        return h
+
+    def paintEvent(self, e):
+        text = self.text()
+        r = self.contentsRect()
+        fm = self.fontMetrics()
+        if not text or fm.horizontalAdvance(text) <= r.width():
+            return super().paintEvent(e)
+        f = self.font()
+        size = f.pointSizeF()
+        lo = size * 0.6
+        while size > lo and QFontMetrics(_resized(f, size)).horizontalAdvance(text) > r.width():
+            size -= 0.5
+        p = QPainter(self)
+        p.setFont(_resized(f, size))
+        p.setPen(self.palette().color(self.foregroundRole()))
+        p.drawText(r, int(self.alignment()) | Qt.AlignmentFlag.AlignVCenter, text)
+
+
+def _resized(f: QFont, size: float) -> QFont:
+    g = QFont(f)
+    g.setPointSizeF(max(1.0, size))
+    return g
+
+
+class ResponsiveRow(QWidget):
+    """左右兩組元件：寬度足夠時排成一列，不夠時右側那組換到第二列（靠右），避免文字或按鈕被壓縮截斷。"""
+
+    def __init__(self, left: list, right: list, spacing: int = 18, parent=None, wrap_left: bool = False,
+                 tail: list | None = None):
+        super().__init__(parent)
+        self._left, self._right = left, right
+        self._tail = tail or []          # 一律放在第一列最右邊（例如「刪除」按鈕）
+        self._wrap_left = wrap_left      # 換到第二列時靠左（預設靠右）
+        self._spacing = spacing
+        self._v = QVBoxLayout(self)
+        self._v.setContentsMargins(0, 0, 0, 0)
+        self._v.setSpacing(8)
+        self._row1 = QHBoxLayout()
+        self._row2 = QHBoxLayout()
+        self._row1.setSpacing(spacing)
+        self._row2.setSpacing(spacing)
+        self._v.addLayout(self._row1)
+        self._v.addLayout(self._row2)
+        self._two = None
+        self._arrange(False)
+
+    def _items(self, items: list, minimum: bool = False) -> int:
+        ws = [w[0] if isinstance(w, tuple) else w for w in items]
+        ws = [w for w in ws if isinstance(w, QWidget) and not w.isHidden()]
+        return sum((w.minimumSizeHint() if minimum else w.sizeHint()).width() for w in ws) + sum(w for w in items if isinstance(w, int)) \
+            + self._spacing * max(0, len(ws) - 1)
+
+    def _arrange(self, two: bool) -> None:
+        if two == self._two:
+            return
+        self._two = two
+        for lay in (self._row1, self._row2):
+            while lay.count():
+                lay.takeAt(0)
+        def put(lay, w):
+            if isinstance(w, tuple):
+                lay.addWidget(w[0], w[1])
+            elif isinstance(w, QWidget):
+                lay.addWidget(w)
+            elif w == "stretch":
+                lay.addStretch()
+            else:
+                lay.addSpacing(w)
+        for w in self._left:
+            put(self._row1, w)
+        grow = any(isinstance(w, tuple) for w in self._left + self._right)
+        if "stretch" not in self._left and not (grow and not two) and (two or not self._tail) \
+                and not any(isinstance(w, tuple) for w in self._left):
+            self._row1.addStretch()
+        target = self._row2 if two else self._row1
+        if two:
+            if not any(isinstance(w, tuple) for w in self._right) and "stretch" not in self._right \
+                    and not self._wrap_left:
+                self._row2.addStretch()
+        else:
+            self._row1.addSpacing(self._spacing)
+        for w in self._right:
+            put(target, w)
+        if two and self._wrap_left:
+            self._row2.addStretch()
+        if self._tail:
+            if not two and "stretch" not in self._right:
+                self._row1.addStretch()
+            for w in self._tail:
+                put(self._row1, w)
+        self.updateGeometry()
+
+    def minimumSizeHint(self):
+        from PySide6.QtCore import QSize
+        w = max(self._items(self._left, True) + self._items(self._tail, True), self._items(self._right, True))
+        return QSize(w, super().minimumSizeHint().height())
+
+    def relayout(self) -> None:
+        """依目前寬度決定排成一列或兩列（右側元件全部隱藏時一律一列）。"""
+        right = [w[0] if isinstance(w, tuple) else w for w in self._right]
+        if not any(isinstance(w, QWidget) and not w.isHidden() for w in right):
+            self._arrange(False)
+            return
+        need = self._items(self._left) + self._items(self._right) + self._items(self._tail) + 40
+        self._arrange(need > self.width())
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        QTimer.singleShot(0, self.relayout)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self.relayout()
+
+
+class FitTabWidget(QTabWidget):
+    """分頁標籤太多、視窗較窄時，先縮小標籤間距，再略縮字型，盡量讓所有分頁標籤都看得到。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDocumentMode(True)
+        self._style = None
+        QTimer.singleShot(0, self._fit)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._fit()
+
+    def changeEvent(self, e):
+        super().changeEvent(e)
+        if e.type() == QEvent.Type.FontChange:
+            QTimer.singleShot(0, self._fit)
+
+    def tabInserted(self, index):
+        super().tabInserted(index)
+        QTimer.singleShot(0, self._fit)
+
+    def _fit(self) -> None:
+        bar = self.tabBar()
+        n = bar.count()
+        if not n or self.width() <= 0:
+            return
+        from PySide6.QtWidgets import QApplication
+        base = QApplication.font().pointSizeF()
+        avail = self.width() - 8
+        style = None
+        for size in (base * 1.15, base, base * 0.92):
+            f = QFont(QApplication.font())
+            f.setPointSizeF(size)
+            f.setBold(True)
+            fm = QFontMetrics(f)
+            text = sum(fm.horizontalAdvance(bar.tabText(i)) for i in range(n))
+            pad = (avail - text - 2 * n) / (2 * n)
+            if pad >= 16 and size == base * 1.15:
+                style = ""
+                break
+            if pad >= 6:
+                style = f"QTabBar::tab {{ padding: 10px {int(min(pad, 16))}px; font-size: {size:.2f}pt; }}"
+                break
+        if style is None:
+            style = f"QTabBar::tab {{ padding: 10px 6px; font-size: {base * 0.92:.2f}pt; }}"
+        if style != self._style:
+            self._style = style
+            bar.setStyleSheet(style)
+
+
 class StatCard(Card):
     def __init__(self, title: str, accent: str = C.primary, parent=None):
         super().__init__(parent, padding=16)
@@ -256,15 +450,16 @@ class StatCard(Card):
         dot.setFixedSize(10, 10)
         dot.setStyleSheet(f"background:{accent}; border-radius:5px;")
         self.dot = dot
-        self.title = QLabel(title)
+        self.title = FitLabel(title)
         self.title.setObjectName("StatTitle")
         top.addWidget(dot)
         top.addWidget(self.title)
         top.addStretch()
-        self.value = QLabel("—")
+        self.value = FitLabel("—")
         self.value.setObjectName("StatValue")
-        self.sub = QLabel("")
+        self.sub = FitLabel("")
         self.sub.setObjectName("StatSub")
+        self.sub.setToolTip("")
         self.lay.setSpacing(6)
         self.lay.addLayout(top)
         self.lay.addWidget(self.value)
@@ -290,20 +485,23 @@ class StatCard(Card):
 
 
 def page_header(title: str, subtitle: str = "") -> tuple[QWidget, QHBoxLayout]:
+    """頁首：第一列是標題與（呼叫端加入的）按鈕，說明文字在下一列占滿整個寬度，按鈕多時也不會被擠壓。"""
     w = QWidget()
-    lay = QHBoxLayout(w)
+    outer = QVBoxLayout(w)
+    outer.setContentsMargins(0, 0, 0, 0)
+    outer.setSpacing(2)
+    lay = QHBoxLayout()
     lay.setContentsMargins(0, 0, 0, 0)
-    col = QVBoxLayout()
-    col.setSpacing(2)
     t = QLabel(title)
     t.setObjectName("PageTitle")
-    col.addWidget(t)
+    lay.addWidget(t)
+    lay.addStretch()
+    outer.addLayout(lay)
     if subtitle:
         s = QLabel(subtitle)
         s.setObjectName("PageSubtitle")
-        col.addWidget(s)
-    lay.addLayout(col)
-    lay.addStretch()
+        s.setWordWrap(True)
+        outer.addWidget(s)
     return w, lay
 
 
@@ -371,8 +569,10 @@ class Column:
     def __init__(self, title: str, value: Callable[[dict], Any], align: str = "left",
                  color: Callable[[dict], str | None] | None = None,
                  sort: Callable[[dict], Any] | None = None, bold: bool = False,
-                 width: int | None = None, stretch: bool = False):
+                 width: int | None = None, stretch: bool = False, elide: bool | None = None):
         self.title = title
+        # 備註、說明等長文字：寬度不足時可以省略（滑鼠提示有全文）
+        self.elide = elide if elide is not None else title in ("備註", "說明", "摘要", "內容", "說明／備註")
         self.value = value
         self.align = align
         self.color = color
@@ -475,6 +675,8 @@ class DataTable(QTableView):
     """美化過的表格，含排序與欄寬設定。"""
 
     rowActivated = Signal(dict)
+    STRETCH_CAP = 260      # 名稱類伸縮欄最多保留的寬度
+    ELIDE_WIDTH = 120      # 備註、說明類伸縮欄寬度不足時的最小寬度（其餘以「…」表示）
 
     def __init__(self, columns: list[Column], parent=None, sortable: bool = True):
         super().__init__(parent)
@@ -498,15 +700,86 @@ class DataTable(QTableView):
         hh.setHighlightSections(False)
         hh.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         hh.setStretchLastSection(False)
+        self.columns = columns
         for i, col in enumerate(columns):
             if col.stretch:
                 hh.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
             elif col.width:
                 self.setColumnWidth(i, col.width)
         self.doubleClicked.connect(self._activated)
+        self.fit_columns()
 
     def set_rows(self, rows: list[dict]) -> None:
         self.model_.set_rows(rows)
+        self.fit_columns()
+
+    def changeEvent(self, e):
+        super().changeEvent(e)
+        if e.type() in (QEvent.Type.FontChange, QEvent.Type.StyleChange):
+            QTimer.singleShot(0, self.fit_columns)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self.fit_columns()
+
+    def fit_columns(self) -> None:
+        """依目前字型計算每欄需要的寬度：日期、金額、名稱不截斷；備註類（elide）可省略並以滑鼠提示全文。"""
+        self.ensurePolished()
+        font = self.font()
+        bold = QFont(font)
+        bold.setBold(True)
+        fm, bfm = QFontMetrics(font), QFontMetrics(bold)
+        self.model_._bold = bold        # 粗體列跟著目前字型大小（設定 → 字型大小變更後）
+        self._need: dict[int, int] = {}
+        self.verticalHeader().setResizeContentsPrecision(300)   # 依前 300 列估計欄寬
+        for i, col in enumerate(self.columns):
+            if self.indexWidget(self.model().index(0, i)) is not None:
+                continue
+            # 內容寬度以 Qt 實際繪製時的需求為準（含樣式表的內距），再留 4px，避免被畫成「…」
+            content = self.sizeHintForColumn(i) + 4 if self.model_.rows else 0
+            need = max(bfm.horizontalAdvance(col.title) + 22, content)
+            if col.stretch:
+                need = max(110, min(need, self.ELIDE_WIDTH if col.elide else self.STRETCH_CAP))
+            self._need[i] = need
+        self.horizontalHeader().setMinimumSectionSize(36)
+        self._layout_columns()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._layout_columns()
+
+    def _layout_columns(self) -> None:
+        """寬度足夠：固定欄用設定寬度、伸縮欄占其餘空間。不夠：固定欄縮到剛好放得下內容；
+        仍不夠才讓伸縮欄維持最小寬度並以水平捲動，不把文字擠到看不見。"""
+        need = getattr(self, "_need", None)
+        if need is None:
+            return
+        hh = self.horizontalHeader()
+        cols = [i for i in range(len(self.columns)) if not self.isColumnHidden(i) and i in need]
+        fixed = [i for i in cols if not self.columns[i].stretch]
+        stretch = [i for i in cols if self.columns[i].stretch]
+        pref = {i: max(self.columns[i].width or 0, need[i]) for i in fixed}
+        room = self.viewport().width()
+        s_need = sum(need[i] for i in stretch)
+        if sum(pref.values()) + s_need <= room:
+            widths = pref
+        else:   # 介於「剛好放得下內容」與設定寬度之間，依可用空間等比例分配
+            extra = sum(pref[i] - need[i] for i in fixed)
+            f = max(0.0, min(1.0, (room - s_need - sum(need[i] for i in fixed)) / extra)) if extra else 0.0
+            widths = {i: int(need[i] + (pref[i] - need[i]) * f) for i in fixed}
+        for i, w in widths.items():
+            if self.columnWidth(i) != w:
+                self.setColumnWidth(i, w)
+        squeeze = sum(widths.values()) + s_need > room
+        # 同時有名稱欄與備註欄時，名稱欄固定為內容寬度，剩餘空間給備註欄（避免平分後名稱被截斷）
+        notes = [i for i in stretch if self.columns[i].elide]
+        for i in stretch:
+            fixed_w = squeeze or (notes and i not in notes)
+            mode = QHeaderView.ResizeMode.Interactive if fixed_w else QHeaderView.ResizeMode.Stretch
+            if hh.sectionResizeMode(i) != mode:
+                hh.setSectionResizeMode(i, mode)
+            if fixed_w and self.columnWidth(i) != need[i]:
+                self.setColumnWidth(i, need[i])
 
     def _activated(self, index) -> None:
         row = self.proxy.data(index, ROW_ROLE)
@@ -524,7 +797,6 @@ class DataTable(QTableView):
     def current_row(self) -> dict | None:
         rows = self.selected_rows()
         return rows[0] if rows else None
-
 
 def amount_color(v: float) -> str | None:
     if v > 0:

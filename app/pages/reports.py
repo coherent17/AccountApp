@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QBrush, QColor, QFont
+from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
                                QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from ..charts import BarChart, DonutChart
-from ..database import ADJUST_ACCOUNT, FX_ACCOUNT, REALIZED_ACCOUNT, month_keys
+from .. import statements as st
+from ..database import month_keys
+from ..statements import COMPARE_MODES, compare_date, compare_range
 from ..dialogs import ExportDialog
 from ..theme import C, fmt_date, fmt_money, fmt_month, fmt_month_short, fmt_num, icon
-from ..widgets import (PERIOD_PRESETS, Card, Column, DataTable, button, iso, make_date_edit,
+from ..widgets import (PERIOD_PRESETS, Card, Column, DataTable, FitTabWidget, ResponsiveRow, button, iso, make_date_edit,
                        page_header, preset_range, qdate, section_title)
 from .base import Page
 
@@ -28,15 +30,59 @@ class StatementTree(QTreeWidget):
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         h = self.header()
         h.setStretchLastSection(False)
-        h.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        h.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         for i in range(1, len(headers)):
             h.setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
             self.setColumnWidth(i, 170)
             self.headerItem().setTextAlignment(i, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._bold = QFont()
         self._bold.setBold(True)
+        self._name_need = 200
+
+    def fit(self) -> None:
+        """金額欄寬依內容（不截斷、也不留太多空白），科目欄占其餘寬度；太窄時出現水平捲軸。"""
+        self.ensurePolished()
+        bold = QFont(self.font())
+        bold.setBold(True)
+        bfm = QFontMetrics(bold)
+        h = self.header()
+        spanned = any(self.topLevelItem(i).isFirstColumnSpanned() for i in range(self.topLevelItemCount()))
+        for c in range(1, self.columnCount()):
+            if self.isColumnHidden(c):
+                continue
+            need = max(bfm.horizontalAdvance(self.headerItem().text(c)) + 24,
+                       self.sizeHintForColumn(c) + 6 if self.topLevelItemCount() else 0)
+            self.setColumnWidth(c, max(need, 84))
+        name = bfm.horizontalAdvance(self.headerItem().text(0)) + 24
+        if spanned:   # 報稅彙總：說明列跨欄並自動換行，只依一般列計算
+            for i in range(self.topLevelItemCount()):
+                it = self.topLevelItem(i)
+                if not it.isFirstColumnSpanned():
+                    name = max(name, QFontMetrics(it.font(0), self).horizontalAdvance(it.text(0)) + 40)
+        else:
+            name = max(name, self.sizeHintForColumn(0) + 6)
+        self._name_need = name
+        self._layout()
+
+    def _layout(self) -> None:
+        others = sum(self.columnWidth(c) for c in range(1, self.columnCount()) if not self.isColumnHidden(c))
+        avail = self.viewport().width() - others
+        self.setColumnWidth(0, max(self._name_need, avail, 120))
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._layout()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self.fit()
 
     def row(self, values: list[str], level: int = 1, style: str = "", color: str | None = None):
+        if len(values) < self.columnCount():
+            values = values + [""] * (self.columnCount() - len(values))
+        return self._row(values, level, style, color)
+
+    def _row(self, values: list[str], level: int = 1, style: str = "", color: str | None = None):
         item = QTreeWidgetItem(["　" * level + values[0]] + values[1:])
         for i in range(1, len(values)):
             item.setTextAlignment(i, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -79,7 +125,6 @@ class ReportsPage(Page):
         b.addWidget(head)
 
         fc = Card(padding=14)
-        fl = QHBoxLayout()
         lbl = QLabel("報表期間")
         lbl.setObjectName("Muted")
         self.period = QComboBox()
@@ -88,28 +133,30 @@ class ReportsPage(Page):
         self.d2 = make_date_edit()
         self.period_note = QLabel()
         self.period_note.setObjectName("Hint")
-        fl.addWidget(lbl)
-        fl.addWidget(self.period)
-        fl.addWidget(self.d1)
-        fl.addWidget(QLabel("～"))
-        fl.addWidget(self.d2)
-        fl.addSpacing(10)
-        fl.addWidget(self.period_note, 1)
-        fc.lay.addLayout(fl)
+        # 視窗較窄時「已結帳至」換到第二列，日期不會被壓縮
+        self._period_row = ResponsiveRow([lbl, self.period, self.d1, QLabel("～"), self.d2], [self.period_note],
+                                         spacing=8)
+        fc.lay.addWidget(self._period_row)
         b.addWidget(fc)
 
-        self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(True)
+        self.tabs = FitTabWidget()
         b.addWidget(self.tabs, 1)
 
         # 資產負債表
         w = QWidget()
         lay = QVBoxLayout(w)
         lay.setContentsMargins(0, 12, 0, 0)
+        br = QHBoxLayout()
         self.bs_title = QLabel()
         self.bs_title.setObjectName("Hint")
-        lay.addWidget(self.bs_title)
-        self.bs = StatementTree(["會計科目", "原幣金額", f"金額（{ctx.base}）", "占總資產"])
+        self.bs_title.setWordWrap(True)
+        br.addWidget(self.bs_title, 1)
+        br.addWidget(QLabel("比較"))
+        self.bs_cmp = self._compare_combo("report_compare_bs")
+        br.addWidget(self.bs_cmp)
+        lay.addLayout(br)
+        self.bs = StatementTree(["會計科目", "原幣金額", f"金額（{ctx.base}）", "占總資產",
+                                 "比較日金額", "增減金額", "增減 %"])
         lay.addWidget(self.bs, 1)
         self.tabs.addTab(w, "資產負債表")
 
@@ -118,13 +165,16 @@ class ReportsPage(Page):
         lay = QVBoxLayout(w)
         lay.setContentsMargins(0, 12, 0, 0)
         ir = QHBoxLayout()
-        self.compare = QCheckBox("與去年同期比較")
-        self.compare.toggled.connect(self.refresh)
-        ir.addWidget(self.compare)
-        ir.addStretch()
+        self.is_title = QLabel()
+        self.is_title.setObjectName("Hint")
+        self.is_title.setWordWrap(True)
+        ir.addWidget(self.is_title, 1)
+        ir.addWidget(QLabel("比較"))
+        self.is_cmp = self._compare_combo("report_compare_is")
+        ir.addWidget(self.is_cmp)
         lay.addLayout(ir)
         self.is_ = StatementTree(["會計科目", "筆數", f"本期金額（{ctx.base}）", "占收入比",
-                                  "去年同期", "增減金額", "增減 %"])
+                                  "比較期間", "增減金額", "增減 %"])
         lay.addWidget(self.is_, 1)
         self.tabs.addTab(w, "收支損益表")
 
@@ -161,10 +211,10 @@ class ReportsPage(Page):
         ], sortable=False)
         mc = Card()
         mc.lay.addWidget(section_title("每月收支"))
-        self.mon_chart = BarChart(height=360)
+        self.mon_chart = BarChart(height=240)     # 視窗較矮時可縮小（版面足夠時自動放大）
         mc.lay.addWidget(self.mon_chart)
-        lay.addWidget(self.mon_table, 5)
-        lay.addWidget(mc, 6)
+        lay.addWidget(self.mon_table, 6)
+        lay.addWidget(mc, 5)
         self.tabs.addTab(w, "月度收支")
 
         # 分類分析
@@ -196,10 +246,10 @@ class ReportsPage(Page):
         left.addWidget(self.cat_table, 1)
         cc = Card()
         cc.lay.addWidget(section_title("分類占比"))
-        self.cat_chart = DonutChart(height=360)
+        self.cat_chart = DonutChart(height=240)
         cc.lay.addWidget(self.cat_chart)
-        lay.addLayout(left, 6)
-        lay.addWidget(cc, 5)
+        lay.addLayout(left, 7)
+        lay.addWidget(cc, 4)
         self.tabs.addTab(w, "分類與預算")
 
         # 日記帳
@@ -216,10 +266,12 @@ class ReportsPage(Page):
         add_j = button("新增分錄", "Primary", icon("plus", "#FFFFFF"))
         add_j.clicked.connect(self.new_journal)
         top.addWidget(add_j)
-        top.addStretch()
+        top.addSpacing(16)
         self.jnl_sum = QLabel()
         self.jnl_sum.setStyleSheet("font-weight:700;")
-        top.addWidget(self.jnl_sum)
+        self.jnl_sum.setWordWrap(True)
+        self.jnl_sum.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        top.addWidget(self.jnl_sum, 1)
         lay.addLayout(top)
         self.jnl = DataTable([
             Column("日期", lambda r: fmt_date(r["date"]) if r.get("first") else "", width=118),
@@ -254,10 +306,12 @@ class ReportsPage(Page):
         self.ledger_acc.setMinimumWidth(260)
         self.ledger_acc.currentIndexChanged.connect(self.refresh_ledger)
         top.addWidget(self.ledger_acc)
-        top.addStretch()
+        top.addSpacing(16)
         self.ledger_sum = QLabel()
         self.ledger_sum.setStyleSheet("font-weight:700;")
-        top.addWidget(self.ledger_sum)
+        self.ledger_sum.setWordWrap(True)
+        self.ledger_sum.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        top.addWidget(self.ledger_sum, 1)
         lay.addLayout(top)
         self.ledger = DataTable([
             Column("日期", lambda r: fmt_date(r["date"]), width=118),
@@ -276,6 +330,7 @@ class ReportsPage(Page):
         lay.addWidget(self.ledger, 1)
         hint = QLabel("借方：資產增加／負債減少；貸方：資產減少／負債增加。資產帳戶餘額在借方，負債帳戶餘額在貸方。")
         hint.setObjectName("Hint")
+        hint.setWordWrap(True)
         lay.addWidget(hint)
         self.tabs.addTab(w, "分類帳")
 
@@ -298,6 +353,7 @@ class ReportsPage(Page):
         ], sortable=False)
         lay.addWidget(self.tb, 1)
         self.tb_sum = QLabel()
+        self.tb_sum.setWordWrap(True)
         self.tb_sum.setStyleSheet("font-weight:700; padding:8px 4px;")
         lay.addWidget(self.tb_sum)
         hint = QLabel("六欄式試算表：期初餘額＋本期借貸發生額＝期末餘額。損益科目只有本期發生額；"
@@ -370,6 +426,9 @@ class ReportsPage(Page):
         start, end = self.range()
         closed = self.db.closed_until
         self.period_note.setText(f"已結帳至 {fmt_date(closed)}" if closed else "")
+        if self.period_note.isHidden() == bool(closed):
+            self.period_note.setVisible(bool(closed))
+            self._period_row.relayout()
         name = self.tabs.tabText(self.tabs.currentIndex())
         if name == "分類帳":
             self.refresh_ledger_accounts()
@@ -380,6 +439,8 @@ class ReportsPage(Page):
                     "日記帳": self.refresh_journal,
                     "報稅彙總": self.refresh_tax}
         handlers[name](start, end)
+        for tree in (self.bs, self.is_, self.cf, self.tax):
+            tree.fit()
 
     def apply_filter(self, tab=None, account_id=None, **_):
         if tab == "ledger":
@@ -394,113 +455,111 @@ class ReportsPage(Page):
                 return i
         return 0
 
+    def _compare_combo(self, key: str) -> QComboBox:
+        combo = QComboBox()
+        for k, label in COMPARE_MODES:
+            combo.addItem(label, k)
+        i = combo.findData(self.db.get_setting(key, "none"))
+        combo.setCurrentIndex(max(i, 0))
+        combo.setToolTip("與上一期比較：資產負債表比較本期期初，收支損益表比較長度相同的前一期（例如本月比上月、今年比去年）。\n"
+                         "與去年同期比較：日期往前推一年。")
+
+        def changed(_=0):
+            self.db.set_setting(key, combo.currentData())
+            self.refresh()
+        combo.currentIndexChanged.connect(changed)
+        return combo
+
     # ------------------------------------------------------------------ 資產負債表
     def refresh_bs(self, start: str, end: str) -> None:
         base = self.ctx.base
-        bs = self.db.balance_sheet(end)
+        mode = self.bs_cmp.currentData()
+        cdate = compare_date(mode, start, end)
+        data = st.balance_sheet(self.db, end, cdate)
         t = self.bs
         t.clear()
-        self.bs_title.setText(f"基準日：{fmt_date(end)}（報表期間的最後一天）")
-        total = bs["assets"] or 1
-
-        def group(name: str, sign: int):
-            accs = bs["groups"][name]
-            t.row([name, "", "", ""], 1, "subtotal")
-            for a in sorted(accs, key=lambda a: a["code"]):
-                v = a["base_value"] * sign
-                orig = fmt_money(a["balance"], a["currency"]) if a["currency"] != base else ""
-                t.row([f"{a['code']}　{a['name']}（{a['category']}）", orig, fmt_num(v, base),
-                       pct(v / total)], 2)
-            v = bs["totals"][name]
-            t.row([f"{name}合計", "", fmt_num(v, base), pct(v / total)], 1, "subtotal")
-
-        t.row(["資產", "", "", ""], 0, "section")
-        group("流動資產", 1)
-        group("非流動資產", 1)
-        t.row(["資產總計", "", fmt_num(bs["assets"], base), "100.0%"], 0, "total")
-        t.row(["", "", "", ""], 0)
-        t.row(["負債及淨值", "", "", ""], 0, "section")
-        group("流動負債", -1)
-        group("非流動負債", -1)
-        t.row(["負債總計", "", fmt_num(bs["liabilities"], base), pct(bs["liabilities"] / total)], 0,
-              "total")
-        t.row(["淨資產（業主權益）", "", fmt_num(bs["net"], base), pct(bs["net"] / total)], 0, "total",
-              C.primary)
-        t.row(["負債及淨值總計", "", fmt_num(bs["liabilities"] + bs["net"], base), ""], 0, "grand")
-        t.row(["", "", "", ""], 0)
-        r = self.db.ratios(end)
-        t.row(["財務比率分析", "", "", ""], 0, "section")
-        t.row(["負債比率（負債 ÷ 資產）", "", pct(r["debt_ratio"]) or "—", ""], 1)
-        t.row(["流動比率（流動資產 ÷ 流動負債）", "",
-               "無流動負債" if r["current_ratio"] is None else f"{r['current_ratio']:.2f} 倍", ""], 1)
-        t.row(["流動資產占比", "", pct(r["liquid_ratio"]) or "—", ""], 1)
-        t.row(["緊急預備金（現金及約當現金 ÷ 平均月支出）", "",
-               "—" if r["emergency_months"] is None else f"{r['emergency_months']:.1f} 個月", ""], 1)
-        t.row(["近 12 個月儲蓄率", "", pct(r["savings_rate"]) or "—", ""], 1)
-        t.row(["", "", "", ""], 0)
+        cmp = cdate is not None
+        for col in (4, 5, 6):
+            t.setColumnHidden(col, not cmp)
+        t.setColumnHidden(1, not any(r["orig"] is not None for r in data["rows"]))
+        t.headerItem().setText(4, fmt_date(cdate) if cmp else "比較日")
+        self.bs_title.setText(f"基準日：{fmt_date(end)}（報表期間的最後一天）"
+                              + (f"　｜　比較日：{fmt_date(cdate)}" if cmp else ""))
+        styles = {"total": "total", "grand": "grand", "subtotal": "subtotal", "section": "section"}
+        liab = False
+        for r in data["rows"]:
+            if r["style"] == "section":
+                liab = r["name"].startswith("負債")
+            if r["style"] == "blank":
+                t.row([""], 0)
+                continue
+            if r["cur"] is None:
+                t.row([r["name"]], r["level"], styles.get(r["style"], ""))
+                continue
+            d, dp = st.change(r["cur"], r["prev"])
+            orig = fmt_money(r["orig"], r["currency"]) if r["orig"] is not None else ""
+            color = C.primary if r["name"].startswith("淨資產") else None
+            item = t.row([r["name"], orig, fmt_num(r["cur"], base), pct(r["share"]),
+                          fmt_num(r["prev"], base) if cmp else "",
+                          fmt_num(d, base, signed=True) if cmp else "", pct(dp) if cmp else ""],
+                         r["level"], styles.get(r["style"], ""), color)
+            if cmp and d:
+                # 增減欄：對淨值有利為綠色、不利為紅色（負債增加為不利）
+                bad = liab and not r["name"].startswith(("淨資產", "負債及淨值"))
+                for c in (5, 6):
+                    item.setForeground(c, QBrush(QColor(C.income if (d > 0) != bad else C.expense)))
+        t.row([""], 0)
+        crange = compare_range(mode, start, end)
+        t.row(["財務比率分析"], 0, "section")
+        for r in st.ratios(self.db, start, end, crange):
+            item = t.row([r["name"], "", st.fmt_ratio(r["cur"], r["kind"], r["note"]), "",
+                          st.fmt_ratio(r["prev"], r["kind"]) if cmp else "",
+                          st.fmt_ratio_change(r["cur"], r["prev"], r["kind"]) if cmp else "", ""], 1)
+            item.setToolTip(0, r["help"])
+        t.row([""], 0)
         eq = self.db.equity_statement(start, end)
-        t.row([f"權益變動（{fmt_date(start)}～{fmt_date(end)}）", "", "", ""], 0, "section")
+        t.row([f"權益變動（{fmt_date(start)}～{fmt_date(end)}）"], 0, "section")
         for name, v in eq["rows"]:
-            t.row([name, "", fmt_num(v, base), ""], 1)
-        t.row(["期末淨值", "", fmt_num(eq["closing"], base), ""], 0, "total", C.primary)
+            t.row([name, "", fmt_num(v, base)], 1)
+        t.row(["期末淨值", "", fmt_num(eq["closing"], base)], 0, "total", C.primary)
         closed = self.db.year_closings()
         years = [y for y in range(int(start[:4]), int(end[:4]) + 1) if y in closed]
         if years:
-            t.row([f"已辦理年度結帳：{'、'.join(map(str, years))} 年（本期損益已結轉累積淨值）", "", "", ""], 1)
+            t.row([f"已辦理年度結帳：{'、'.join(map(str, years))} 年（本期損益已結轉累積淨值）"], 1)
 
     # ------------------------------------------------------------------ 損益表
     def refresh_is(self, start: str, end: str) -> None:
         base = self.ctx.base
-        s = self.db.income_statement(start, end)
-        cmp = self.compare.isChecked()
-        for col in (4, 5, 6):
-            self.is_.setColumnHidden(col, not cmp)
-        p = None
-        if cmp:
-            p = self.db.income_statement(_shift_year(start), _shift_year(end))
-            self.is_.headerItem().setText(4, f"去年同期（{_shift_year(start)[:4]}）")
-        prev_inc = {c["id"]: c["total"] for c in p["income"]} if p else {}
-        prev_exp = {c["id"]: c["total"] for c in p["expense"]} if p else {}
+        mode = self.is_cmp.currentData()
+        crange = compare_range(mode, start, end)
+        cmp = crange is not None
+        data = st.income_statement(self.db, start, end, crange)
         t = self.is_
+        for col in (4, 5, 6):
+            t.setColumnHidden(col, not cmp)
+        t.headerItem().setText(4, f"{fmt_date(crange[0])}～{fmt_date(crange[1])}" if cmp else "比較期間")
+        self.is_title.setText(f"期間：{fmt_date(start)}～{fmt_date(end)}"
+                              + (f"　｜　比較：{fmt_date(crange[0])}～{fmt_date(crange[1])}" if cmp else ""))
         t.clear()
-        ti = s["total_income"] or None
-
-        def cols(cur, prev):
-            if not cmp:
-                return ["", "", ""]
-            d = cur - prev
-            return [fmt_num(prev, base), fmt_num(d, base, signed=True),
-                    pct(d / prev) if prev else "—"]
-
-        def line(name, count, cur, prev, level=2, style="", color=None):
-            t.row([name, count, fmt_num(cur, base), pct(cur / ti) if ti else ""] + cols(cur, prev),
-                  level, style, color)
-
-        t.row(["收入", "", "", "", "", "", ""], 0, "section")
-        seen = set()
-        for c in s["income"]:
-            seen.add(c["id"])
-            line(c["name"], str(c["count"]), c["total"], prev_inc.get(c["id"], 0))
-        for c in (p["income"] if p else []):
-            if c["id"] not in seen:
-                line(c["name"], "0", 0, c["total"])
-        line("收入合計", "", s["total_income"], p["total_income"] if p else 0, 1, "subtotal", C.income)
-        t.row(["支出（費用）", "", "", "", "", "", ""], 0, "section")
-        seen = set()
-        for c in s["expense"]:
-            seen.add(c["id"])
-            line(c["name"], str(c["count"]), c["total"], prev_exp.get(c["id"], 0))
-        for c in (p["expense"] if p else []):
-            if c["id"] not in seen:
-                line(c["name"], "0", 0, c["total"])
-        line("支出合計", "", s["total_expense"], p["total_expense"] if p else 0, 1, "subtotal", C.expense)
-        line("本期收支結餘", "", s["operating"], p["operating"] if p else 0, 0, "total")
-        t.row(["業外損益", "", "", "", "", "", ""], 0, "section")
-        line(f"{REALIZED_ACCOUNT}（證券買賣）", "", s["realized"], p["realized"] if p else 0)
-        line(f"{ADJUST_ACCOUNT}（市值變動）", "", s["adjust"], p["adjust"] if p else 0)
-        line(f"{FX_ACCOUNT}（匯率變動）", "", s["fx"], p["fx"] if p else 0)
-        line("本期綜合損益（淨資產增減）", "", s["comprehensive"], p["comprehensive"] if p else 0, 0,
-             "grand", C.primary if s["comprehensive"] >= 0 else C.expense)
+        for r in data["rows"]:
+            if r["style"] == "section":
+                t.row([r["name"]], 0, "section")
+                continue
+            d, dp = st.change(r["cur"], r["prev"])
+            color = None
+            if r["style"] == "subtotal":
+                color = C.income if r["kind"] == "income" else C.expense
+            elif r["style"] == "grand":
+                color = C.primary if r["cur"] >= 0 else C.expense
+            item = t.row([r["name"], r["count"], fmt_num(r["cur"], base), pct(r["share"]),
+                          fmt_num(r["prev"], base) if cmp else "",
+                          fmt_num(d, base, signed=True) if cmp else "",
+                          (pct(dp) if dp is not None else "—") if cmp else ""],
+                         r["level"], r["style"], color)
+            if cmp and d:
+                good = (d > 0) != (r["kind"] == "expense")
+                for c in (5, 6):
+                    item.setForeground(c, QBrush(QColor(C.income if good else C.expense)))
 
     # ------------------------------------------------------------------ 現金流量表
     def refresh_cf(self, start: str, end: str) -> None:
@@ -697,10 +756,3 @@ class ReportsPage(Page):
         from ..dialogs_print import PrintDialog
         a, b = self.range()
         PrintDialog(self.ctx, a, b, self.window()).exec()
-
-
-def _shift_year(iso_date: str) -> str:
-    y, m, d = int(iso_date[:4]), int(iso_date[5:7]), int(iso_date[8:10])
-    if m == 2 and d == 29:
-        d = 28
-    return f"{y - 1:04d}-{m:02d}-{d:02d}"

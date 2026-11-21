@@ -367,7 +367,8 @@ class Investments:
         """依時間順序重算持股，並產生每筆交易應有的分錄。"""
         sec = self.get_security(sid)
         state = {"shares": 0.0, "cost": 0.0, "val_adj": 0.0, "price": 0.0, "price_date": "",
-                 "realized": [], "dividends": [], "vouchers": []}
+                 "realized": [], "dividends": [], "vouchers": [],
+                 "flows": []}    # 投資人的現金流量（投入為負、收回為正），供計算報酬率（performance.py）
         inv = sec["account_id"]
         for e in self.events(sid):
             if upto and e["date"] > upto:
@@ -380,6 +381,7 @@ class Investments:
                 state["shares"] += e["shares"]
                 state["cost"] += gross
                 lines += [{"account": inv, "amt": gross}, {"account": e["cash_account_id"], "amt": -gross}]
+                state["flows"].append((e["date"], -gross))
                 note = f"買進 {sec['name']} {e['shares']:,.0f} 股 @ {e['price']:,.2f}"
             elif k == "sell":
                 if e["shares"] > state["shares"] + 1e-9:
@@ -399,11 +401,13 @@ class Investments:
                     state["shares"] = state["cost"] = 0.0
                 state["realized"].append({"date": e["date"], "gain": gain, "event": e["id"],
                                           "shares": e["shares"], "cost": cost_out, "proceeds": proceeds})
+                state["flows"].append((e["date"], proceeds))
                 note = f"賣出 {sec['name']} {e['shares']:,.0f} 股 @ {e['price']:,.2f}"
             elif k == "jbuy":
                 # 分錄已由使用者借記投資科目、貸記付款科目，這裡只累計成本與股數
                 state["shares"] += e["shares"]
                 state["cost"] += e["value"]
+                state["flows"].append((e["date"], -e["value"]))
             elif k == "jsell":
                 if e["shares"] > state["shares"] + 1e-9:
                     raise ValueError(f"{e['date'].replace('-', '/')} 分錄賣出 {fmt_shares(e['shares'])} 股，"
@@ -429,6 +433,7 @@ class Investments:
                 state["realized"].append({"date": e["date"], "gain": gain, "event": None,
                                           "txn_id": e["txn_id"], "shares": e["shares"], "cost": cost_out,
                                           "proceeds": cost_out + gain})
+                state["flows"].append((e["date"], cost_out + gain))
             elif k == "cash_div":
                 net = e["amount"] - e["nhi"]
                 lines += [{"account": e["cash_account_id"], "amt": net},
@@ -436,10 +441,12 @@ class Investments:
                 if e["nhi"]:
                     lines.append({"category": ("expense", "健保補充保費"), "debit": e["nhi"]})
                 state["dividends"].append({"date": e["date"], "amount": e["amount"], "nhi": e["nhi"]})
+                state["flows"].append((e["date"], net))
                 note = f"{sec['name']} 現金股利"
             elif k == "jdiv":
                 # 分錄已由使用者記入股利收入，這裡只計入該標的的股利
                 state["dividends"].append({"date": e["date"], "amount": e["amount"], "nhi": 0.0})
+                state["flows"].append((e["date"], e["amount"]))
             elif k == "stock_div":
                 state["shares"] += e["shares"]
             elif k == "price":
