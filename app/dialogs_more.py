@@ -17,7 +17,7 @@ from .database import (CLOSING, CLOSING_SOURCE, INVESTMENT_CATEGORIES, TYPE_LABE
 from .dialogs import BaseDialog, fill_account_combo, open_path
 from .investments import KIND_LABELS, Investments
 from .theme import C, TYPE_COLORS, fmt_date, fmt_money, fmt_num, icon
-from .widgets import (AmountEdit, Column, DataTable, ask, button, error, info, iso,
+from .widgets import (AmountEdit, Column, DataTable, TagEdit, ask, button, error, info, iso,
                       make_date_edit, section_title)
 
 
@@ -116,7 +116,7 @@ class JournalDialog(BaseDialog):
     ]
 
     def __init__(self, ctx: AppContext, txn: dict | None = None, prefill: list[dict] | None = None,
-                 date: str | None = None, note: str = "", parent=None):
+                 date: str | None = None, note: str = "", parent=None, tags: list[str] | None = None):
         super().__init__("編輯分錄" if txn else "複式分錄（傳票）", parent, width=1260)
         self.ctx = ctx
         self.db = ctx.db
@@ -147,12 +147,21 @@ class JournalDialog(BaseDialog):
         top.addWidget(self.tmpl_manage, 0, 5)
         top.addWidget(self.field_label("摘要"), 1, 0)
         top.addWidget(self.note, 1, 1, 1, 5)
+        self.tags = TagEdit([t["name"] for t in self.db.all_tags()])
+        self.tags.set_tags(self.db.get_tags(txn["id"]) if txn else (tags or []))
+        self.tags.setToolTip("標籤／專案：把跨科目的傳票歸在一起統計（例如一趟旅行、房屋修繕）。")
+        system = bool(txn and txn["source"])
+        if not system:
+            top.addWidget(self.field_label("標籤"), 2, 0)
+            top.addWidget(self.tags, 2, 1, 1, 5)
+        else:
+            self.tags.hide()
         top.setColumnStretch(1, 1)
         top.setColumnStretch(3, 1)
         if txn:
             v = QLabel(f"傳票號碼：{voucher_no(txn['id'])}")
             v.setObjectName("Hint")
-            top.addWidget(v, 2, 0, 1, 6)
+            top.addWidget(v, 3, 0, 1, 6)
         self.root.addLayout(top)
 
         self.table = QTableWidget(0, 5)
@@ -250,7 +259,7 @@ class JournalDialog(BaseDialog):
             self.add_row()
         if self.readonly:
             self.table.setEnabled(False)
-            for w in (self.date, self.note, self.template, self.tmpl_save, self.tmpl_manage):
+            for w in (self.date, self.note, self.template, self.tmpl_save, self.tmpl_manage, self.tags):
                 w.setEnabled(False)
             why = ("此傳票已作廢。" if txn["void"] else
                    "這是年度結帳分錄：損益科目結轉本期損益，只記錄於日記簿、不影響報表金額。"
@@ -655,9 +664,10 @@ class JournalDialog(BaseDialog):
                                        "確定要這樣儲存嗎？", yes="仍要儲存", no="回去選擇標的"):
                 return
             if self.txn:
-                self.db.update_journal(self.txn["id"], iso(self.date.date()), self.note.text(), lines)
+                self.db.update_journal(self.txn["id"], iso(self.date.date()), self.note.text(), lines,
+                                       tags=self.tags.tags())
             else:
-                self.db.add_journal(iso(self.date.date()), self.note.text(), lines)
+                self.db.add_journal(iso(self.date.date()), self.note.text(), lines, tags=self.tags.tags())
         except ValueError as e:
             self.show_error(str(e))
             return
@@ -1753,3 +1763,46 @@ class AttachmentsPanel(QWidget):
             except OSError:
                 pass
         self.pending = []
+
+
+class TagPickDialog(BaseDialog):
+    """為選取的多筆紀錄加上同一個標籤／專案。"""
+
+    def __init__(self, ctx: AppContext, count: int, parent=None):
+        super().__init__("加上標籤／專案", parent, width=480)
+        self.tag = ""
+        self.root.addWidget(QLabel(f"為選取的 {count} 筆紀錄加上標籤："))
+        self.box = QComboBox()
+        self.box.setEditable(True)
+        self.box.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        for t in ctx.db.all_tags():
+            self.box.addItem(t["name"])
+        self.box.setCurrentText("")
+        self.box.lineEdit().setPlaceholderText("輸入新標籤，或從清單選擇已有的標籤")
+        self.root.addWidget(self.box)
+        hint = QLabel("標籤用來把跨分類的紀錄歸在一起（例如一趟旅行、房屋修繕），"
+                      "不影響金額與報表，已結帳期間的紀錄也可以加。到「財務報表 → 標籤／專案」查看合計。")
+        hint.setObjectName("Hint")
+        hint.setWordWrap(True)
+        self.root.addWidget(hint)
+        self.root.addWidget(self.msg)
+        bar = QHBoxLayout()
+        bar.addStretch()
+        cancel = button("取消")
+        cancel.clicked.connect(self.reject)
+        ok = button("加上標籤", "Primary", "tag")
+        ok.setDefault(True)
+        ok.clicked.connect(self.save)
+        bar.addWidget(cancel)
+        bar.addWidget(ok)
+        self.root.addLayout(bar)
+        self.box.setFocus()
+
+    def save(self) -> None:
+        from .database import Database
+        tags = Database.parse_tags(self.box.currentText())
+        if not tags:
+            self.show_error("請輸入標籤名稱")
+            return
+        self.tag = tags[0]
+        self.accept()

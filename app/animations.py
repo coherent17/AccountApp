@@ -255,7 +255,7 @@ class Toast(QFrame):
         super().__init__(parent)
         self.setObjectName("Toast")
         self.setStyleSheet(
-            f"#Toast {{ background: {C.text}; border-radius: 12px; }}"
+            f"#Toast {{ background: {C.toast}; border-radius: 12px; }}"
             f"#Toast QLabel {{ color: white; background: transparent; font-weight: 700; }}"
             f"#ToastIcon {{ background: {C.income}; border-radius: 13px; color: white; }}")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)

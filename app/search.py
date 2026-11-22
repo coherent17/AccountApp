@@ -178,6 +178,9 @@ def _search_vouchers(db, toks) -> list[dict]:
     atts: dict[int, list[str]] = {}
     for a in db._q("SELECT txn_id, name FROM attachments"):
         atts.setdefault(a["txn_id"], []).append(a["name"])
+    tags: dict[int, list[str]] = {}
+    for g in db._q("SELECT txn_id, tag FROM txn_tags"):
+        tags.setdefault(g["txn_id"], []).append(g["tag"])
 
     out = []
     for t in db._q("SELECT * FROM transactions ORDER BY date DESC, id DESC"):
@@ -212,7 +215,7 @@ def _search_vouchers(db, toks) -> list[dict]:
                 words += [s["code"], s["name"]]
                 codes.append(s["code"])
             nums += [ln["debit"], ln["credit"], ln["orig"] or 0, ln["shares"], ln["price"]]
-        words += names + codes + atts.get(t["id"], [])
+        words += names + codes + atts.get(t["id"], []) + tags.get(t["id"], [])
         hay = " ".join(w for w in words if w).lower()
         if not all(_text_match(tok, hay, codes, nums, t["id"], t["date"]) for tok in toks):
             continue
@@ -225,7 +228,8 @@ def _search_vouchers(db, toks) -> list[dict]:
         out.append({"group": "傳票", "kind": "voucher", "id": t["id"], "date": t["date"],
                     "ref": voucher_no(t["id"]), "title": note or TYPE_LABELS.get(t["type"], ""),
                     "detail": TYPE_LABELS.get(t["type"], "") + "・" + "、".join(names[:4])
-                    + (f"・附件 {len(atts[t['id']])}" if t["id"] in atts else ""),
+                    + (f"・附件 {len(atts[t['id']])}" if t["id"] in atts else "")
+                    + (f"・標籤 {'、'.join(tags[t['id']])}" if t["id"] in tags else ""),
                     "amount": amt, "currency": cur, "void": bool(t["void"]),
                     "system": t["source"].startswith(("inv:", "close:"))})
     return out

@@ -94,6 +94,52 @@ class AmountEdit(QLineEdit):
 
 
 # ---------------------------------------------------------------------- 日期
+class TagEdit(QLineEdit):
+    """標籤／專案輸入框：以「、」或逗號分隔多個標籤；輸入時會提示已用過的標籤（只補最後一個）。"""
+
+    def __init__(self, known: list[str] | None = None, parent=None):
+        super().__init__(parent)
+        from PySide6.QtCore import QStringListModel
+        from PySide6.QtWidgets import QCompleter
+        self.setPlaceholderText("例如：日本旅遊 2026、房屋修繕（可留空）")
+        self.setClearButtonEnabled(True)
+        self._model = QStringListModel(known or [])
+        self._comp = QCompleter(self._model, self)
+        self._comp.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self._comp.setFilterMode(Qt.MatchFlag.MatchContains)
+        self._comp.setWidget(self)
+        self._comp.activated.connect(self._insert)
+        self.textEdited.connect(self._update)
+
+    @staticmethod
+    def _split(text: str) -> tuple[str, str]:
+        i = max(text.rfind(ch) for ch in "、,，;；")
+        return (text[:i + 1], text[i + 1:]) if i >= 0 else ("", text)
+
+    def _update(self, text: str) -> None:
+        _head, last = self._split(text)
+        last = last.strip()
+        if not last:
+            self._comp.popup().hide()
+            return
+        self._comp.setCompletionPrefix(last)
+        if self._comp.completionCount():
+            self._comp.complete()
+        else:
+            self._comp.popup().hide()
+
+    def _insert(self, tag: str) -> None:
+        head, _last = self._split(self.text())
+        self.setText(head + tag + "、")
+
+    def tags(self) -> list[str]:
+        from .database import Database
+        return Database.parse_tags(self.text())
+
+    def set_tags(self, tags: list[str]) -> None:
+        self.setText("、".join(tags))
+
+
 def qdate(iso: str) -> QDate:
     d = dt.date.fromisoformat(iso)
     return QDate(d.year, d.month, d.day)
@@ -252,7 +298,7 @@ def shadow(widget: QWidget, blur: int = 30, alpha: int = 18) -> None:
     eff = QGraphicsDropShadowEffect(widget)
     eff.setBlurRadius(blur)
     eff.setOffset(0, 6)
-    eff.setColor(QColor(15, 23, 42, alpha))
+    eff.setColor(QColor(*C.shadow, alpha * 3 if C.dark else alpha))
     widget.setGraphicsEffect(eff)
 
 
@@ -420,7 +466,7 @@ class FitTabWidget(QTabWidget):
         base = QApplication.font().pointSizeF()
         avail = self.width() - 8
         style = None
-        for size in (base * 1.15, base, base * 0.92):
+        for size in (base * 1.15, base, base * 0.92, base * 0.85):
             f = QFont(QApplication.font())
             f.setPointSizeF(size)
             f.setBold(True)
@@ -434,7 +480,7 @@ class FitTabWidget(QTabWidget):
                 style = f"QTabBar::tab {{ padding: 10px {int(min(pad, 16))}px; font-size: {size:.2f}pt; }}"
                 break
         if style is None:
-            style = f"QTabBar::tab {{ padding: 10px 6px; font-size: {base * 0.92:.2f}pt; }}"
+            style = f"QTabBar::tab {{ padding: 10px 5px; font-size: {base * 0.85:.2f}pt; }}"
         if style != self._style:
             self._style = style
             bar.setStyleSheet(style)
@@ -882,6 +928,18 @@ class DataTable(QTableView):
     def current_row(self) -> dict | None:
         rows = self.selected_rows()
         return rows[0] if rows else None
+
+    def select_where(self, pred) -> bool:
+        """選取第一個符合條件的列（依目前排序）；沒有符合時選第一列。"""
+        n = self.proxy.rowCount()
+        for r in range(n):
+            row = self.proxy.data(self.proxy.index(r, 0), ROW_ROLE)
+            if row is not None and pred(row):
+                self.selectRow(r)
+                return True
+        if n:
+            self.selectRow(0)
+        return False
 
 def amount_color(v: float) -> str | None:
     if v > 0:

@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QCompleter, Q
 from .context import AppContext
 from .database import ASSET_CATEGORIES, CURRENCIES, LIABILITY_CATEGORIES
 from .theme import C, currency_name, decimals_for, fmt_money, icon
-from .widgets import (AmountEdit, ChipGroup, button, error, iso, make_date_edit, qdate,
+from .widgets import (AmountEdit, ChipGroup, TagEdit, button, error, iso, make_date_edit, qdate,
                       section_title)
 
 
@@ -184,6 +184,12 @@ class TransactionDialog(BaseDialog):
         grid.addWidget(self.field_label("說明"), r, 0)
         grid.addWidget(self.note, r, 1)
         r += 1
+        self.tags = TagEdit([t["name"] for t in self.db.all_tags()])
+        self.tags.setToolTip("標籤／專案：把跨分類的紀錄歸在一起統計，例如一趟旅行、房屋修繕、孫子的教育費。\n"
+                             "多個標籤用「、」分開；到「財務報表 → 標籤／專案」查看合計。")
+        grid.addWidget(self.field_label("標籤"), r, 0)
+        grid.addWidget(self.tags, r, 1)
+        r += 1
         from .dialogs_more import AttachmentsPanel
         self.attach = AttachmentsPanel(ctx, self.txn["id"] if self.txn else None)
         grid.addWidget(self.field_label("附件"), r, 0, Qt.AlignmentFlag.AlignTop)
@@ -244,6 +250,8 @@ class TransactionDialog(BaseDialog):
             if txn.get("category_id"):
                 self.chips.set_value(txn["category_id"])
             self.note.setText(txn.get("note", ""))
+            if txn.get("id"):
+                self.tags.set_tags(self.db.get_tags(txn["id"]))
         self._update_currency()
         self.amount.setFocus()
 
@@ -315,6 +323,7 @@ class TransactionDialog(BaseDialog):
             "account_id": self.account.currentData(),
             "amount": amount,
             "note": self.note.text(),
+            "tags": self.tags.tags(),
         }
         if self.account.currentData() is None:
             raise ValueError("請先到「帳戶管理」新增至少一個帳戶")
@@ -348,7 +357,7 @@ class TransactionDialog(BaseDialog):
         self.saved_any = True
         self.ctx.changed()
         label = {"expense": "支出", "income": "收入", "transfer": "轉帳"}.get(self.ttype, "紀錄")
-        self.ctx.toast.emit(f"已{'更新' if self.txn else '儲存'}{label}：{self.amount.text()}")
+        self.ctx.toast.emit(f"已{'更新' if self.txn else '儲存'}{label}：{self.amount.text()}（Ctrl+Z 可復原）")
         if keep_open:
             self.amount.clear()
             self.note.clear()
@@ -402,7 +411,7 @@ class TransactionDialog(BaseDialog):
             prefill = [{"key": ("account", to) if to else None, "debit": amt},
                        {"key": ("account", acc) if acc else None, "credit": amt}]
         dlg = JournalDialog(self.ctx, prefill=prefill, date=iso(self.date.date()),
-                            note=self.note.text(), parent=self.parentWidget())
+                            note=self.note.text(), tags=self.tags.tags(), parent=self.parentWidget())
         self.hide()
         if dlg.exec():
             self.saved_any = True

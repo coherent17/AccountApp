@@ -12,9 +12,11 @@ import socket
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import QPushButton
 
+from .theme import C
+
 PROBE_HOST = ("api.github.com", 443)
 INTERVAL_MS = 5 * 60 * 1000        # 每 5 分鐘檢查一次
-ON_COLOR, OFF_COLOR, WAIT_COLOR = "#0C9A6A", "#DC444A", "#7D899C"      # 與 theme.C 的收入綠、支出紅、淡灰一致
+
 
 
 def probe(timeout: float = 4.0) -> bool:
@@ -51,7 +53,7 @@ class NetStatus(QPushButton):
         self._timer.setInterval(INTERVAL_MS)
         self._timer.timeout.connect(self.check_now)
         self.clicked.connect(self.check_now)
-        self._show("網路：檢查中…", WAIT_COLOR)
+        self._show("網路：檢查中…", C.faint)
 
     def start(self, first_delay_ms: int = 1500) -> None:
         self._timer.start()
@@ -65,7 +67,7 @@ class NetStatus(QPushButton):
         if self._job.isRunning():
             return
         if self.online is None:
-            self._show("網路：檢查中…", WAIT_COLOR)
+            self._show("網路：檢查中…", C.faint)
         self._job.start()
 
     def _show(self, text: str, color: str) -> None:
@@ -78,7 +80,7 @@ class NetStatus(QPushButton):
         prev = self.online
         self.online = ok
         self.checked_at = dt.datetime.now()
-        self._show("網路：已連線" if ok else "網路：離線", ON_COLOR if ok else OFF_COLOR)
+        self._show("網路：已連線" if ok else "網路：離線", C.income if ok else C.expense)
         self.setToolTip(
             ("目前可以連上網路。" if ok else "目前連不上網路。沒有網路時記帳、報表、備份等功能都照常使用；") +
             ("" if ok else "只有「檢查新版本」與「從網路取得匯率／股價」需要網路。") +

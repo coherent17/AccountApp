@@ -21,43 +21,55 @@ FONT_SCALES = {
 }
 
 
+# 淺色（預設）與深色兩組設計配色；C 的屬性由 set_mode() 依設定填入。
+LIGHT = {
+    "bg": "#F4F6FA", "surface": "#FFFFFF", "surface_alt": "#F7F9FC", "popup": "#FFFFFF",
+    "border": "#E4E8EF", "border_strong": "#CFD6E1", "border_hover": "#AEB8C8",
+    "text": "#111827", "muted": "#5B6880", "faint": "#7D899C",
+    "sidebar": "#FFFFFF", "sidebar_hover": "#F1F4F9", "sidebar_active": "#E9EFFE", "sidebar_text": "#475569",
+    "primary": "#3056D3", "primary_hover": "#2546B5", "primary_soft": "#EAF0FE", "primary_deep": "#4B3CC4",
+    "primary_disabled": "#A9B8E8", "on_primary": "#FFFFFF",
+    "income": "#0C9A6A", "income_soft": "#E5F6EF", "income_line": "#C5EADB", "income_hover": "#D6F1E6",
+    "expense": "#DC444A", "expense_soft": "#FDEEEE", "expense_line": "#F7CFD1", "expense_hover": "#FBE1E2",
+    "transfer": "#55647C", "transfer_soft": "#EEF1F6", "transfer_line": "#D9DFE9", "transfer_hover": "#E3E8F0",
+    "adjust": "#7350DD", "adjust_soft": "#F1EDFE", "adjust_line": "#DCD2FA", "adjust_hover": "#E7E0FD",
+    "danger_line": "#F2C3C5",
+    "gold": "#D4880B", "gold_soft": "#FDF4E2", "gold_line": "#F1D29A", "gold_text": "#7A4F00",
+    "row_alt": "#FAFBFD", "row_line": "#EEF1F6", "row_sub": "#F6F8FC", "row_total": "#ECF1FD", "row_grand": "#E1E9FC",
+    "tooltip": "#1F2937", "toast": "#111827", "shadow": (15, 23, 42), "chart_edge": "#FFFFFF",
+    "chart": ["#3056D3", "#0C9A6A", "#F0A020", "#DC444A", "#7350DD", "#0EA5B7",
+              "#E45FA2", "#7CB518", "#64748B", "#F07A2E", "#14B8A6", "#A35BE8"],
+}
+DARK = {
+    "bg": "#0E131B", "surface": "#161C26", "surface_alt": "#1C2330", "popup": "#1C2330",
+    "border": "#273041", "border_strong": "#364154", "border_hover": "#55637C",
+    "text": "#E7EBF3", "muted": "#9CA8BC", "faint": "#7F8BA0",
+    "sidebar": "#121821", "sidebar_hover": "#1C2330", "sidebar_active": "#1D2A4C", "sidebar_text": "#AAB5C7",
+    "primary": "#5B7CF0", "primary_hover": "#7591F5", "primary_soft": "#1D2A4C", "primary_deep": "#5B4BD3",
+    "primary_disabled": "#2E3B63", "on_primary": "#FFFFFF",
+    "income": "#3CC48F", "income_soft": "#13302A", "income_line": "#1E4A3E", "income_hover": "#183B33",
+    "expense": "#F2696E", "expense_soft": "#3A1D22", "expense_line": "#5A2A31", "expense_hover": "#45222A",
+    "transfer": "#9DAAC1", "transfer_soft": "#222A37", "transfer_line": "#323C4E", "transfer_hover": "#2A3342",
+    "adjust": "#A78DF6", "adjust_soft": "#272044", "adjust_line": "#3B3166", "adjust_hover": "#302853",
+    "danger_line": "#5A2A31",
+    "gold": "#F0B24A", "gold_soft": "#2E2516", "gold_line": "#5A4520", "gold_text": "#F3C877",
+    "row_alt": "#19202B", "row_line": "#222A37", "row_sub": "#1B2230", "row_total": "#1E2945", "row_grand": "#253259",
+    "tooltip": "#2C3546", "toast": "#2C3546", "shadow": (0, 0, 0), "chart_edge": "#161C26",
+    "chart": ["#6E8EF7", "#3CC48F", "#F5B342", "#F2696E", "#A78DF6", "#2CC3D5",
+              "#F07DB8", "#9BD13A", "#8A97AD", "#F7914F", "#2DD4BF", "#C084FC"],
+}
+THEME_MODES = {"light": "淺色", "dark": "深色", "system": "跟隨 Windows 設定"}
+
+
 class C:
     """設計配色（v2.10.0）：沉穩的墨藍為主色，收入綠、支出紅、轉帳灰藍、評價紫；
-    每個顏色都有淡色底（*_soft），用於標籤、按鈕底色與圖示底。"""
-    bg = "#F4F6FA"
-    surface = "#FFFFFF"
-    surface_alt = "#F7F9FC"
-    border = "#E4E8EF"
-    border_strong = "#CFD6E1"
-    border_hover = "#AEB8C8"
-    text = "#111827"
-    muted = "#5B6880"
-    faint = "#7D899C"
-    sidebar = "#FFFFFF"
-    sidebar_hover = "#F1F4F9"
-    sidebar_active = "#E9EFFE"
-    sidebar_text = "#475569"
-    primary = "#3056D3"
-    primary_hover = "#2546B5"
-    primary_soft = "#EAF0FE"
-    primary_deep = "#4B3CC4"
-    income = "#0C9A6A"
-    income_soft = "#E5F6EF"
-    expense = "#DC444A"
-    expense_soft = "#FDEEEE"
-    transfer = "#55647C"
-    transfer_soft = "#EEF1F6"
-    adjust = "#7350DD"
-    adjust_soft = "#F1EDFE"
-    gold = "#D4880B"
-    gold_soft = "#FDF4E2"
-    row_alt = "#FAFBFD"
-    row_line = "#EEF1F6"
-    row_sub = "#F6F8FC"
-    row_total = "#ECF1FD"
-    row_grand = "#E1E9FC"
-    chart = ["#3056D3", "#0C9A6A", "#F0A020", "#DC444A", "#7350DD", "#0EA5B7",
-             "#E45FA2", "#7CB518", "#64748B", "#F07A2E", "#14B8A6", "#A35BE8"]
+    每個顏色都有淡色底（*_soft），用於標籤、按鈕底色與圖示底。v2.11.0 起另有深色模式（DARK）。
+    頁面一律讀取 C.xxx，不要寫死色碼。"""
+    dark = False
+
+
+for _k, _v in LIGHT.items():
+    setattr(C, _k, _v)
 
 
 def soft(color: str, alpha: float = 0.12) -> str:
@@ -66,19 +78,68 @@ def soft(color: str, alpha: float = 0.12) -> str:
     return f"rgba({c.red()}, {c.green()}, {c.blue()}, {int(alpha * 255)})"
 
 
-TYPE_COLORS = {
-    "income": (C.income, C.income_soft),
-    "expense": (C.expense, C.expense_soft),
-    "transfer": (C.transfer, C.transfer_soft),
-    "adjust": (C.adjust, C.adjust_soft),
-    "journal": (C.primary, C.primary_soft),
-}
-
+TYPE_COLORS: dict[str, tuple[str, str]] = {}
 # 按鈕樣式（objectName）→ 圖示顏色
-BUTTON_ICON_COLORS = {
-    "Primary": "#FFFFFF", "Income": C.income, "Expense": C.expense, "Transfer": C.transfer,
-    "Adjust": C.adjust, "Danger": C.expense, "Link": C.primary,
-}
+BUTTON_ICON_COLORS: dict[str, str] = {}
+
+
+def _derive() -> None:
+    """依目前的 C 重新填入衍生的對照表（就地更新，已匯入的模組也會看到新顏色）。"""
+    TYPE_COLORS.update({
+        "income": (C.income, C.income_soft), "expense": (C.expense, C.expense_soft),
+        "transfer": (C.transfer, C.transfer_soft), "adjust": (C.adjust, C.adjust_soft),
+        "journal": (C.primary, C.primary_soft),
+    })
+    BUTTON_ICON_COLORS.update({
+        "Primary": C.on_primary, "Income": C.income, "Expense": C.expense, "Transfer": C.transfer,
+        "Adjust": C.adjust, "Danger": C.expense, "Link": C.primary,
+    })
+
+
+def system_prefers_dark() -> bool:
+    try:
+        from PySide6.QtGui import QGuiApplication
+        hints = QGuiApplication.styleHints()
+        return hints is not None and hints.colorScheme() == Qt.ColorScheme.Dark
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def resolve_mode(mode: str) -> bool:
+    """設定值（light／dark／system）→ 是否使用深色。"""
+    if mode == "dark":
+        return True
+    if mode == "system":
+        return system_prefers_dark()
+    return False
+
+
+def set_mode(dark: bool) -> None:
+    """切換淺色／深色配色。須在建立視窗之前呼叫（已建立的視窗不會全部重畫，切換時程式會重新開啟）。"""
+    for k, v in (DARK if dark else LIGHT).items():
+        setattr(C, k, list(v) if isinstance(v, list) else v)
+    C.dark = dark
+    _derive()
+
+
+_derive()
+
+
+def palette():
+    """Fusion 樣式的調色盤（樣式表沒有涵蓋的元件，例如預覽列印視窗、文字瀏覽框）。"""
+    from PySide6.QtGui import QPalette
+    pal = QPalette()
+    R = QPalette.ColorRole
+    for role, color in ((R.Window, C.bg), (R.WindowText, C.text), (R.Base, C.surface), (R.AlternateBase, C.row_alt),
+                        (R.Text, C.text), (R.Button, C.surface), (R.ButtonText, C.text),
+                        (R.ToolTipBase, C.tooltip), (R.ToolTipText, "#FFFFFF"), (R.PlaceholderText, C.faint),
+                        (R.Highlight, C.primary), (R.HighlightedText, C.on_primary), (R.Link, C.primary),
+                        (R.BrightText, "#FFFFFF"), (R.Mid, C.border_strong), (R.Dark, C.border_hover),
+                        (R.Light, C.surface_alt), (R.Midlight, C.surface_alt), (R.Shadow, "#000000")):
+        pal.setColor(role, QColor(color))
+    for role in (R.Text, R.WindowText, R.ButtonText):
+        pal.setColor(QPalette.ColorGroup.Disabled, role, QColor(C.faint))
+    return pal
 
 
 def _tinted(name: str, fg: str, bg: str, line: str, hover: str) -> str:
@@ -94,7 +155,7 @@ def stylesheet(pt: float, arrow: str = "", check: str = "") -> str:
     return f"""
     * {{ font-family: "{FONT_FAMILY}", "Microsoft JhengHei"; font-size: {s}pt; color: {C.text}; }}
     QMainWindow, QDialog, #PageRoot {{ background: {C.bg}; }}
-    QToolTip {{ background: #1F2937; color: white; border: none; padding: 7px 10px; border-radius: 8px; }}
+    QToolTip {{ background: {C.tooltip}; color: #FFFFFF; border: none; padding: 7px 10px; border-radius: 8px; }}
 
     /* ---------- 側邊欄 ---------- */
     #Sidebar {{ background: {C.sidebar}; border: none; border-right: 1px solid {C.border}; }}
@@ -113,7 +174,7 @@ def stylesheet(pt: float, arrow: str = "", check: str = "") -> str:
     #Sidebar QLabel#NavKey {{ color: {C.faint}; font-size: {s * 0.78}pt; background: {C.surface_alt};
         border: 1px solid {C.border}; border-radius: 5px; padding: 1px 5px; }}
     #SidebarExport {{
-        background: {C.primary}; color: white; border: none; border-radius: 10px;
+        background: {C.primary}; color: {C.on_primary}; border: none; border-radius: 10px;
         padding: 11px 14px; font-weight: 700; font-size: {s}pt;
     }}
     #SidebarExport:hover {{ background: {C.primary_hover}; }}
@@ -136,10 +197,10 @@ def stylesheet(pt: float, arrow: str = "", check: str = "") -> str:
     #HeroCard QLabel {{ background: transparent; color: white; }}
     #HeroCard QLabel#StatTitle, #HeroCard QLabel#StatSub {{ color: rgba(255, 255, 255, 200); }}
     #RatioValue {{ font-size: {s * 1.3}pt; font-weight: 700; }}
-    #RemindCard {{ background: {C.gold_soft}; border: 1px solid #F1D29A; border-radius: 16px; }}
+    #RemindCard {{ background: {C.gold_soft}; border: 1px solid {C.gold_line}; border-radius: 16px; }}
     #RemindCard QLabel {{ background: transparent; }}
-    #SampleBanner {{ background: {C.gold_soft}; border: 1px solid #F1D29A; border-radius: 14px; }}
-    #SampleBanner QLabel {{ background: transparent; color: #7A4F00; font-weight: 700; }}
+    #SampleBanner {{ background: {C.gold_soft}; border: 1px solid {C.gold_line}; border-radius: 14px; }}
+    #SampleBanner QLabel {{ background: transparent; color: {C.gold_text}; font-weight: 700; }}
 
     /* ---------- 按鈕 ---------- */
     QPushButton {{
@@ -149,14 +210,14 @@ def stylesheet(pt: float, arrow: str = "", check: str = "") -> str:
     QPushButton:hover {{ background: {C.surface_alt}; border-color: {C.border_hover}; }}
     QPushButton:pressed {{ background: {C.row_line}; }}
     QPushButton:disabled {{ color: {C.faint}; background: {C.surface_alt}; border-color: {C.border}; }}
-    QPushButton#Primary {{ background: {C.primary}; color: white; border: 1px solid {C.primary}; font-weight: 700; }}
+    QPushButton#Primary {{ background: {C.primary}; color: {C.on_primary}; border: 1px solid {C.primary}; font-weight: 700; }}
     QPushButton#Primary:hover {{ background: {C.primary_hover}; border-color: {C.primary_hover}; }}
-    QPushButton#Primary:disabled {{ background: #A9B8E8; border-color: #A9B8E8; }}
-    {_tinted("Income", C.income, C.income_soft, "#C5EADB", "#D6F1E6")}
-    {_tinted("Expense", C.expense, C.expense_soft, "#F7CFD1", "#FBE1E2")}
-    {_tinted("Transfer", C.transfer, C.transfer_soft, "#D9DFE9", "#E3E8F0")}
-    {_tinted("Adjust", C.adjust, C.adjust_soft, "#DCD2FA", "#E7E0FD")}
-    QPushButton#Danger {{ color: {C.expense}; border-color: #F2C3C5; }}
+    QPushButton#Primary:disabled {{ background: {C.primary_disabled}; border-color: {C.primary_disabled}; }}
+    {_tinted("Income", C.income, C.income_soft, C.income_line, C.income_hover)}
+    {_tinted("Expense", C.expense, C.expense_soft, C.expense_line, C.expense_hover)}
+    {_tinted("Transfer", C.transfer, C.transfer_soft, C.transfer_line, C.transfer_hover)}
+    {_tinted("Adjust", C.adjust, C.adjust_soft, C.adjust_line, C.adjust_hover)}
+    QPushButton#Danger {{ color: {C.expense}; border-color: {C.danger_line}; }}
     QPushButton#Danger:hover {{ background: {C.expense_soft}; border-color: {C.expense}; }}
     QPushButton#Link {{ background: transparent; border: none; color: {C.primary}; padding: 4px 6px; }}
     QPushButton#Link:hover {{ text-decoration: underline; }}
@@ -168,7 +229,7 @@ def stylesheet(pt: float, arrow: str = "", check: str = "") -> str:
         padding: 10px 6px; font-size: {big}pt; color: {C.muted};
     }}
     QPushButton#Segment:hover {{ border-color: {C.border_hover}; color: {C.text}; }}
-    QPushButton#Segment:checked {{ color: white; font-weight: 700; border: none; }}
+    QPushButton#Segment:checked {{ color: {C.on_primary}; font-weight: 700; border: none; }}
     QPushButton#Segment[ttype="expense"]:checked {{ background: {C.expense}; }}
     QPushButton#Segment[ttype="income"]:checked {{ background: {C.income}; }}
     QPushButton#Segment[ttype="transfer"]:checked {{ background: {C.transfer}; }}
@@ -179,13 +240,13 @@ def stylesheet(pt: float, arrow: str = "", check: str = "") -> str:
     }}
     QPushButton#Chip:hover {{ border-color: {C.primary}; background: {C.primary_soft}; }}
     QPushButton#Chip:checked {{ background: {C.primary}; border: 2px solid {C.primary};
-        color: white; font-weight: 700; }}
+        color: {C.on_primary}; font-weight: 700; }}
 
     /* ---------- 輸入 ---------- */
     QLineEdit, QComboBox, QDateEdit, QSpinBox, QDoubleSpinBox, QPlainTextEdit {{
         background: {C.surface}; border: 1px solid {C.border_strong}; border-radius: 10px;
         padding: 7px 11px; min-height: 22px; selection-background-color: {C.primary};
-        selection-color: white;
+        selection-color: {C.on_primary};
     }}
     QLineEdit:hover, QComboBox:hover, QDateEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover,
     QPlainTextEdit:hover {{ border-color: {C.border_hover}; }}
@@ -202,17 +263,17 @@ def stylesheet(pt: float, arrow: str = "", check: str = "") -> str:
     QComboBox::down-arrow, QDateEdit::down-arrow {{ image: url({arrow}); width: 14px; height: 14px; }}
     QComboBox::down-arrow:on {{ top: 1px; }}
     QComboBox QAbstractItemView {{
-        background: white; border: 1px solid {C.border_strong}; outline: none; border-radius: 8px;
+        background: {C.popup}; border: 1px solid {C.border_strong}; outline: none; border-radius: 8px;
         selection-background-color: {C.primary_soft}; selection-color: {C.text}; padding: 4px;
     }}
     QComboBox QAbstractItemView::item {{ min-height: 32px; padding: 2px 8px; border-radius: 6px; }}
     QCheckBox, QRadioButton {{ spacing: 8px; background: transparent; padding: 4px 10px 4px 0; }}
     QRadioButton::indicator {{ width: 16px; height: 16px; border-radius: 10px;
-        border: 2px solid {C.border_strong}; background: white; }}
+        border: 2px solid {C.border_strong}; background: {C.surface}; }}
     QRadioButton::indicator:hover {{ border-color: {C.primary}; }}
     QRadioButton::indicator:checked {{ border: 6px solid {C.primary}; width: 8px; height: 8px; }}
     QCheckBox::indicator {{ width: 18px; height: 18px; border-radius: 6px;
-        border: 2px solid {C.border_strong}; background: white; }}
+        border: 2px solid {C.border_strong}; background: {C.surface}; }}
     QCheckBox::indicator:hover {{ border-color: {C.primary}; }}
     QCheckBox::indicator:checked {{ background: {C.primary}; border: 2px solid {C.primary};
         image: url({check}); }}
@@ -223,7 +284,7 @@ def stylesheet(pt: float, arrow: str = "", check: str = "") -> str:
         font-weight: 700; border-radius: 6px; }}
     QCalendarWidget QToolButton:hover {{ background: {C.primary_soft}; }}
     QCalendarWidget #qt_calendar_navigationbar {{ background: {C.surface}; border-bottom: 1px solid {C.border}; }}
-    QCalendarWidget QAbstractItemView {{ selection-background-color: {C.primary}; selection-color: white;
+    QCalendarWidget QAbstractItemView {{ selection-background-color: {C.primary}; selection-color: {C.on_primary};
         font-size: {s}pt; }}
 
     /* ---------- 表格 ---------- */
@@ -274,7 +335,7 @@ def stylesheet(pt: float, arrow: str = "", check: str = "") -> str:
 
     QMessageBox {{ background: {C.surface}; }}
     QMessageBox QLabel {{ font-size: {big}pt; }}
-    QMenu {{ background: white; border: 1px solid {C.border}; padding: 6px; border-radius: 10px; }}
+    QMenu {{ background: {C.popup}; border: 1px solid {C.border}; padding: 6px; border-radius: 10px; }}
     QMenu::item {{ padding: 9px 26px 9px 14px; border-radius: 7px; }}
     QMenu::item:selected {{ background: {C.primary_soft}; color: {C.primary}; }}
     QMenu::separator {{ height: 1px; background: {C.border}; margin: 4px 8px; }}
@@ -310,6 +371,11 @@ _ICONS = {
     "eye": '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     "up": '<path d="m6 15 6-6 6 6"/>',
     "down": '<path d="m6 9 6 6 6-6"/>',
+    "tag": '<path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+    "book": '<path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H20v15H5.5A1.5 1.5 0 0 0 4 19.5z"/><path d="M4 19.5A1.5 1.5 0 0 0 5.5 21H20"/>'
+            '<path d="M8 7h8M8 11h6"/>',
+    "undo": '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
+    "moon": '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
     "copy": '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',
     "excel": '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="m9 8 6 8M15 8l-6 8"/>',
     "check": '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
@@ -332,7 +398,8 @@ _ICONS = {
 }
 
 
-def icon(name: str, color: str = C.text, size: int = 64) -> QIcon:
+def icon(name: str, color: str | None = None, size: int = 64) -> QIcon:
+    color = color or C.text
     body = _ICONS.get(name, "")
     svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
            f'stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
@@ -358,7 +425,7 @@ def icon_file(name: str, color: str, tag: str) -> str:
 
 
 def arrow_file() -> str:
-    return icon_file("down", C.muted, "arrow_v3")
+    return icon_file("down", C.muted, "arrow_v3_" + C.muted.lstrip("#"))
 
 
 def check_file() -> str:

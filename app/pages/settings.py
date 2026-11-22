@@ -11,7 +11,7 @@ from ..context import APP_NAME, APP_VERSION
 from ..database import CURRENCIES, TAX_TAGS
 from ..dialogs import open_path
 from ..theme import C, FONT_SCALES, fmt_date, fmt_money, icon
-from ..widgets import (AmountEdit, Column, DataTable, ask, button, error, info, iso,
+from ..widgets import (AmountEdit, Column, DataTable, ask, button, error, hline, info, iso,
                        make_date_edit, page_header)
 from .base import Page
 
@@ -56,6 +56,24 @@ class SettingsPage(Page):
         anim_hint = QLabel("若電腦較舊、覺得畫面不夠流暢，或偏好簡潔畫面，可以關閉。")
         anim_hint.setObjectName("Hint")
         gl.addWidget(anim_hint, 5, 1, 1, 2)
+        from ..theme import THEME_MODES
+        gl.addWidget(QLabel("外觀"), 6, 0)
+        tr = QHBoxLayout()
+        self.theme_group = QButtonGroup(self)
+        self.theme_buttons = {}
+        for key, label in THEME_MODES.items():
+            rb = QRadioButton(label)
+            self.theme_group.addButton(rb)
+            self.theme_buttons[key] = rb
+            rb.toggled.connect(lambda on, k=key: on and self.set_theme(k))
+            tr.addWidget(rb)
+        tr.addStretch()
+        gl.addLayout(tr, 6, 1, 1, 2)
+        theme_hint = QLabel("深色模式在晚上或光線較暗時比較不刺眼；切換後程式會重新開啟一次（資料不受影響）。"
+                            "列印與 PDF 仍使用白底，方便閱讀。")
+        theme_hint.setObjectName("Hint")
+        theme_hint.setWordWrap(True)
+        gl.addWidget(theme_hint, 7, 1, 1, 2)
         gl.addWidget(QLabel("本位幣"), 2, 0)
         self.base = QComboBox()
         for code, (n, _) in CURRENCIES.items():
@@ -202,11 +220,14 @@ class SettingsPage(Page):
         gl.addWidget(QLabel("資料位置"), 0, 0)
         gl.addWidget(self.path_label, 0, 1)
         gl.addWidget(open_folder, 0, 2)
-        auto = QLabel("每天第一次開啟程式時會自動備份，保留最近 30 份於「自動備份」資料夾。")
+        auto = QLabel("每天第一次開啟程式時會自動備份，保留最近 30 份於「自動備份」資料夾。"
+                      "自動備份跟帳本在同一台電腦上，建議再設定下面的「第二份備份」。")
         auto.setObjectName("Hint")
+        auto.setWordWrap(True)
         gl.addWidget(auto, 1, 1, 1, 2)
         row = QHBoxLayout()
-        for text, kind, ic, fn in (("立即備份到…", "Primary", "save", self.backup),
+        row.setSpacing(8)
+        for text, kind, ic, fn in (("立即備份到…", None, "save", self.backup),
                                    ("從備份檔還原…", None, "restore", self.restore),
                                    ("開啟自動備份資料夾", None, "folder",
                                     lambda: open_path(self.ctx.backup_dir)),
@@ -216,6 +237,40 @@ class SettingsPage(Page):
             row.addWidget(btn)
         row.addStretch()
         gl.addLayout(row, 2, 0, 1, 3)
+        gl.addWidget(hline(), 3, 0, 1, 3)
+        gl.addWidget(QLabel("第二份備份"), 4, 0)
+        self.extra_label = QLabel()
+        self.extra_label.setWordWrap(True)
+        gl.addWidget(self.extra_label, 4, 1, 1, 2)
+        self.extra_status = QLabel()
+        self.extra_status.setObjectName("Hint")
+        self.extra_status.setWordWrap(True)
+        gl.addWidget(self.extra_status, 5, 1, 1, 2)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self.extra_choose = button("選擇隨身碟或資料夾…", "Primary", "folder")
+        self.extra_choose.clicked.connect(self.choose_extra)
+        row.addWidget(self.extra_choose)
+        self.extra_onedrive = button("使用 OneDrive", icon="save")
+        self.extra_onedrive.clicked.connect(self.use_onedrive)
+        row.addWidget(self.extra_onedrive)
+        self.extra_now = button("立即備份", icon="save")
+        self.extra_now.clicked.connect(self.extra_backup_now)
+        row.addWidget(self.extra_now)
+        self.extra_open = button("開啟", icon="folder")
+        self.extra_open.clicked.connect(self.open_extra)
+        row.addWidget(self.extra_open)
+        self.extra_off = button("停用", "Link")
+        self.extra_off.clicked.connect(self.disable_extra)
+        row.addWidget(self.extra_off)
+        row.addStretch()
+        gl.addLayout(row, 6, 0, 1, 3)
+        eh = QLabel("每天第一次開啟程式、以及關閉程式時（有記帳的話），帳本會另外複製一份到這裡，"
+                    "連同憑證附件，保留最近 30 天。電腦硬碟故障時，可以用「從備份檔還原…」選這裡的檔案救回帳本。"
+                    "隨身碟沒插上時不會影響記帳，插上後下次開啟就會補上。")
+        eh.setObjectName("Hint")
+        eh.setWordWrap(True)
+        gl.addWidget(eh, 7, 1, 1, 2)
         gl.setColumnStretch(1, 1)
         b.addWidget(g)
 
@@ -262,6 +317,116 @@ class SettingsPage(Page):
             self.close_year.addItem(f"{y} 年（民國 {y - 1911} 年）" + ("　✓ 已結帳" if y in done else ""), y)
         self.closed_label.setStyleSheet(f"font-weight:700; color:{C.adjust if c else C.muted};")
         self.path_label.setText(self.ctx.db_path)
+        mode = db.get_setting("theme_mode", "light")
+        rb = self.theme_buttons.get(mode, self.theme_buttons["light"])
+        rb.blockSignals(True)
+        rb.setChecked(True)
+        rb.blockSignals(False)
+        self.refresh_extra()
+
+    def refresh_extra(self) -> None:
+        from .. import backup
+        st = backup.status(self.db)
+        on = bool(st["dir"])
+        self.extra_label.setText(backup.target_dir(st["dir"]) if on else "尚未設定（建議設定一個隨身碟或 OneDrive 資料夾）")
+        self.extra_label.setStyleSheet("font-weight:700;" if on else f"color:{C.muted};")
+        if not on:
+            text, color = "", C.muted
+        elif st["error"] and (st["days"] is None or st["days"] > 0):
+            text, color = f"上次備份失敗：{st['error']}", C.expense
+        elif st["last"]:
+            when = fmt_date(st["last"][:10]) + " " + st["last"][11:16]
+            ago = "今天" if st["days"] == 0 else f"{st['days']} 天前"
+            text = f"上次成功備份：{when}（{ago}）"
+            color = C.expense if st["remind"] else C.income
+        else:
+            text, color = "還沒有備份過，按「立即備份」試試看。", C.gold
+        self.extra_status.setText(text)
+        self.extra_status.setStyleSheet(f"color:{color}; font-weight:700;")
+        self.extra_status.setVisible(bool(text))
+        for w in (self.extra_now, self.extra_open, self.extra_off):
+            w.setVisible(on)
+        self.extra_choose.setText("改用其他位置…" if on else "選擇隨身碟或資料夾…")
+        self.extra_choose.setObjectName("" if on else "Primary")      # 已設定時「立即備份」才是主要動作
+        self.extra_now.setObjectName("Primary" if on else "")
+        for w, ic in ((self.extra_choose, "folder"), (self.extra_now, "save")):
+            w.setIcon(icon(ic, C.on_primary if w.objectName() == "Primary" else C.text))
+            w.style().unpolish(w)
+            w.style().polish(w)
+        self.extra_onedrive.setVisible(bool(backup.onedrive_dir()) and st["dir"] != backup.onedrive_dir())
+
+    def _set_extra(self, folder: str) -> None:
+        from .. import backup
+        folder = os.path.normpath(folder)
+        data = os.path.normpath(self.ctx.folder)
+        if folder == data or folder.startswith(data + os.sep):
+            error(self, "第二份備份不能放在帳本自己的資料夾裡，請選擇隨身碟、外接硬碟或 OneDrive。")
+            return
+        od = backup.onedrive_dir()
+        in_cloud = bool(od) and os.path.normpath(folder).lower().startswith(os.path.normpath(od).lower())
+        if backup.same_drive(folder, self.ctx.folder) and not in_cloud:
+            if not ask(self, "這個資料夾跟帳本在同一顆硬碟上，硬碟故障時兩份會一起損壞。\n"
+                             "建議改選隨身碟、外接硬碟或 OneDrive。仍要使用這個資料夾嗎？", yes="仍要使用"):
+                return
+        self.db.set_setting(backup.DIR_KEY, folder)
+        self.db.set_setting(backup.ERROR_KEY, "")
+        self.extra_backup_now()
+
+    def choose_extra(self) -> None:
+        from .. import backup
+        start = self.db.get_setting(backup.DIR_KEY, "") or os.path.expanduser("~")
+        folder = QFileDialog.getExistingDirectory(self, "選擇第二份備份的位置（隨身碟、外接硬碟或 OneDrive）", start)
+        if folder:
+            self._set_extra(folder)
+
+    def use_onedrive(self) -> None:
+        from .. import backup
+        od = backup.onedrive_dir()
+        if od:
+            self._set_extra(od)
+
+    def extra_backup_now(self) -> None:
+        from .. import backup
+        try:
+            path = backup.run(self.db, self.ctx.folder)
+        except OSError as e:
+            self.refresh_extra()
+            error(self, f"第二份備份失敗：{e}")
+            return
+        self.refresh_extra()
+        self.ctx.toast.emit(f"已備份到 {os.path.dirname(path)}")
+
+    def open_extra(self) -> None:
+        from .. import backup
+        d = self.db.get_setting(backup.DIR_KEY, "")
+        if d and os.path.isdir(backup.target_dir(d)):
+            open_path(backup.target_dir(d))
+        else:
+            error(self, "目前找不到這個資料夾（隨身碟是否已插上？）")
+
+    def disable_extra(self) -> None:
+        from .. import backup
+        if not ask(self, "停用後不會再自動做第二份備份（已經備份的檔案會保留）。確定嗎？", yes="停用"):
+            return
+        for k in (backup.DIR_KEY, backup.LAST_KEY, backup.ERROR_KEY):
+            self.db.set_setting(k, "")
+        self.refresh_extra()
+
+    def set_theme(self, mode: str) -> None:
+        from ..theme import resolve_mode
+        old = self.db.get_setting("theme_mode", "light")
+        if mode == old:
+            return
+        self.db.set_setting("theme_mode", mode)
+        if resolve_mode(mode) == C.dark:
+            self.ctx.toast.emit("已儲存外觀設定")
+            return
+        if ask(self, "外觀要重新開啟程式才會完整套用。要現在重新開啟嗎？\n（帳本資料已儲存，不會受影響）",
+               yes="重新開啟", no="稍後"):
+            from ..main import restart_app
+            restart_app()
+        else:
+            self.ctx.toast.emit("下次開啟程式時會套用新的外觀")
 
     def save_name(self) -> None:
         self.db.set_setting("owner_name", self.name.text().strip())

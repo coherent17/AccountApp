@@ -1385,6 +1385,253 @@ def test_global_search():
     assert db._q1("SELECT COUNT(*) n FROM audit_log")["n"] == before
 
 
+# ---------------------------------------------------------------------- v2.11.0：標籤、復原、第二份備份
+def _books(db):
+    """帳務指紋：各帳戶餘額、未作廢傳票、持股與試算表是否平衡。"""
+    lo, hi = db.date_range()
+    return ({a["id"]: round(a["balance"], 2) for a in db.account_summaries(include_archived=True)},
+            db._q1("SELECT COUNT(*) n FROM transactions WHERE void = 0")["n"],
+            [(h["id"], round(h["shares"], 4), round(h["cost"], 2)) for h in Investments(db).holdings(include_zero=True)],
+            balanced(db.trial_balance(lo, hi)))
+
+
+def test_tags():
+    db, inv, bank, st, sid = _plain_ledger()
+    food = db.find_category("expense", "餐飲")["id"]
+    hotel = db.find_category("expense", "旅遊")["id"]
+    assert Database.parse_tags(" #日本旅遊 2026、房屋修繕，日本旅遊 2026; ") == ["日本旅遊 2026", "房屋修繕"]
+    t1 = db.add_transaction(date="2026-03-02", type="expense", account_id=bank, amount=1200, category_id=food,
+                            note="京都晚餐", tags="日本旅遊 2026")
+    t2 = db.add_journal("2026-03-03", "京都住宿", [
+        {"category_id": hotel, "debit": 8000}, {"category_id": food, "debit": 500},
+        {"account_id": bank, "credit": 8500}], tags=["日本旅遊 2026", "住宿"])
+    t3 = db.add_transaction(date="2026-03-04", type="expense", account_id=bank, amount=99, category_id=food)
+    assert db.get_tags(t2) == ["日本旅遊 2026", "住宿"]
+    assert [r["id"] for r in db.query_transactions(tag="日本旅遊 2026")] == [t2, t1]
+    assert {r["id"] for r in db.query_transactions(keyword="住宿")} == {t2}       # 關鍵字也找得到標籤
+    s = {r["name"]: r for r in db.tag_summary("2026-01-01", "2026-12-31")}
+    assert s["日本旅遊 2026"]["expense"] == 9700 and s["日本旅遊 2026"]["count"] == 2
+    assert s["住宿"]["expense"] == 8500 and s["住宿"]["net"] == -8500
+    cats = {c["name"]: c["total"] for c in db.tag_categories("日本旅遊 2026", "2026-01-01", "2026-12-31")}
+    assert cats == {"旅遊": 8000, "餐飲": 1700}
+    # 批次加標籤、改名（合併）、移除
+    assert db.add_tag([t1, t3], "三月") == 2 and db.add_tag([t1], "三月") == 0
+    assert db.rename_tag("三月", "住宿") == 2
+    assert db.get_tags(t1) == ["日本旅遊 2026", "住宿"] and db.get_tags(t3) == ["住宿"]
+    assert db.delete_tag("住宿") == 3 and not db.get_tags(t3)
+    # 修改傳票時保留／更新標籤；作廢的傳票不計入合計
+    db.update_transaction(t1, date="2026-03-02", type="expense", account_id=bank, amount=1300, category_id=food,
+                          note="京都晚餐")
+    assert db.get_tags(t1) == ["日本旅遊 2026"]
+    db.void_transactions([t1], "重複")
+    assert {r["name"]: r for r in db.tag_summary("2026-01-01", "2026-12-31")}["日本旅遊 2026"]["expense"] == 8500
+    # 已結帳期間也可以加標籤（不影響金額）；系統傳票不行
+    db.set_closed_until("2026-03-31")
+    db.set_tags(t2, ["日本旅遊 2026", "回顧"])
+    assert db.get_tags(t2) == ["日本旅遊 2026", "回顧"]
+    db.set_closed_until("")
+    inv.add_event(sid, "buy", "2026-04-01", shares=100, price=100, fee=20, cash_account_id=bank)
+    sys_id = db._q1("SELECT id FROM transactions WHERE source LIKE 'inv:%'")["id"]
+    try:
+        db.set_tags(sys_id, ["x"])
+        raise AssertionError("系統傳票不應能加標籤")
+    except ValueError:
+        pass
+    # 投資分錄重編不會弄丟使用者分錄的標籤
+    jb = db.add_journal("2026-04-02", "買進 0050", [
+        {"account_id": st, "debit": 10000, "security_id": sid, "shares": 100, "price": 100},
+        {"account_id": bank, "credit": 10000}], tags=["退休投資"])
+    inv.add_event(sid, "price", "2026-04-30", price=120)
+    inv.rebuild(sid, "2026-01-01")
+    assert db.get_tags(jb) == ["退休投資"]
+    # 匯出 Excel 的收支明細可以看到標籤
+    assert any(r["tags"] == ["退休投資"] for r in db.query_transactions())
+
+
+def test_undo():
+    from app import undo
+    db, inv, bank, st, sid = _plain_ledger()
+    food = db.find_category("expense", "餐飲")["id"]
+    salary = db.find_category("income", "薪資")["id"]
+    db.clear_undo()
+    b0 = _books(db)
+    # 新增 → 復原＝作廢（傳票保留）
+    t1 = db.add_transaction(date="2026-02-01", type="expense", account_id=bank, amount=300, category_id=food,
+                            note="午餐")
+    assert undo.next_label(db).startswith("新增 V") and "午餐" in undo.next_label(db)
+    undo.undo_last(db)
+    t = db.get_transaction(t1)
+    assert t["void"] == 1 and "復原" in t["void_reason"] and _books(db) == b0
+    assert not undo.can_undo(db)
+    try:
+        undo.undo_last(db)
+        raise AssertionError
+    except ValueError:
+        pass
+    # 修改 → 復原＝改回原內容（含標籤、類型）
+    t2 = db.add_transaction(date="2026-02-02", type="income", account_id=bank, amount=40000, category_id=salary,
+                            note="退休金", tags=["固定收入"])
+    b1 = _books(db)
+    db.update_transaction(t2, date="2026-02-05", type="expense", account_id=bank, amount=99, category_id=food,
+                          note="改錯了", tags=[])
+    undo.undo_last(db)
+    t = db.get_transaction(t2)
+    assert (t["type"], t["amount"], t["date"], t["note"], t["category_id"]) == ("income", 40000, "2026-02-02",
+                                                                             "退休金", salary)
+    assert db.get_tags(t2) == ["固定收入"] and _books(db) == b1
+    # 分錄（連結投資標的）修改 → 復原：股數、單價、持股都回來
+    j = db.add_journal("2026-03-01", "買進 0050", [
+        {"account_id": st, "debit": 15000, "security_id": sid, "shares": 100, "price": 150},
+        {"account_id": bank, "credit": 15000}])
+    b2 = _books(db)
+    lines_before = [(x["account_id"], x["debit"], x["credit"], x["shares"], x["price"]) for x in db.get_lines(j)]
+    db.update_journal(j, "2026-03-01", "買進 0050", [
+        {"account_id": st, "debit": 30000, "security_id": sid, "shares": 200, "price": 150},
+        {"account_id": bank, "credit": 30000}])
+    assert _books(db) != b2
+    undo.undo_last(db)
+    assert [(x["account_id"], x["debit"], x["credit"], x["shares"], x["price"]) for x in db.get_lines(j)] == lines_before
+    assert _books(db) == b2 and investment_accounts_match(db)
+    # 作廢多筆（含銀行對帳勾選）→ 一步復原
+    t3 = db.add_transaction(date="2026-03-05", type="expense", account_id=bank, amount=500, category_id=food)
+    t4 = db.add_transaction(date="2026-03-06", type="expense", account_id=bank, amount=600, category_id=food)
+    db.save_reconciliation(bank, "2026-03-31", 0, [t3, t4])
+    b3 = _books(db)
+    db.void_transactions([t3, t4], "整理")
+    assert undo.next_label(db) == "作廢 2 筆傳票"
+    undo.undo_last(db)
+    assert _books(db) == b3
+    assert {r["txn_id"] for r in db._q("SELECT txn_id FROM recon_items")} >= {t3, t4}
+    # 取消作廢 → 復原＝再次作廢（原因不變）
+    db.void_transactions([t4], "原因甲")
+    db.unvoid_transaction(t4)
+    undo.undo_last(db)
+    assert db.get_transaction(t4)["void"] == 1 and db.get_transaction(t4)["void_reason"] == "原因甲"
+    undo.undo_last(db)                      # 再復原上一步（作廢）→ 恢復
+    assert db.get_transaction(t4)["void"] == 0
+    # 投資管理：新增交易 → 復原＝刪除；刪除交易 → 復原＝加回（同一編號）
+    b4 = _books(db)
+    eid = inv.add_event(sid, "buy", "2026-04-01", shares=50, price=160, fee=20, cash_account_id=bank)
+    assert _books(db) != b4
+    undo.undo_last(db)
+    assert _books(db) == b4 and not db._q1("SELECT 1 FROM sec_events WHERE id = ?", (eid,))
+    eid = inv.add_event(sid, "buy", "2026-04-01", shares=50, price=160, fee=20, cash_account_id=bank)
+    b5 = _books(db)
+    inv.delete_event(eid)
+    undo.undo_last(db)
+    assert _books(db) == b5 and db._q1("SELECT 1 FROM sec_events WHERE id = ?", (eid,)) and investment_accounts_match(db)
+    # 同一天重新輸入市價（取代舊價格）→ 復原＝舊價格回來
+    inv.add_event(sid, "price", "2026-04-30", price=170)
+    b6 = _books(db)
+    inv.add_event(sid, "price", "2026-04-30", price=200)
+    undo.undo_last(db)
+    assert _books(db) == b6 and inv.last_price(sid) == 170 and investment_accounts_match(db)
+    # 定期交易入帳 → 復原：傳票作廢、下次仍會提醒
+    rid = db.save_recurring(None, "月退休金", {"type": "income", "account_id": bank, "amount": 42000,
+                                               "category_id": salary}, "monthly", 5, "2026-05-01")
+    rec = db.list_recurring()[0]
+    due = db.due_recurring("2026-05-31")
+    tid = db.post_recurring(rec, due[0][1])
+    assert not db.due_recurring("2026-05-31")
+    undo.undo_last(db)
+    assert db.get_transaction(tid)["void"] == 1 and len(db.due_recurring("2026-05-31")) == 1
+    assert rid
+    # 匯入多筆 → 一步復原
+    from app.importer import do_import
+    b7 = _books(db)
+    items = [{"error": "", "category_id": food, "category_name": "", "date": f"2026-06-0{i}", "type": "expense",
+              "account_id": bank, "amount": 10 * i, "note": "匯入"} for i in range(1, 4)]
+    assert do_import(db, items) == (3, 0)
+    assert undo.next_label(db) == "匯入 3 筆紀錄"
+    undo.undo_last(db)
+    assert _books(db) == b7
+    # 已結帳期間不能復原：顯示原因，這一步留在清單上
+    t5 = db.add_transaction(date="2026-06-10", type="expense", account_id=bank, amount=77, category_id=food)
+    db.set_closed_until("2026-06-30")
+    try:
+        undo.undo_last(db)
+        raise AssertionError("已結帳期間不應能復原")
+    except ValueError as e:
+        assert "無法復原" in str(e)
+    assert undo.can_undo(db) and db.get_transaction(t5)["void"] == 0
+    db.set_closed_until("")
+    undo.undo_last(db)
+    assert db.get_transaction(t5)["void"] == 1
+    # 每一步都留有修改紀錄
+    assert db._q1("SELECT COUNT(*) n FROM audit_log WHERE action = '復原'")["n"] >= 12
+    # 系統內部動作（投資重編、範例資料）不會進入復原清單；清除資料時清單一併清空
+    db.clear_undo()
+    inv.rebuild(sid, "2026-01-01")
+    assert not undo.can_undo(db)
+    db.add_transaction(date="2026-07-01", type="expense", account_id=bank, amount=1, category_id=food)
+    db.reset_all()
+    assert not undo.can_undo(db)
+
+
+def test_migration_v8_tags():
+    """第 8 版（v2.9.0／v2.10.0）帳本升級到第 9 版：新增標籤資料表，帳務不變、不重編投資分錄。"""
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "v8.db")
+    db = Database(path)
+    load_sample_data(db)
+    before = _books(db)
+    ids = [r["id"] for r in db._q("SELECT id FROM transactions ORDER BY id")]
+    n_audit = db._q1("SELECT COUNT(*) n FROM audit_log")["n"]
+    db.close()
+    c = sqlite3.connect(path)
+    c.executescript("DROP INDEX IF EXISTS idx_txn_tags_tag; DROP TABLE txn_tags; PRAGMA user_version = 8;")
+    c.commit()
+    c.close()
+    db = Database(path)
+    assert db.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 9
+    assert _books(db) == before
+    assert [r["id"] for r in db._q("SELECT id FROM transactions ORDER BY id")] == ids
+    assert db._q1("SELECT COUNT(*) n FROM audit_log")["n"] == n_audit       # 沒有「系統升級」重編
+    assert os.path.exists(os.path.join(d, "v8_升級前備份_v8.db"))
+    db.set_tags(ids[0], ["測試"]) if not db.get_transaction(ids[0])["source"] else None
+    assert db.all_tags() is not None
+
+
+def test_extra_backup():
+    from app import backup
+    db = make()
+    data = tempfile.mkdtemp()
+    os.makedirs(os.path.join(data, "憑證附件", "2026"))
+    with open(os.path.join(data, "憑證附件", "2026", "發票.pdf"), "wb") as fh:
+        fh.write(b"pdf")
+    usb = tempfile.mkdtemp()
+    assert not backup.due_today(db) and not backup.status(db)["remind"]
+    try:
+        backup.run(db, data)
+        raise AssertionError("未設定位置時應失敗")
+    except OSError:
+        pass
+    db.set_setting(backup.DIR_KEY, usb)
+    assert backup.due_today(db) and backup.status(db)["remind"]
+    path = backup.run(db, data)
+    assert os.path.dirname(path) == os.path.join(usb, backup.SUBFOLDER)
+    assert Database.is_valid_ledger(path)
+    copy = Database(path)
+    assert _books(copy) == _books(db)
+    copy.close()
+    assert os.path.exists(os.path.join(usb, backup.SUBFOLDER, "憑證附件", "2026", "發票.pdf"))
+    assert not backup.due_today(db)
+    st = backup.status(db)
+    assert st["days"] == 0 and not st["remind"] and not st["error"]
+    # 同一天再備份：覆蓋同一個檔；保留最近 30 天
+    assert backup.run(db, data) == path
+    for i in range(35):
+        backup.run(db, data, today=_dt.date(2025, 1, 1) + _dt.timedelta(days=i))
+    files = [f for f in os.listdir(os.path.join(usb, backup.SUBFOLDER)) if f.endswith(".db")]
+    assert len(files) == backup.KEEP and f"帳本備份_{_dt.date.today():%Y%m%d}.db" in files
+    # 隨身碟沒插上：不影響帳本，只記錄原因
+    db.set_setting(backup.DIR_KEY, os.path.join(usb, "不存在的隨身碟"))
+    assert not backup.try_run(db, data)
+    assert "找不到資料夾" in backup.status(db)["error"]
+    db.set_setting(backup.LAST_KEY, (_dt.datetime.now() - _dt.timedelta(days=10)).isoformat(timespec="seconds"))
+    assert backup.status(db)["remind"] and backup.status(db)["days"] == 10
+
+
 if __name__ == "__main__":
     failed = 0
     for k, f in list(globals().items()):

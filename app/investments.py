@@ -323,7 +323,10 @@ class Investments:
                 raise ValueError("交割帳戶的幣別必須與投資帳戶相同")
             if cash["id"] == sec["account_id"]:
                 raise ValueError("交割帳戶不可與投資帳戶相同")
+        replaced = []
         if kind == "price":
+            replaced = self.db._q("SELECT * FROM sec_events WHERE security_id = ? AND kind = 'price'"
+                                  " AND date = ?", (sid, date))
             self.db.conn.execute("DELETE FROM sec_events WHERE security_id = ? AND kind = 'price'"
                                  " AND date = ?", (sid, date))
         cur = self.db.conn.execute(
@@ -339,6 +342,8 @@ class Investments:
             self.db.conn.commit()
             raise
         self.rebuild(sid, date)
+        self.db._record(f"{KIND_LABELS.get(kind, kind)} {sec['name']}（{date.replace('-', '/')}）",
+                        {"kind": "event_added", "eid": eid, "replaced": replaced})
         return eid
 
     def delete_event(self, eid: int) -> None:
@@ -353,13 +358,17 @@ class Investments:
             self.db.conn.rollback()
             raise ValueError("刪除後會造成之後的賣出股數超過持股，請先刪除之後的賣出交易。")
         self.rebuild(ev["security_id"], ev["date"])
+        sec = self.get_security(ev["security_id"])
+        self.db._record(f"刪除投資交易 {sec['name'] if sec else ''}（{ev['date'].replace('-', '/')}）",
+                        {"kind": "events_deleted", "rows": [ev]})
 
     def set_prices(self, prices: list[tuple[int, float]], date: str) -> int:
         n = 0
-        for sid, price in prices:
-            if price and price > 0:
-                self.add_event(sid, "price", date, price=price)
-                n += 1
+        with self.db.undo_group(f"市價評價（{date.replace('-', '/')}）"):
+            for sid, price in prices:
+                if price and price > 0:
+                    self.add_event(sid, "price", date, price=price)
+                    n += 1
         return n
 
     # ------------------------------------------------------------------ 計算
@@ -667,6 +676,7 @@ class Investments:
                                          f"{KIND_LABELS.get(ev['kind'], ev['kind'])}（由收支明細刪除系統傳票）")
         for sid, d in first.items():
             self.rebuild(sid, d)
+        self.db._record(f"刪除 {len(events)} 筆投資交易", {"kind": "events_deleted", "rows": list(events.values())})
         return len(events)
 
     def holdings(self, as_of: str | None = None, include_zero: bool = False) -> list[dict]:

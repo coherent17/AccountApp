@@ -21,7 +21,8 @@ from .pages.reports import ReportsPage
 from .pages.settings import SettingsPage
 from .pages.transactions import TransactionsPage
 from .sample_data import load_sample_data
-from .theme import C, FONT_FAMILY, FONT_SCALES, app_icon, arrow_file, check_file, icon, stylesheet
+from .theme import (C, FONT_FAMILY, FONT_SCALES, app_icon, arrow_file, check_file, icon, palette, resolve_mode,
+                    set_mode, stylesheet)
 from .widgets import hline
 from .widgets import error
 
@@ -130,6 +131,8 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+N"), self, activated=self.quick_add)
         QShortcut(QKeySequence("Ctrl+E"), self, activated=self.export)
         QShortcut(QKeySequence("Ctrl+F"), self, activated=self.open_search)
+        QShortcut(QKeySequence("Ctrl+Z"), self, activated=self.undo)
+        self._changes_at_start = ctx.db.conn.total_changes
         self._search = None
         for i, (key, *_rest) in enumerate(NAV, 1):
             QShortcut(QKeySequence(f"Ctrl+{i}"), self, activated=lambda k=key: self.go(k))
@@ -203,6 +206,25 @@ class MainWindow(QMainWindow):
         if auto_check_due(self.ctx):
             check_for_updates(self.ctx, self, silent=True)
 
+    def undo(self) -> None:
+        """Ctrl+Z：復原本次開啟後的上一步（新增、修改、作廢、投資交易…）。"""
+        from .undo import next_label, undo_last
+        from .widgets import ask, info
+        label = next_label(self.ctx.db)
+        if not label:
+            info(self, "目前沒有可以復原的操作。\n（復原只限這次開啟程式之後做的新增、修改與作廢。）")
+            return
+        if not ask(self, f"要復原上一步嗎？\n\n{label}\n\n"
+                         "新增的傳票會改為「已作廢」（保留在帳上），修改會改回原來的內容。", yes="復原"):
+            return
+        try:
+            done = undo_last(self.ctx.db)
+        except ValueError as e:
+            error(self, str(e))
+            return
+        self.ctx.changed()
+        self.ctx.toast.emit(f"已復原：{done}")
+
     def open_search(self) -> None:
         from .dialogs_search import SearchDialog
         if self._search is None:
@@ -217,7 +239,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e):
         self.net.stop()
+        changed = self.ctx.db.conn.total_changes != self._changes_at_start
         if not os.environ.get("MY_LEDGER_SMOKE_DIR"):
+            if changed:        # 本次有記帳：關閉前把最新的帳本再複製到第二個備份位置（失敗不影響關閉）
+                from . import backup
+                backup.try_run(self.ctx.db, self.ctx.folder)
             self.save_geometry()
         self.ctx.db.close()
         super().closeEvent(e)
@@ -268,6 +294,7 @@ def apply_theme(app: QApplication, ctx: AppContext) -> None:
     f = QFont(FONT_FAMILY)
     f.setPointSizeF(pt)
     app.setFont(f)
+    app.setPalette(palette())
     app.setStyleSheet(stylesheet(pt, arrow_file(), check_file()))
     QTimer.singleShot(0, refit_layouts)
     from . import animations
@@ -311,12 +338,34 @@ def create_app(argv=None, db_path: str | None = None):
     _install_excepthook(ctx.folder)
     from .dialogs_update import cleanup_old_exe
     cleanup_old_exe()
+    set_mode(resolve_mode(ctx.db.get_setting("theme_mode", "light")))
     apply_theme(app, ctx)
     try:
         ctx.db.auto_backup(ctx.backup_dir)
     except Exception:  # noqa: BLE001
         pass
+    from . import backup
+    if backup.due_today(ctx.db) and not os.environ.get("MY_LEDGER_SMOKE_DIR"):
+        backup.try_run(ctx.db, ctx.folder)      # 每天第一次開啟：第二份備份（隨身碟／OneDrive）
     return app, ctx
+
+
+def restart_app() -> None:
+    """重新開啟程式（切換深色模式後使用）：先關閉主視窗（會儲存視窗大小並做第二份備份），再啟動新的程式。"""
+    import subprocess
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("_PYI", "_MEI"))}
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    if getattr(sys, "frozen", False):
+        cmd = [sys.executable]
+    else:
+        cmd = [sys.executable, os.path.abspath(sys.argv[0])]
+    flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+    app = QApplication.instance()
+    for w in app.topLevelWidgets():
+        if isinstance(w, MainWindow):
+            w.close()
+    subprocess.Popen(cmd, env=env, close_fds=True, creationflags=flags)
+    app.quit()
 
 
 def _smoke_test(app: QApplication, ctx: AppContext, win: MainWindow, out: str) -> None:

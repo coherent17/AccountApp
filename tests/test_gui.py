@@ -1065,6 +1065,8 @@ for name in sorted(f for f in os.listdir(FIX) if f.startswith("ledger_v") and f.
     Report(c2.db).build([k for k, _ in _REPORTS], "2025-01-01", "2025-12-31")
     for mode_ in ("prior_period", "prior_year"):
         Report(c2.db).build(["bs", "is", "ratios"], "2025-01-01", "2025-12-31", mode_)
+    _ann = Report(c2.db).annual(2025, [k for k, _n, _d in __import__("app.printing", fromlist=["x"]).ANNUAL_SECTIONS])
+    assert "2025 年度財務報告" in _ann, name
     from app.investments import Investments as _Inv  # noqa: E402
     from app.performance import portfolio_performance as _pp  # noqa: E402
     _r = _pp(_Inv(c2.db))
@@ -1078,6 +1080,170 @@ for name in sorted(f for f in os.listdir(FIX) if f.startswith("ledger_v") and f.
         app.processEvents()
     w2.close()
     c2.db.close()
+    w2.deleteLater()        # 已關閉帳本的視窗一併銷毀（之後切換外觀時不會再重算它的表格）
+    from PySide6.QtCore import QEvent as _QE  # noqa: E402
+    app.sendPostedEvents(None, _QE.Type.DeferredDelete)
     print("OLD LEDGER OK", name)
 
 print("CHART / JOURNAL-INVEST GUI TESTS PASSED")
+
+
+# ---- v2.11.0：標籤／專案、復原（Ctrl+Z）、年度財務報告、深色模式、第二份備份
+from app import undo as _undo  # noqa: E402
+from app import main as _main  # noqa: E402
+from app.dialogs_more import JournalDialog as _JD, TagPickDialog  # noqa: E402
+from app.dialogs_print import AnnualReportDialog  # noqa: E402
+from app.printing import ANNUAL_SECTIONS  # noqa: E402
+
+bank_id = next(a["id"] for a in db.list_accounts() if a["category"] == "銀行存款")
+food_id = db.find_category("expense", "餐飲")["id"]
+d = TransactionDialog(ctx, "expense", account_id=bank_id, parent=win)
+d.amount.setText("880")
+d.chips.set_value(food_id)
+d.note.setText("清水寺附近午餐")
+d.tags.setText("日本旅遊 2026、#京都")
+d.save(keep_open=False)
+tid = db.query_transactions(keyword="清水寺")[0]["id"]
+assert db.get_tags(tid) == ["日本旅遊 2026", "京都"]
+d = TransactionDialog(ctx, txn=db.get_transaction(tid), parent=win)        # 編輯時帶出標籤
+assert d.tags.tags() == ["日本旅遊 2026", "京都"]
+d.tags.setText("日本旅遊 2026")
+d.save(keep_open=False)
+assert db.get_tags(tid) == ["日本旅遊 2026"]
+jd = _JD(ctx, prefill=[{"key": ("category", food_id), "debit": 300}, {"key": ("account", bank_id), "credit": 300}],
+         note="大阪章魚燒", tags=["日本旅遊 2026"], parent=win)
+jd.save()
+jid = db.query_transactions(keyword="章魚燒")[0]["id"]
+assert db.get_tags(jid) == ["日本旅遊 2026"]
+# 收支明細：依標籤篩選、說明欄顯示標籤
+tp = win.pages["transactions"]
+win.go("transactions", animate=False)
+tp.apply_filter(tag="日本旅遊 2026", start="2000-01-01", end="2100-12-31")
+tp.reload()
+app.processEvents()
+assert {r["id"] for r in tp.table.model_.rows} == {tid, jid}, [r["id"] for r in tp.table.model_.rows]
+_note = tp.table.model().index(0, 5).data()
+assert tp.tag.isVisible() and "#日本旅遊 2026" in _note and _note.index("#") > 0, _note   # 說明在前、標籤在後
+tpd = TagPickDialog(ctx, 2, win)
+tpd.box.setCurrentText("出國")
+tpd.save()
+assert tpd.tag == "出國"
+tp.clear_filters()
+# 財務報表 → 標籤／專案
+rp = win.pages["reports"]
+win.go("reports", animate=False)
+rp.period.setCurrentText("全部")
+rp.tabs.setCurrentIndex(rp._tab_index("標籤／專案"))
+app.processEvents()
+rows_ = {r["name"]: r for r in rp.tag_table.model_.rows}
+assert rows_["日本旅遊 2026"]["expense"] == 1180 and rows_["日本旅遊 2026"]["count"] == 2
+rp.tag_table.select_where(lambda r: r["name"] == "日本旅遊 2026")
+app.processEvents()
+assert "日本旅遊 2026" in rp.tag_detail_title.text() and rp.tag_detail.model_.rows
+rp.open_tag(rp.tag_table.current_row())
+app.processEvents()
+assert tp.tag.currentData() == "日本旅遊 2026" and tp.period.currentText() == "自訂期間"
+tp.reload()
+assert {r["id"] for r in tp.table.model_.rows} == {tid, jid}
+# 全域搜尋找得到標籤
+win.open_search()
+win._search.box.setText("日本旅遊")
+win._search.run()
+assert {r["id"] for r in win._search.table.model_.rows if r["kind"] == "voucher"} == {tid, jid}
+win._search.close()
+
+# 復原：主視窗 Ctrl+Z（ask 已在測試中自動回答「是」）
+db.clear_undo()
+win.undo()                                          # 沒有可復原的操作：只顯示提示
+n0 = db._q1("SELECT COUNT(*) n FROM transactions WHERE void = 0")["n"]
+d = TransactionDialog(ctx, "expense", account_id=bank_id, parent=win)
+d.amount.setText("55")
+d.chips.set_value(food_id)
+d.save(keep_open=False)
+assert db._q1("SELECT COUNT(*) n FROM transactions WHERE void = 0")["n"] == n0 + 1
+win.undo()
+app.processEvents()
+assert db._q1("SELECT COUNT(*) n FROM transactions WHERE void = 0")["n"] == n0 and not _undo.can_undo(db)
+tp.table.selectRow(0)
+tp.void_selected()
+assert _undo.can_undo(db)
+win.undo()
+assert db._q1("SELECT COUNT(*) n FROM transactions WHERE void = 0")["n"] == n0
+
+# 年度財務報告：封面、目錄與各章節；每章新的一頁
+year = int(db.date_range()[1][:4])
+html = Report(db).annual(year, [k for k, _n, _d in ANNUAL_SECTIONS])
+for word in (f"{year} 年度財務報告", "目　錄", "年度摘要", "比較資產負債表", "比較收支損益表", "權益變動表",
+             "現金流量表", "財務比率分析", "月度收支表", "投資績效", "標籤／專案彙總", "報稅參考", "日記簿"):
+    assert word in html, word
+ad = AnnualReportDialog(ctx, win, year=year)
+assert ad.year.currentData() == year
+for k, cb in ad.boxes.items():
+    cb.setChecked(k not in ("journal",))
+out = ad.export_pdf(os.path.join(tmp, "年度報告.pdf"))
+assert out and pdf_pages(out) >= 12, pdf_pages(out)
+assert "journal" not in db.get_json("annual_sections")
+for cb in ad.boxes.values():
+    cb.setChecked(False)
+ad.boxes["summary"].setChecked(True)
+short = ad.export_pdf(os.path.join(tmp, "年度摘要.pdf"))
+assert pdf_pages(short) >= 2
+ad.close()
+
+# 第二份備份：設定頁選資料夾 → 立即備份；隨身碟拔掉時總覽提醒
+from app import backup as _bk  # noqa: E402
+sp = win.pages["settings"]
+usb = tempfile.mkdtemp()
+sp._set_extra(usb)
+assert os.path.exists(os.path.join(usb, _bk.SUBFOLDER, f"帳本備份_{__import__('datetime').date.today():%Y%m%d}.db"))
+sp.refresh()
+assert "上次成功備份" in sp.extra_status.text() and sp.extra_now.isVisibleTo(sp)
+sp._set_extra(ctx.folder)                                     # 不能放在帳本自己的資料夾
+assert db.get_setting(_bk.DIR_KEY) == os.path.normpath(usb)
+db.set_setting(_bk.DIR_KEY, os.path.join(usb, "拔掉的隨身碟"))
+db.set_setting(_bk.LAST_KEY, "2020-01-01T08:00:00")
+sp.extra_backup_now()
+sp.refresh()
+assert "失敗" in sp.extra_status.text()
+win.go("dashboard", animate=False)
+ctx.changed()
+app.processEvents()
+dp = win.pages["dashboard"]
+assert dp.remind_card.isVisibleTo(dp)
+assert any("第二份備份" in (dp.remind_box.itemAt(i).layout().itemAt(0).widget().text()
+                          if dp.remind_box.itemAt(i).layout() else "") for i in range(dp.remind_box.count()))
+sp.disable_extra()
+assert not db.get_setting(_bk.DIR_KEY)
+
+# 外觀：切換深色要重新開啟（測試中不真的重開）；深色模式下所有頁面與對話框都能開啟
+restarted = []
+_main.restart_app = lambda: restarted.append(1)
+sp.set_theme("dark")
+assert db.get_setting("theme_mode") == "dark" and restarted == [1]
+from app.theme import C as _C, set_mode as _set_mode  # noqa: E402
+from app.dialogs import ExportDialog as _ED  # noqa: E402,F401
+for _w in app.topLevelWidgets():          # 前面測試開過、帳本已關閉的視窗
+    if isinstance(_w, MainWindow) and _w is not win:
+        _w.deleteLater()
+from PySide6.QtCore import QEvent as _QE2  # noqa: E402
+app.sendPostedEvents(None, _QE2.Type.DeferredDelete)
+_set_mode(True)
+_main.apply_theme(app, ctx)
+win_d = MainWindow(ctx)
+win_d.show()
+for key in win_d.pages:
+    win_d.go(key, animate=False)
+    app.processEvents()
+for page in ("reports", "investments"):
+    tabs = win_d.pages[page].tabs
+    for i2 in range(tabs.count()):
+        tabs.setCurrentIndex(i2)
+        app.processEvents()
+assert _C.dark and app.palette().window().color().name().lower() == _C.bg.lower()
+TransactionDialog(ctx, "expense", parent=win_d).close()
+win_d.hide()
+_set_mode(False)
+_main.apply_theme(app, ctx)
+sp.set_theme("light")
+assert db.get_setting("theme_mode") == "light"
+print("TAGS / UNDO / ANNUAL REPORT / BACKUP / DARK MODE GUI TESTS PASSED")
