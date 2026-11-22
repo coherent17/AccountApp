@@ -10,7 +10,8 @@ import { Accounts } from "./pages/accounts.js";
 import { Investments } from "./pages/investments.js";
 import { Reports } from "./pages/reports.js";
 import { Settings } from "./pages/settings.js";
-import { checkUpdates } from "./dialogs/update.js";
+import { checkUpdates, openUpdate, showWhatsNew, startUpdateTimer, useAvailableUpdate } from "./dialogs/update.js";
+import { openTour } from "./dialogs/tour.js";
 import { openChart, openSubject, openYearClose } from "./dialogs/chart.js";
 import { openJournal } from "./dialogs/journal.js";
 import { openDue, openImport, openReconcile, openRecurring, openSearch, openWelcome } from "./dialogs/more.js";
@@ -40,6 +41,7 @@ const ALL = { start: "1900-01-01", end: "2999-12-31" };
 window.__t = {
   go: (p) => window.__go(p), openTxn, openAccount, openAdjust, openPrices, openRates, openSecurity, openSecurityList, openTrade, openAnnual, openPrint, openExport, openChart, openSubject, openYearClose, openJournal,
   openRecurring, openDue, openReconcile, openImport, openSearch: () => openSearch(window.__go), openWelcome,
+  openTour, openUpdateFake: (v) => { window.__fakeUpdate(v); },
   openUserJournal: async () => openJournal({ tid: (await api("txn_list", { ...ALL, type: "journal" })).rows.find((r) => !r.source).id }),
   journalTemplate: (name) => { const s = document.querySelector(".journal .jtop select"); const i = [...s.options].findIndex((o) => o.text === name); s.value = i; s.dispatchEvent(new Event("change", { bubbles: true })); },
   tab: (label) => [...document.querySelectorAll(".tabs button")].find((b) => b.textContent.includes(label)).click(), openVoucher, openAudit, askVoid: () => askVoidReason(2),
@@ -92,6 +94,7 @@ const SECTIONS = { dashboard: "", transactions: "記帳", accounts: "記帳", in
 
 function SideBar({ page, go, setPref }) {
   const r = document.documentElement;
+  const upd = useAvailableUpdate();
   const owner = META.owner || "您好";
   return html`<aside class="side">
     <div class="brand"><div class="logo"><img src="logo.svg" alt="" /></div>
@@ -99,6 +102,8 @@ function SideBar({ page, go, setPref }) {
     ${NAV.map(([k, label, ic], i) => html`<button class=${"nav" + (page === k ? " on" : "")} onClick=${() => go(k)}
         title=${"Ctrl+" + (i + 1)}><${Icon} name=${ic} />${label}</button>`)}
     <div class="grow"></div>
+    ${upd && html`<button class="update-pill" onClick=${openUpdate} title="按一下查看更新內容並更新"><span class="pulse"></span>
+      <div><b>有新版本 ${upd.version}</b><small>按這裡更新</small></div><${Icon} name="download" /></button>`}
     <div class="section-label">快速功能</div>
     <button class="nav" onClick=${() => openTxn({ type: "expense" })}><${Icon} name="plus" />記一筆<kbd>Ctrl+N</kbd></button>
     <button class="nav" onClick=${() => openSearch(go)}><${Icon} name="search" />搜尋<kbd>Ctrl+F</kbd></button>
@@ -174,9 +179,13 @@ async function boot() {
   const splash = document.getElementById("splash");               // 啟動畫面：資料準備好後淡出
   if (splash) setTimeout(() => { splash.classList.add("hide"); setTimeout(() => splash.remove(), 600); }, META.smoke ? 0 : 350);
   if (!META.smoke) {
+    await new Promise((r) => setTimeout(r, 500));                           // 等啟動畫面淡出
     if (await api("first_run")) await openWelcome();                       // 第一次開啟：稱呼、基本帳戶或範例資料
-    else setTimeout(() => openDue().catch(() => {}), 600);                 // 定期交易到期提醒
-    setTimeout(() => checkUpdates(true).catch(() => {}), 4000);            // 每天第一次開啟時檢查新版本（可在設定關閉）
+    else await showWhatsNew();                                             // 剛更新：「已更新到…」與更新內容
+    if (await api("tour_status")) await openTour();                        // 第一次使用新介面：三張卡片的導覽
+    openDue().catch(() => {});                                             // 定期交易到期提醒
+    setTimeout(() => checkUpdates(true).catch(() => {}), 4000);            // 檢查新版本（開啟時，之後每 4 小時）
+    startUpdateTimer();
   }
 }
 

@@ -4,6 +4,7 @@ import { META, PERIOD_PRESETS, api, changed, html, money, presetRange, toast, us
 import { Btn, Check, DataTable, DateInput, Icon, MenuButton, PageHead, Select, TextInput, TypeBadge, ask, errorBox, info,
          openMenu } from "../lib/ui.js";
 import { askVoidReason, openAudit, openTxn, openVoucher, pickTag } from "../dialogs/txn.js";
+import { catEmoji } from "../lib/caticon.js";
 import { openJournal } from "../dialogs/journal.js";
 import { openImport, openRecurring, openRecurringEdit } from "../dialogs/more.js";
 import { openAdjust } from "../dialogs/account.js";
@@ -120,7 +121,8 @@ export function Transactions({ go }) {
     { key: "voucher", title: "傳票號碼", align: "c", nowrap: true, sort: (r) => r.id,
       render: (r) => html`<span class="muted num">${r.voucher}</span>${r.n_attach > 0 && html`<span title="有附件"><${Icon} name="clip" cls="mini" /></span>`}` },
     { key: "type", title: "類型", align: "c", render: (r) => html`<${TypeBadge} type=${r.void ? "void" : r.source ? "invest" : r.type} label=${r.type_label} />`, sort: (r) => r.type_label },
-    { key: "category", title: "分類／科目", render: (r) => r.category, sort: (r) => r.category, elide: true },
+    { key: "category", title: "分類／科目", sort: (r) => r.category, elide: true, tip: (r) => r.category,
+      render: (r) => (r.type === "income" || r.type === "expense" ? html`<span class="emo">${catEmoji(r.category, r.type)}</span>${r.category}` : r.category) },
     { key: "account", title: "帳戶", render: (r) => r.account, sort: (r) => r.account, elide: true },
     { key: "note", title: "說明", elide: true, cls: () => "grow",
       tip: (r) => (r.void ? `〔作廢：${r.void_reason}〕` : "") + r.note + r.tags.map((t) => "　#" + t).join(""),
@@ -177,7 +179,9 @@ export function Transactions({ go }) {
       <${DataTable} columns=${columns} rows=${rows} selected=${sel} onSelect=${setSel} defaultSort=${["date", true]}
         onActivate=${(r) => (r.void ? menu({ preventDefault() {}, clientX: innerWidth / 2, clientY: innerHeight / 2 }, r) : openVoucher(r.id))}
         onMenu=${menu} onDelete=${() => voidSelected()} rowCls=${(r) => (r.void ? "void" : "")}
-        empty=${data ? "這個期間沒有符合條件的紀錄" : "讀取中…"} />
+        empty=${data ? "這個期間沒有符合條件的紀錄" : "讀取中…"}
+        emptyAction=${data && html`<div class="row"><${Btn} kind="expense" icon="minus" onClick=${() => openTxn({ type: "expense" })}>記一筆支出</${Btn}>
+          <${Btn} kind="link" onClick=${() => set({ period: "全部" })}>看全部期間</${Btn}></div>`} />
     </div>
 
     <div class="card foot">

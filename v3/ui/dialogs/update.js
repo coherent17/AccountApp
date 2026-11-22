@@ -1,22 +1,59 @@
 // 檢查新版本與一鍵更新。
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { api, html, toast, ymd } from "../lib/core.js";
 import { Btn, Dialog, Icon, errorBox, info, openModal } from "../lib/ui.js";
 
-/** silent=true：開啟程式時的每日自動檢查，沒有新版或失敗時不打擾。 */
+// 有新版本、但她選了「稍後再說」：不再跳出視窗，改在側邊欄顯示「有新版本」，按一下再開啟
+let available = null;
+const shown = new Set();
+const subs = new Set();
+const setAvailable = (rel) => { available = rel; subs.forEach((f) => f(rel)); };
+export function useAvailableUpdate() {
+  const [rel, setRel] = useState(available);
+  useEffect(() => { subs.add(setRel); return () => subs.delete(setRel); }, []);
+  return rel;
+}
+
+/** silent=true：自動檢查（開啟時與每 4 小時），沒有新版或失敗時不打擾；同一版本只自動跳出一次。 */
 export async function checkUpdates(silent = true) {
   const s = await api("update_settings");
   if (silent && !s.due) return;
   if (!silent) toast("正在檢查新版本…", "info");
   let rel;
   try { rel = await api("update_fetch"); } catch (e) { if (!silent) errorBox(e.message); return; }
-  if (!rel.newer) { if (!silent) info(`目前使用的 ${rel.current} 版已經是最新版本。`); return; }
+  if (!rel.newer) { setAvailable(null); if (!silent) info(`目前使用的 ${rel.current} 版已經是最新版本。`); return; }
   if (silent && s.skip === rel.version) return;
-  openModal((close) => html`<${UpdateDialog} rel=${rel} auto=${s.can_self_update && !!rel.url} close=${close} />`);
+  setAvailable({ ...rel, auto: s.can_self_update && !!rel.url });
+  if (silent && shown.has(rel.version)) return;
+  shown.add(rel.version);
+  openUpdate();
+}
+export function openUpdate() {
+  if (!available) return;
+  const rel = available;
+  return openModal((close) => html`<${UpdateDialog} rel=${rel} auto=${rel.auto} close=${close} />`);
+}
+/** 程式開著的期間，每 30 分鐘看看是否該檢查了（實際上每 4 小時才會連線一次）。 */
+export function startUpdateTimer() {
+  setInterval(() => checkUpdates(true).catch(() => {}), 30 * 60 * 1000);
+}
+
+/** 更新後第一次開啟：「已更新到 x.y.z」與這一版的更新內容。 */
+export async function showWhatsNew() {
+  const wn = await api("whats_new");
+  if (!wn) return false;
+  await openModal((close) => html`<${Dialog} title=${`已更新到 ${wn.version} 版`} icon="gift" accent="var(--income)" width="40rem" onClose=${() => close()}
+      footer=${html`<div class="grow"></div><${Btn} kind="primary" icon="check" onClick=${() => close()}>開始使用</${Btn}>`}>
+    <div class="wn-head"><div class="wn-badge"><img src="logo.svg" alt="" /></div>
+      <div><b>更新完成，您的帳本資料都在</b><span class="muted">更新前已自動備份一份帳本，放在「自動備份」資料夾。</span></div></div>
+    <div class="section-title sm">這個版本的新功能</div>
+    <${Notes} text=${wn.notes} />
+  </${Dialog}>`);
+  return true;
 }
 
 // 更新說明（GitHub 上的 Markdown）：條列與段落
-function Notes({ text }) {
+export function Notes({ text }) {
   const blocks = [];
   for (const line of (text || "（沒有說明）").split(/\r?\n/)) {
     const t = line.trim();
@@ -60,8 +97,8 @@ function UpdateDialog({ rel, auto, close }) {
   const pct = prog && prog.total ? Math.round((prog.got / prog.total) * 100) : null;
   return html`<${Dialog} title="有新版本可以更新" icon="download" width="44rem" onClose=${() => !busy && close()}
       footer=${busy ? html`<div class="grow"></div><span class="muted">下載中，請稍候…</span>` : html`
-        <${Btn} kind="link" onClick=${async () => { await api("update_skip", rel.version); toast(`已略過 ${rel.version} 版，有更新的版本時會再通知您`); close(); }}>略過這個版本</${Btn}>
-        <div class="grow"></div><${Btn} onClick=${() => close()}>稍後再說</${Btn}>
+        <${Btn} kind="link" onClick=${async () => { await api("update_skip", rel.version); setAvailable(null); toast(`已略過 ${rel.version} 版，有更新的版本時會再通知您`); close(); }}>略過這個版本</${Btn}>
+        <div class="grow"></div><${Btn} onClick=${() => { close(); toast("左側選單會顯示「有新版本」，準備好時再按一下更新", "info"); }}>稍後再說</${Btn}>
         <${Btn} kind=${auto ? "" : "primary"} onClick=${() => { api("open_url", rel.url || rel.page).catch(() => {}); close(); }}>用瀏覽器下載</${Btn}>
         ${auto && html`<${Btn} kind="primary" icon="download" onClick=${now}>立即更新</${Btn}>`}`}>
     <div class="update-head"><b>新版本 ${rel.version} 已推出</b><span class="muted">您目前使用的是 ${rel.current} 版${rel.published ? `　｜　發布日期 ${ymd(rel.published)}` : ""}</span></div>
@@ -73,3 +110,13 @@ function UpdateDialog({ rel, auto, close }) {
     ${msg && html`<div class="msg bad"><${Icon} name="alert" />${msg}</div>`}
   </${Dialog}>`;
 }
+
+// 自動截圖用：模擬「有新版本」與「已更新」的畫面
+window.__fakeUpdate = (v) => setAvailable({ version: v, current: "3.1.0", auto: true, published: "2026-11-23", url: "x",
+  notes: "新功能說明\n* 第一項改進\n* 第二項改進" });
+window.__fakeWhatsNew = () => openModal((close) => html`<${Dialog} title="已更新到 3.2.0 版" icon="gift" accent="var(--income)" width="40rem" onClose=${() => close()}
+    footer=${html`<div class="grow"></div><${Btn} kind="primary" icon="check" onClick=${() => close()}>開始使用</${Btn}>`}>
+  <div class="wn-head"><div class="wn-badge"><img src="logo.svg" alt="" /></div>
+    <div><b>更新完成，您的帳本資料都在</b><span class="muted">更新前已自動備份一份帳本，放在「自動備份」資料夾。</span></div></div>
+  <div class="section-title sm">這個版本的新功能</div>
+  <${Notes} text=${"更貼心的設計（3.2 版）\n* 總覽新增「本月洞察」與「本月支出排行」\n* 分類加上小圖示\n* 有新版本時左側選單會提醒"} /></${Dialog}>`);

@@ -51,8 +51,27 @@ class DashboardApi:
                            "type_label": TYPE_LABELS[t["type"]], "category": cat, "account": t["account_name"] or "",
                            "note": t["note"], "amount": signed, "currency": t["currency"],
                            "signed": t["type"] != "transfer", "tags": t.get("tags", [])})
+        # 今天記了幾筆、連續記帳天數（只算她自己記的、未作廢的傳票）
+        days = {r["date"] for r in db._q("SELECT DISTINCT date FROM transactions WHERE void = 0 AND source = ''"
+                                         " AND date >= ?", ((today - dt.timedelta(days=400)).isoformat(),))}
+        today_count = db._q1("SELECT COUNT(*) n FROM transactions WHERE void = 0 AND source = '' AND date = ?",
+                             (today.isoformat(),))["n"]
+        streak, day = 0, today if today.isoformat() in days else today - dt.timedelta(days=1)
+        while day.isoformat() in days:
+            streak += 1
+            day -= dt.timedelta(days=1)
+        # 本月支出排行與上月比較
+        prev_spent = {c["id"]: c["total"] for c in db.category_totals(month_start(prev_ym), month_end(prev_ym), "expense")}
+        cats = db.category_totals(month_start(ym), month_end(ym), "expense")
+        total_exp = sum(c["total"] for c in cats) or 1
+        ranking = [{"id": c["id"], "name": c["name"], "total": c["total"], "share": c["total"] / total_exp,
+                    "count": c["count"], "prev": prev_spent.get(c["id"], 0.0)} for c in cats[:6]]
+        budgets_all = {c["id"]: c for c in db.list_categories("expense") if c["budget"] > 0}
+        over = [budgets_all[i]["name"] for i, v in spent.items() if i in budgets_all and v > budgets_all[i]["budget"]]
+        insights = self._insights(m, pm, ranking, over, db.upcoming_maturities(60), today, r)
         return {
-            "today": today.isoformat(),
+            "today": today.isoformat(), "today_count": today_count, "streak": streak,
+            "ranking": ranking, "insights": insights,
             "sample": db.get_setting("sample_data") == "1",
             "net": nw["net"], "assets": nw["assets"], "liabilities": nw["liabilities"],
             "month": {"income": m["income"], "expense": m["expense"], "net": m["net"]},
@@ -66,3 +85,32 @@ class DashboardApi:
             "reminders": reminders,
             "recent": recent,
         }
+
+    @staticmethod
+    def _insights(m, pm, ranking, over, mats, today, r) -> list[dict]:
+        """本月洞察：用一句白話說出值得注意的事（最多 5 則）。tone：good／warn／info。"""
+        out = []
+        if pm["expense"] and m["expense"]:
+            d = (m["expense"] - pm["expense"]) / pm["expense"]
+            if abs(d) >= 0.05:
+                word = "少" if d < 0 else "多"
+                out.append({"icon": "trend_down" if d < 0 else "trend_up", "tone": "good" if d < 0 else "warn",
+                            "text": f"本月支出比上個月{word} {abs(d):.0%}", "sub": "到目前為止的金額，月底前還會變動" if d < 0 else ""})
+        if ranking:
+            top = ranking[0]
+            out.append({"icon": "pie", "tone": "info", "category": top["name"],
+                        "text": f"「{top['name']}」是本月最大的支出，占 {top['share']:.0%}",
+                        "sub": f"共 {top['count']} 筆"})
+        for name in over[:2]:
+            out.append({"icon": "alert", "tone": "warn", "category": name, "text": f"「{name}」本月已超出預算",
+                        "sub": "可到「財務報表 → 分類與預算」查看"})
+        if m["income"] and m["net"] > 0 and m["net"] / m["income"] >= 0.2:
+            out.append({"icon": "heart", "tone": "good", "text": f"本月儲蓄率 {m['net'] / m['income']:.0%}，表現很好", "sub": "20% 以上就是健康的水準"})
+        for a in mats[:1]:
+            d = a["days_left"]
+            when = "今天到期" if d == 0 else (f"已到期 {-d} 天" if d < 0 else f"{d} 天後到期")
+            out.append({"icon": "calendar", "tone": "warn" if d <= 7 else "info", "text": f"{a['name']} {when}",
+                        "sub": f"到期日 {a['maturity_date'].replace('-', '/')}"})
+        if r.get("emergency_months") is not None and r["emergency_months"] < 3:
+            out.append({"icon": "alert", "tone": "warn", "text": "緊急預備金不到 3 個月的支出", "sub": "建議保留 6 個月以上的生活費"})
+        return out[:5]
