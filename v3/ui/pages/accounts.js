@@ -2,9 +2,12 @@
 import { useState } from "preact/hooks";
 import { META, api, changed, css, html, money, num, pct, toast, useLoad, ymd } from "../lib/core.js";
 import { Kpi } from "../lib/charts.js";
-import { Btn, Card, Check, DataTable, PageHead, ask, errorBox, openMenu } from "../lib/ui.js";
+import { Btn, Card, Check, DataTable, MenuButton, PageHead, ask, errorBox, openMenu } from "../lib/ui.js";
 import { openAccount, openAdjust } from "../dialogs/account.js";
 import { showTransactions } from "./transactions.js";
+import { openReconcile } from "../dialogs/more.js";
+import { openRates } from "../dialogs/invest.js";
+import { openChart } from "../dialogs/chart.js";
 
 export function Accounts({ go }) {
   const [archived, setArchived] = useState(false);
@@ -31,6 +34,7 @@ export function Accounts({ go }) {
     !a.invest && { label: "更新餘額／市值", icon: "refresh", run: () => openAdjust(a.id) },
     { label: "查看這個帳戶的收支明細", icon: "eye", run: () => showTransactions(go, { account: a.id, period: "全部" }) },
     { label: "查看分類帳（借貸與累計餘額）", icon: "list", run: () => ledger(a) },
+    { label: "銀行對帳…", icon: "check", run: () => openReconcile(a.id) },
     "-",
     { label: a.archived ? "取消封存" : "封存", icon: "archive", run: () => toggleArchive(a) },
     { label: "刪除", icon: "trash", danger: true, run: () => del(a) },
@@ -65,6 +69,9 @@ export function Accounts({ go }) {
 
   return html`
     <${PageHead} title="帳戶管理" sub="資產與負債科目：銀行、現金、投資、信用卡、貸款等">
+      <${Btn} icon="list" big onClick=${openChart} title="檢視全部會計科目、新增科目（含自訂代號）">會計科目表</${Btn}>
+      <${MenuButton} label="更多功能" items=${[{ label: "銀行對帳（與存摺逐筆核對）", icon: "check", run: () => openReconcile(current ? current.id : null) },
+                                            { label: "更新匯率", icon: "refresh", run: openRates }]} />
       <${Btn} kind="adjust" icon="refresh" big onClick=${() => openAdjust(current && !current.invest ? current.id : null)}>更新餘額／市值</${Btn}>
       <${Btn} kind="primary" icon="plus" big onClick=${() => openAccount()}>新增帳戶</${Btn}>
     </${PageHead}>

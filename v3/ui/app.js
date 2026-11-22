@@ -13,6 +13,9 @@ import { Settings } from "./pages/settings.js";
 import { checkUpdates } from "./dialogs/update.js";
 import { openChart, openSubject, openYearClose } from "./dialogs/chart.js";
 import { openJournal } from "./dialogs/journal.js";
+import { openDue, openImport, openReconcile, openRecurring, openSearch, openWelcome } from "./dialogs/more.js";
+import { showTransactions } from "./pages/transactions.js";
+import { showSecurity } from "./pages/investments.js";
 import { askVoidReason, openAudit, openTxn, openVoucher } from "./dialogs/txn.js";
 import { openAccount, openAdjust } from "./dialogs/account.js";
 import { openPrices, openRates, openSecurity, openSecurityList, openTrade } from "./dialogs/invest.js";
@@ -36,6 +39,7 @@ window.__undo = undo;
 const ALL = { start: "1900-01-01", end: "2999-12-31" };
 window.__t = {
   go: (p) => window.__go(p), openTxn, openAccount, openAdjust, openPrices, openRates, openSecurity, openSecurityList, openTrade, openAnnual, openPrint, openExport, openChart, openSubject, openYearClose, openJournal,
+  openRecurring, openDue, openReconcile, openImport, openSearch: () => openSearch(window.__go), openWelcome,
   openUserJournal: async () => openJournal({ tid: (await api("txn_list", { ...ALL, type: "journal" })).rows.find((r) => !r.source).id }),
   journalTemplate: (name) => { const s = document.querySelector(".journal .jtop select"); const i = [...s.options].findIndex((o) => o.text === name); s.value = i; s.dispatchEvent(new Event("change", { bubbles: true })); },
   tab: (label) => [...document.querySelectorAll(".tabs button")].find((b) => b.textContent.includes(label)).click(), openVoucher, openAudit, askVoid: () => askVoidReason(2),
@@ -61,12 +65,15 @@ function App() {
   const [, force] = useState(0);
   const go = (p) => setPage(p);
   window.__go = go;
+  window.__showTransactions = (f) => showTransactions(go, f);
+  window.__showSecurity = (sid) => showSecurity(go, sid);
 
   useEffect(() => {
     const onKey = (e) => {
       if (window.__modalOpen) return;
       if (e.ctrlKey && e.key >= "1" && e.key <= "6") { go(NAV[+e.key - 1][0]); e.preventDefault(); }
       else if (e.ctrlKey && (e.key === "n" || e.key === "N")) { e.preventDefault(); openTxn({ type: "expense" }); }
+      else if (e.ctrlKey && (e.key === "f" || e.key === "F")) { e.preventDefault(); openSearch(go); }
       else if (e.ctrlKey && (e.key === "z" || e.key === "Z") && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); undo(); }
     };
     window.addEventListener("keydown", onKey);
@@ -90,6 +97,7 @@ function App() {
       ${NAV.map(([k, label, ic], i) => html`<button class=${"nav" + (page === k ? " on" : "")} onClick=${() => go(k)}
           title=${"Ctrl+" + (i + 1)}><${Icon} name=${ic} />${label}</button>`)}
       <div class="grow"></div><hr />
+      <button class="nav" onClick=${() => openSearch(go)}><${Icon} name="search" />搜尋<kbd>Ctrl+F</kbd></button>
       <button class="nav" onClick=${() => openTxn({ type: "expense" })}><${Icon} name="plus" />記一筆<kbd>Ctrl+N</kbd></button>
       <button class="nav" onClick=${undo}><${Icon} name="undo" />復原<kbd>Ctrl+Z</kbd></button>
       <div class="prefs">
@@ -123,7 +131,11 @@ async function boot() {
   applyPrefs(dark ? "dark" : "light", META.font_scale || "large");
   if (META.animations && !matchMedia("(prefers-reduced-motion: reduce)").matches) document.documentElement.classList.add("animate");
   render(html`<${App} />`, document.getElementById("app"));
-  if (!META.smoke) setTimeout(() => checkUpdates(true).catch(() => {}), 4000);   // 每天第一次開啟時檢查新版本（可在設定關閉）
+  if (!META.smoke) {
+    if (await api("first_run")) await openWelcome();                       // 第一次開啟：稱呼、基本帳戶或範例資料
+    else setTimeout(() => openDue().catch(() => {}), 600);                 // 定期交易到期提醒
+    setTimeout(() => checkUpdates(true).catch(() => {}), 4000);            // 每天第一次開啟時檢查新版本（可在設定關閉）
+  }   // 每天第一次開啟時檢查新版本（可在設定關閉）
 }
 
 if (window.pywebview && window.pywebview.api) boot();

@@ -72,6 +72,13 @@ SCENES = [
     ("journal_system", ESC + "; __t.openFirstOf('journal')", 2.5),
     ("journal_xlarge", ESC + "; __t.prefs('light', 'xlarge'); __t.openUserJournal()", 2.5),
     ("txn_split", ESC + "; __t.prefs('light', 'large'); __t.openTxn({type: 'expense'})", 1.5),
+    ("recurring", ESC + "; __t.prefs('light', 'large'); __t.openRecurring()", 2),
+    ("recurring_edit", "document.querySelector('.dialog tbody tr').dispatchEvent(new MouseEvent('dblclick', {bubbles: true}))", 2),
+    ("reconcile", ESC + "; " + ESC + "; __t.openReconcile(2)", 2),
+    ("import", ESC + "; __t.openImport()", 1.5),
+    ("search", ESC + "; __t.openSearch()", 1),
+    ("search_results", "(() => { const i = document.querySelector('.big-search input'); i.value = '午餐'; i.dispatchEvent(new Event('input', {bubbles: true})); })()", 2),
+    ("welcome", ESC + "; __t.openWelcome()", 1.5),
     ("dashboard_dark", ESC + "; __t.prefs('dark', 'large'); __t.go('dashboard')", 3),
     ("min_window", ESC + "; __t.prefs('light', 'xlarge'); __t.go('transactions')", 1),
 ]

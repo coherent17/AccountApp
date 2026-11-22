@@ -28,6 +28,12 @@ class DashboardApi:
                    for c in db.list_categories("expense") if c["budget"] > 0][:7]
         due = db.due_recurring()
         reminders = []
+        from app import backup
+        bk = backup.status(db)
+        if bk["remind"]:
+            when = f"上次成功是 {bk['days']} 天前" if bk["days"] is not None else "還沒有成功備份過"
+            reminders.append({"kind": "backup", "text": f"第二份備份（隨身碟／OneDrive）{when}，請插上隨身碟後按「立即備份」。",
+                              "action": "立即備份"})
         if due:
             names = "、".join(dict.fromkeys(rec["name"] for rec, _ in due))
             reminders.append({"kind": "due", "text": f"有 {len(due)} 筆定期交易已到期：{names}", "action": "確認入帳"})
@@ -47,6 +53,7 @@ class DashboardApi:
                            "signed": t["type"] != "transfer", "tags": t.get("tags", [])})
         return {
             "today": today.isoformat(),
+            "sample": db.get_setting("sample_data") == "1",
             "net": nw["net"], "assets": nw["assets"], "liabilities": nw["liabilities"],
             "month": {"income": m["income"], "expense": m["expense"], "net": m["net"]},
             "prev_month": {"income": pm["income"], "expense": pm["expense"]},

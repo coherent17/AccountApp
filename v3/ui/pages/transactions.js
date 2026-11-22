@@ -5,6 +5,9 @@ import { Btn, Check, DataTable, DateInput, Icon, MenuButton, PageHead, Select, T
          openMenu } from "../lib/ui.js";
 import { askVoidReason, openAudit, openTxn, openVoucher, pickTag } from "../dialogs/txn.js";
 import { openJournal } from "../dialogs/journal.js";
+import { openImport, openRecurring, openRecurringEdit } from "../dialogs/more.js";
+import { openAdjust } from "../dialogs/account.js";
+import { openChart } from "../dialogs/chart.js";
 
 const EMPTY = { period: "本月", start: null, end: null, type: null, account: null, category: null, tag: null, keyword: "", void: false };
 
@@ -100,6 +103,7 @@ export function Transactions({ go }) {
       ...(r.void ? [{ label: "取消作廢（恢復這筆）", icon: "restore", run: () => unvoid(r) }]
         : [{ label: "開啟／編輯", icon: "edit", run: () => openVoucher(r.id) },
            !sys && { label: "複製一筆（日期改為今天）", icon: "copy", run: () => copy(r) },
+           ["income", "expense", "transfer"].includes(r.type) && !r.source && { label: "設為定期交易…", icon: "restore", run: async () => openRecurringEdit(null, await api("txn_copy", r.id).then((p) => ({ ...p, date: r.date }))) },
            "-",
            !sys && { label: "迴轉（產生反向分錄）", icon: "refresh", run: () => reverse(r) },
            sys ? { label: "刪除（一併刪除投資管理的交易）", icon: "trash", danger: true, run: () => voidSelected() }
@@ -135,7 +139,11 @@ export function Transactions({ go }) {
       <${Btn} kind="primary" icon="book" big onClick=${() => openJournal()} title="多行借貸傳票，可分割到多個科目">複式分錄</${Btn}>
       <${MenuButton} label="更多功能" items=${[
         { label: "復原上一步（Ctrl+Z）", icon: "undo", run: () => window.__undo() },
+        { label: "更新餘額／市值", icon: "refresh", run: () => openAdjust() },
+        { label: "定期交易（每月固定收支）", icon: "restore", run: openRecurring },
+        { label: "匯入 Excel／CSV", icon: "excel", run: openImport },
         { label: "修改紀錄（稽核軌跡）", icon: "eye", run: () => openAudit() },
+        { label: "會計科目表（新增科目）", icon: "list", run: openChart },
       ]} />
     </${PageHead}>
 

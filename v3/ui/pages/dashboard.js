@@ -3,6 +3,18 @@ import { META, css, html, longDate, money, pct, rootFontPx, useLoad, api, toast,
 import { Icon } from "../lib/ui.js";
 import { CountUp, Kpi, PALETTE, Spark, axis, chartBase, useChart, valueAxis } from "../lib/charts.js";
 import { openTxn, openVoucher } from "../dialogs/txn.js";
+import { openDue } from "../dialogs/more.js";
+import { Btn, ask, errorBox } from "../lib/ui.js";
+import { changed } from "../lib/core.js";
+
+async function clearSample() {
+  if (!(await ask("確定要清除所有範例資料嗎？\n清除後會保留「現金」與「銀行存款」兩個空白帳戶，您可以到「帳戶管理」修改或新增帳戶。", { yes: "清除並開始" }))) return;
+  await api("clear_sample"); changed(); toast("已清除範例資料，可以開始正式記帳了！");
+}
+async function backupNow() {
+  try { await api("extra_run"); toast("第二份備份完成"); } catch (e) { errorBox(e.message); }
+  changed();
+}
 
 function greeting() {
   const h = new Date().getHours();
@@ -88,7 +100,9 @@ function DashboardView({ d, prefsKey, go }) {
         <button class="btn primary" onClick=${() => go("investments")}><${Icon} name="refresh" />更新市值</button>
       </div>
     </div>
-    ${META.demo && html`<div class="banner rise"><${Icon} name="eye" />這是 v3 新介面的測試版，使用範例帳本（不會讀取或修改您的帳本）。</div>`}
+    ${META.demo ? html`<div class="banner rise"><${Icon} name="eye" />這是範例帳本（不會讀取或修改您的帳本），可以放心試用每一項功能。</div>`
+      : d.sample && html`<div class="banner rise"><${Icon} name="eye" /><span class="grow">目前顯示的是範例資料，試用完畢後可以一鍵清除，開始記錄您自己的帳。</span>
+          <${Btn} kind="primary" onClick=${clearSample}>清除範例資料，開始正式記帳</${Btn}></div>`}
 
     <div class="grid kpis">
       <${Kpi} hero title="淨資產（業主權益）" icon="scale" value=${d.net} spark=${d.net_series} prefsKey=${prefsKey}
@@ -124,9 +138,9 @@ function DashboardView({ d, prefsKey, go }) {
 
     ${d.reminders.length > 0 && html`<div class="card remind rise" style="animation-delay:300ms">
       <h3><${Icon} name="bell" />提醒事項</h3>
-      ${d.reminders.map((x) => x.kind === "due"
-        ? html`<div class="ritem"><span class="badge-ic"><${Icon} name="bell" /></span><div class="txt"><b>${x.text}</b></div>
-                 <button class="btn primary" onClick=${() => toast("試作版：入帳視窗尚未製作")}>${x.action}</button></div>`
+      ${d.reminders.map((x) => x.kind === "due" || x.kind === "backup"
+        ? html`<div class="ritem"><span class="badge-ic"><${Icon} name=${x.kind === "due" ? "bell" : "save"} /></span><div class="txt"><b>${x.text}</b></div>
+                 <button class="btn primary" onClick=${() => (x.kind === "due" ? openDue() : backupNow())}>${x.action}</button></div>`
         : html`<div class=${"ritem" + (x.urgent ? " urgent" : "")}><span class="badge-ic"><${Icon} name="book" /></span>
                  <div class="txt"><b>${x.name} 將於 ${ymd(x.date)} 到期（${x.when}）</b>
                  <small>金額 ${money(x.amount, x.currency)}${x.interest ? "，預估利息 " + money(x.interest, x.currency) : ""}</small></div></div>`)}
