@@ -96,15 +96,35 @@ def _grab(win, path: str) -> None:
 SMOKE_PAGES = ["dashboard", "transactions", "accounts", "investments", "reports", "settings"]
 
 
+READY_JS = ("!document.getElementById('splash') && !document.querySelector('.skeleton')"
+            " && !!document.querySelector('.page > .pagefx > *, .page .head')")
+
+
+def wait_ready(win, timeout: float = 20) -> bool:
+    """等畫面真的畫好（啟動畫面消失、沒有載入中的骨架），而不是固定等幾秒。"""
+    end = time.time() + timeout
+    while time.time() < end:
+        try:
+            if win.evaluate_js(READY_JS):
+                time.sleep(0.35)        # 圖表動畫的第一格
+                return True
+        except Exception:  # noqa: BLE001 — 畫面還沒載入完成
+            pass
+        time.sleep(0.15)
+    return False
+
+
 def smoke(win, out: str) -> None:
-    """煙霧測試（與 v2 相同的 MY_LEDGER_SMOKE_DIR）：每一頁截圖為 exe_*.png，JS 錯誤寫進 錯誤紀錄.log，然後關閉。"""
+    """煙霧測試（與 v2 相同的 MY_LEDGER_SMOKE_DIR）：每一頁畫好後截圖為 exe_*.png，然後關閉。
+    畫面程式的錯誤會自動寫進資料夾的「錯誤紀錄.log」；某一頁一直沒畫好也會記錄下來。"""
     os.makedirs(out, exist_ok=True)
-    time.sleep(4)
+    wait_ready(win, 30)
     for page in SMOKE_PAGES:
         win.evaluate_js(f"__t.go('{page}')")
-        time.sleep(2.5)
+        time.sleep(0.2)
+        if not wait_ready(win):
+            win.evaluate_js(f"window.pywebview.api.log_js_error('smoke: {page} 頁 20 秒內沒有畫好')")
         _grab(win, os.path.join(out, f"exe_{page}.png"))
-    # JS 錯誤已由畫面自動寫進「錯誤紀錄.log」
     win.destroy()
 
 
