@@ -9,6 +9,9 @@ import { Transactions } from "./pages/transactions.js";
 import { Accounts } from "./pages/accounts.js";
 import { Investments } from "./pages/investments.js";
 import { Reports } from "./pages/reports.js";
+import { Settings } from "./pages/settings.js";
+import { checkUpdates } from "./dialogs/update.js";
+import { openChart, openSubject, openYearClose } from "./dialogs/chart.js";
 import { askVoidReason, openAudit, openTxn, openVoucher } from "./dialogs/txn.js";
 import { openAccount, openAdjust } from "./dialogs/account.js";
 import { openPrices, openRates, openSecurity, openSecurityList, openTrade } from "./dialogs/invest.js";
@@ -18,7 +21,7 @@ import { openExport } from "./dialogs/data.js";
 const NAV = [["dashboard", "總覽", "home"], ["transactions", "收支明細", "list"], ["accounts", "帳戶管理", "wallet"],
              ["investments", "投資管理", "chart"], ["reports", "財務報表", "excel"], ["settings", "設定", "settings"]];
 const FILL = ["transactions", "investments", "reports"];
-const PAGES = { dashboard: Dashboard, transactions: Transactions, accounts: Accounts, investments: Investments, reports: Reports };
+const PAGES = { dashboard: Dashboard, transactions: Transactions, accounts: Accounts, investments: Investments, reports: Reports, settings: Settings };
 
 async function undo() {
   const label = await api("undo_label");
@@ -31,7 +34,7 @@ window.__undo = undo;
 // 自動測試與截圖用的掛鉤（v3/devshots.py 透過 evaluate_js 操作畫面）
 const ALL = { start: "1900-01-01", end: "2999-12-31" };
 window.__t = {
-  go: (p) => window.__go(p), openTxn, openAccount, openAdjust, openPrices, openRates, openSecurity, openSecurityList, openTrade, openAnnual, openPrint, openExport,
+  go: (p) => window.__go(p), openTxn, openAccount, openAdjust, openPrices, openRates, openSecurity, openSecurityList, openTrade, openAnnual, openPrint, openExport, openChart, openSubject, openYearClose,
   tab: (label) => [...document.querySelectorAll(".tabs button")].find((b) => b.textContent.includes(label)).click(), openVoucher, openAudit, askVoid: () => askVoidReason(2),
   prefs: (t, s) => window.__setPrefs(t, s),
   editFirst: async () => openVoucher((await api("txn_list", { ...ALL, type: "expense" })).rows[0].id),
@@ -108,6 +111,7 @@ function App() {
 async function boot() {
   try {
     setMeta(await api("meta"));
+  window.__folder = META.folder;
   } catch (e) {
     document.getElementById("app").innerHTML = `<div class="boot">無法開啟帳本：${e.message}</div>`;
     return;
@@ -116,6 +120,7 @@ async function boot() {
   applyPrefs(dark ? "dark" : "light", META.font_scale || "large");
   if (META.animations && !matchMedia("(prefers-reduced-motion: reduce)").matches) document.documentElement.classList.add("animate");
   render(html`<${App} />`, document.getElementById("app"));
+  if (!META.smoke) setTimeout(() => checkUpdates(true).catch(() => {}), 4000);   // 每天第一次開啟時檢查新版本（可在設定關閉）
 }
 
 if (window.pywebview && window.pywebview.api) boot();

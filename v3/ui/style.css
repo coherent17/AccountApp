@@ -539,3 +539,27 @@ table.list.compact td { padding: .45rem .5rem; }
 .section-title.sm { font-size: .98rem; margin: .2rem 0 .5rem; }
 .dialog.preview .dbody { padding: 0; background: var(--surface-3); }
 iframe.paper { width: 100%; height: calc(100vh - 14rem); border: 0; background: #fff; display: block; }
+
+/* ---------- 設定 ---------- */
+.grid.two { grid-template-columns: 1fr 1fr; }
+@media (max-width: 1300px) { .grid.two { grid-template-columns: 1fr; } }
+.col { display: flex; flex-direction: column; gap: .6rem; min-width: 0; }
+.card.inner { box-shadow: none; padding: 0; }
+code.path { font: .86rem Consolas, "Microsoft JhengHei UI", monospace; background: var(--surface-2); border: 1px solid var(--line);
+  padding: .4rem .6rem; border-radius: .5rem; color: var(--text-2); word-break: break-all; }
+.extra-box { display: flex; flex-direction: column; gap: .55rem; padding: .9rem 1rem; border: 1px dashed var(--line-strong); border-radius: .8rem; }
+.notes { background: var(--surface-2); border: 1px solid var(--line); border-radius: .8rem; padding: .8rem 1.1rem; max-height: 16rem; overflow-y: auto; line-height: 1.7; }
+.notes p, .notes ul { margin: .3rem 0; }
+.update-head { display: flex; flex-direction: column; gap: .2rem; margin-bottom: .9rem; }
+.update-head b { font-size: 1.35rem; color: var(--primary); }
+.progress { height: .55rem; background: var(--surface-3); border-radius: 999px; overflow: hidden; margin: .6rem 0 .3rem; }
+.progress i { display: block; height: 100%; background: var(--primary); border-radius: 999px; transition: width .3s; }
+.progress i.indet { animation: indet 1.2s ease-in-out infinite; }
+@keyframes indet { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+.check-line { display: flex; gap: .5rem; align-items: center; font-weight: 600; padding: .2rem 0; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; margin-top: .8rem; }
+table.list tbody tr.chart-section td { background: var(--primary-soft); color: var(--primary); font-weight: 750; }
+table.list tbody tr.chart-sub td { background: var(--surface-2); font-weight: 700; }
+.lvl2 { padding-left: 1.4rem; }
+.lvl1 { padding-left: .6rem; }
+.field .fv > .seg { align-self: flex-start; max-width: 100%; flex-wrap: wrap; }

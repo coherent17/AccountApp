@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import json
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -20,6 +21,17 @@ class DbThread:
         self._pool.shutdown(wait=True)
 
 
+def _plain(o):
+    """集合、tuple 等轉成清單，日期轉成文字，讓結果一定能傳給畫面（JSON）。"""
+    if isinstance(o, (set, frozenset)):
+        return sorted(o, key=str)
+    return str(o)
+
+
+def to_json(result):
+    return json.loads(json.dumps(result, default=_plain, ensure_ascii=False))
+
+
 def exposed(method=None, *, db: bool = True):
     """畫面可呼叫的方法：在帳本執行緒執行（db=False 時在呼叫端執行，例如開檔案視窗），並把錯誤轉成訊息。"""
     def deco(fn):
@@ -27,7 +39,7 @@ def exposed(method=None, *, db: bool = True):
         def wrapper(self, *args, **kwargs):
             def call():
                 try:
-                    return fn(self, *args, **kwargs)
+                    return to_json(fn(self, *args, **kwargs))
                 except ValueError as e:
                     if db:
                         try:

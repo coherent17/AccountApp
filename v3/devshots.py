@@ -1,4 +1,4 @@
-"""開發用：自動操作 v3 畫面並截圖（需要 Pillow，不打包進 exe）。
+"""自動操作 v3 畫面並截圖：開發用的場景截圖（run）與 exe 煙霧測試（smoke）。
 
 MY_LEDGER_V3_SHOT=<資料夾> 啟動時執行；MY_LEDGER_V3_SCENES=名稱前綴,… 只跑部分場景。
 每個場景先執行一段 JS（透過 window.__t 的測試掛鉤操作畫面），再截下視窗；JS 錯誤會印出來並寫進 errors.txt。
@@ -59,13 +59,44 @@ SCENES = [
     ("annual", ESC + "; __t.openAnnual([2026, 2025])", 1.5),
     ("export", ESC + "; __t.openExport('2026-01-01', '2026-12-31')", 1.5),
     ("reports_dark", ESC + "; __t.prefs('dark', 'large'); __t.tab('資產負債表')", 2.5),
+    ("settings", ESC + "; __t.prefs('light', 'large'); __t.go('settings')", 2.5),
+    ("settings_mid", "document.querySelector('.main').scrollTop = 900", 1.2),
+    ("settings_lower", "document.querySelector('.main').scrollTop = 99999", 1.2),
+    ("chart", "document.querySelector('.main').scrollTop = 0; __t.openChart()", 2),
+    ("subject", ESC + "; __t.openSubject('asset')", 1.5),
+    ("year_close", ESC + "; __t.openYearClose(2025)", 2),
+    ("settings_dark", ESC + "; __t.prefs('dark', 'large')", 2),
     ("dashboard_dark", ESC + "; __t.prefs('dark', 'large'); __t.go('dashboard')", 3),
     ("min_window", ESC + "; __t.prefs('light', 'xlarge'); __t.go('transactions')", 1),
 ]
 
 
+def _grab(win, path: str) -> None:
+    from v3.screenshot import grab_window
+    grab_window(int(win.native.Handle.ToInt64()), path)
+
+
+SMOKE_PAGES = ["dashboard", "transactions", "accounts", "investments", "reports", "settings"]
+
+
+def smoke(win, out: str) -> None:
+    """煙霧測試（與 v2 相同的 MY_LEDGER_SMOKE_DIR）：每一頁截圖為 exe_*.png，JS 錯誤寫進 錯誤紀錄.log，然後關閉。"""
+    os.makedirs(out, exist_ok=True)
+    time.sleep(4)
+    errors = []
+    for page in SMOKE_PAGES:
+        win.evaluate_js(f"__t.go('{page}')")
+        time.sleep(2.5)
+        errors += json.loads(win.evaluate_js("JSON.stringify(window.__errors.splice(0))") or "[]")
+        _grab(win, os.path.join(out, f"exe_{page}.png"))
+    if errors:
+        folder = win.evaluate_js("window.__folder") or out
+        with open(os.path.join(folder, "錯誤紀錄.log"), "a", encoding="utf-8") as f:
+            f.write("\n".join(["v3 smoke JS errors:"] + errors) + "\n")
+    win.destroy()
+
+
 def run(win, out: str) -> None:
-    from PIL import ImageGrab
     os.makedirs(out, exist_ok=True)
     only = [s for s in os.environ.get("MY_LEDGER_V3_SCENES", "").split(",") if s]
     time.sleep(5)
@@ -75,6 +106,7 @@ def run(win, out: str) -> None:
             continue
         if name == "min_window":
             win.resize(1100, 700)
+            time.sleep(0.5)
         try:
             win.evaluate_js(js)
         except Exception as e:  # noqa: BLE001
@@ -82,8 +114,7 @@ def run(win, out: str) -> None:
         time.sleep(wait)
         errs = json.loads(win.evaluate_js("JSON.stringify(window.__errors.splice(0))") or "[]")
         errors += [f"{name}: {e}" for e in errs]
-        x, y, w, h = win.x, win.y, win.width, win.height
-        ImageGrab.grab(bbox=(x, y, x + w, y + h), all_screens=True).save(os.path.join(out, f"v3_{name}.png"))
+        _grab(win, os.path.join(out, f"v3_{name}.png"))
     with open(os.path.join(out, "errors.txt"), "w", encoding="utf-8") as f:
         f.write("\n".join(errors))
     print("JS errors:" if errors else "no JS errors", *errors, sep="\n", flush=True)

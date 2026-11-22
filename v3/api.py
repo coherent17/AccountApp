@@ -21,6 +21,8 @@ from v3.api_dashboard import DashboardApi
 from v3.api_data import DataApi
 from v3.api_invest import InvestApi
 from v3.api_reports import ReportsApi
+from v3.api_settings import SettingsApi
+from v3.api_update import UpdateApi
 from v3.api_txn import TxnApi
 from v3.rpc import DbThread, exposed  # noqa: F401 — DbThread 由 run.py 匯入
 
@@ -59,6 +61,7 @@ class ApiBase:
             "animations": db.get_setting("animations", "1") != "0",
             "folder": self._folder,
             "online": db.get_setting("online_updates", "0") == "1",
+            "smoke": bool(os.environ.get("MY_LEDGER_SMOKE_DIR") or os.environ.get("MY_LEDGER_V3_SHOT")),
         }
 
     @exposed
@@ -85,6 +88,14 @@ class ApiBase:
         return list(res or [])
 
     @exposed(db=False)
+    def open_url(self, url: str) -> bool:
+        import webbrowser
+        if not url.startswith("https://"):
+            raise ValueError("不支援的網址")
+        webbrowser.open(url)
+        return True
+
+    @exposed(db=False)
     def open_path(self, path: str) -> bool:
         if not path or not os.path.exists(path):
             raise ValueError("找不到這個檔案，可能已被移動或刪除。")
@@ -92,5 +103,5 @@ class ApiBase:
         return True
 
 
-class Api(DataApi, ReportsApi, InvestApi, AccountsApi, TxnApi, DashboardApi, ApiBase):
+class Api(UpdateApi, SettingsApi, DataApi, ReportsApi, InvestApi, AccountsApi, TxnApi, DashboardApi, ApiBase):
     """pywebview 的 js_api：所有畫面可呼叫的方法（各頁的方法分在 api_*.py）。"""
