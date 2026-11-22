@@ -9,7 +9,7 @@
     // 畫面程式的錯誤：留給自動測試檢查，並寫進資料夾的「錯誤紀錄.log」
     window.__errors = [];
     const report = (t) => { window.__errors.push(t); try { window.pywebview.api.log_js_error(t); } catch (_) {} };
-    window.addEventListener("error", (e) => report(String(e.message) + " @ " + e.filename + ":" + e.lineno));
+    window.addEventListener("error", (e) => /ResizeObserver loop/.test(e.message) || report(String(e.message) + " @ " + e.filename + ":" + e.lineno));
     window.addEventListener("unhandledrejection", (e) => {
       const r = e.reason;
       if (r && r.user) return;      // 帳務規則的提示（例如「此期間已結帳」）已經顯示給使用者，不是程式錯誤

@@ -614,3 +614,53 @@ table.recon tbody tr { cursor: pointer; }
 .nav, .brand b, .brand span { white-space: nowrap; }
 .brand > div:last-child { min-width: 0; overflow: hidden; }
 @media (max-width: 1250px) { .nav kbd { display: none; } .brand span { display: none; } .side { padding-left: .7rem; padding-right: .7rem; } }
+
+/* ---------- 總覽：上方卡片（一個格線，左邊大卡跨兩列，邊緣全部對齊） ---------- */
+.kgrid { display: grid; grid-template-columns: 1.3fr 1fr 1fr; grid-auto-rows: 1fr; gap: 1.1rem; }
+.kgrid > .hero2 { grid-row: span 2; }
+@media (max-width: 1250px) { .kgrid { grid-template-columns: 1fr 1fr; grid-auto-rows: auto; } .kgrid > .hero2 { grid-column: 1 / -1; grid-row: auto; } }
+.stat { display: flex; flex-direction: column; gap: .3rem; position: relative; overflow: hidden; }
+.stat::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--accent); opacity: 0; transition: opacity .25s; }
+.stat .t, .hero2 .t { display: flex; align-items: center; gap: .55rem; color: var(--text-2); font-size: .92rem; }
+.stat .v { font-size: 1.85rem; font-weight: 750; line-height: 1.2; white-space: nowrap; }
+.stat .s { color: var(--text-3); font-size: .84rem; }
+.stat .viz { margin-top: auto; padding-top: .7rem; }
+html.animate .stat, html.animate .hero2 { transition: transform .25s cubic-bezier(.2, .8, .2, 1), box-shadow .25s; }
+html.animate .stat:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
+html.animate .stat:hover::before { opacity: 1; }
+.segbar { display: flex; gap: 2px; height: .55rem; border-radius: 999px; overflow: hidden; background: var(--surface-3); }
+.segbar i { display: block; height: 100%; min-width: 3px; }
+.meter.thick { height: .55rem; }
+.viz-label { display: flex; justify-content: space-between; gap: .6rem; flex-wrap: wrap; margin-top: .45rem; font-size: .78rem; color: var(--text-2); }
+.viz-label span { display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap; }
+.viz-label i { width: .55rem; height: .55rem; border-radius: 2px; display: inline-block; }
+.viz-empty { font-size: .8rem; color: var(--text-3); padding: .3rem 0; }
+.minibars { display: grid; grid-template-columns: repeat(6, 1fr); gap: .4rem; height: 3.6rem; align-items: end; }
+.minibars .mb { display: flex; flex-direction: column; align-items: center; gap: .2rem; height: 100%; justify-content: flex-end; }
+.minibars i { display: block; width: 100%; max-width: 1.6rem; border-radius: .3rem .3rem .15rem .15rem; }
+html.animate .minibars i { animation: grow .7s cubic-bezier(.2, .8, .2, 1) both; transform-origin: bottom; }
+@keyframes grow { from { transform: scaleY(0); } }
+.minibars span { font-size: .68rem; color: var(--text-3); line-height: 1; }
+
+.hero2 { position: relative; overflow: hidden; color: #fff; border: 0; box-shadow: var(--shadow-hero); display: flex; flex-direction: column; gap: .3rem;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-2) 100%); }
+.hero2 > :not(.aurora) { position: relative; z-index: 1; }
+.hero2 .t { color: rgba(255, 255, 255, .85); }
+.hero2 .badge-ic { background: rgba(255, 255, 255, .18); color: #fff; }
+.hero2 .v { font-size: 2.6rem; font-weight: 800; line-height: 1.15; letter-spacing: -.01em; white-space: nowrap; }
+.hero2 .s { color: rgba(255, 255, 255, .75); font-size: .84rem; }
+.aurora { position: absolute; inset: -40%; z-index: 0; pointer-events: none; opacity: .55;
+  background: radial-gradient(35% 35% at 30% 30%, rgba(255, 255, 255, .28), transparent 70%),
+              radial-gradient(30% 30% at 75% 65%, rgba(120, 200, 255, .35), transparent 70%),
+              radial-gradient(25% 25% at 55% 15%, rgba(190, 150, 255, .35), transparent 70%); }
+html.animate .aurora { animation: aurora 18s ease-in-out infinite alternate; }
+@keyframes aurora { 0% { transform: translate(0, 0) rotate(0deg); } 100% { transform: translate(6%, -4%) rotate(25deg); } }
+.glass { background: rgba(255, 255, 255, .16); border: 1px solid rgba(255, 255, 255, .22); backdrop-filter: blur(8px); border-radius: .8rem; }
+.pill2 { margin-left: auto; padding: .2rem .65rem; font-size: .78rem; font-weight: 700; color: #fff; border-radius: 999px; white-space: nowrap; }
+.hero-chart { flex: 1; min-height: 6.5rem; margin: .4rem -1.35rem 0; }
+.hero-empty { flex: 1; min-height: 6rem; display: flex; align-items: center; justify-content: center; gap: .5rem; color: rgba(255, 255, 255, .8);
+  font-size: .9rem; border: 1px dashed rgba(255, 255, 255, .35); border-radius: .9rem; margin-top: .6rem; text-align: center; padding: 0 1rem; }
+.hero-foot { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; margin-top: .6rem; }
+.hero-foot .glass { padding: .55rem .8rem; display: flex; flex-direction: column; gap: .1rem; }
+.hero-foot span { font-size: .78rem; color: rgba(255, 255, 255, .8); }
+.hero-foot b { font-size: 1.15rem; }
