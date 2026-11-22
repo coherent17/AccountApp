@@ -186,6 +186,8 @@ class MoreApi:
         else:
             db.start_fresh()
         db.set_setting("first_run_done", "1")
+        from app.version import APP_VERSION
+        db.set_setting("last_seen_version", APP_VERSION)     # 全新安裝不需要「已更新到…」
         db.clear_undo()
 
     @exposed

@@ -12,6 +12,20 @@ import time
 
 ESC = "window.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}))"
 
+# README 用的截圖（MY_LEDGER_V3_SCENES=readme）：淺色、大字，範例帳本
+README = [
+    ("readme_dashboard", "__t.prefs('light', 'large'); __t.go('dashboard')", 3.5),
+    ("readme_insights", "document.querySelector('.main').scrollTop = 640", 2),
+    ("readme_transactions", "document.querySelector('.main').scrollTop = 0; __t.go('transactions')", 2.5),
+    ("readme_txn_dialog", "__t.openTxn({type: 'expense'})", 1.8),
+    ("readme_journal", ESC + "; __t.openUserJournal()", 2.5),
+    ("readme_investments", ESC + "; __t.go('investments')", 3),
+    ("readme_reports", "__t.go('reports')", 3),
+    ("readme_annual", "__t.openAnnual([2026, 2025])", 1.5),
+    ("readme_dark", ESC + "; __t.prefs('dark', 'large'); __t.go('dashboard')", 3.5),
+    ("readme_tour", "__t.prefs('light', 'large'); __t.openTour()", 1.5),
+]
+
 # (名稱, 截圖前執行的 JS, 等待秒數)
 SCENES = [
     ("dashboard", "__t.go('dashboard')", 3),
@@ -138,8 +152,9 @@ def run(win, out: str) -> None:
     only = [s for s in os.environ.get("MY_LEDGER_V3_SCENES", "").split(",") if s]
     time.sleep(5)
     errors = []
-    for name, js, wait in SCENES:
-        if only and not any(name.startswith(o) for o in only):
+    scenes = README if only == ["readme"] else SCENES
+    for name, js, wait in scenes:
+        if only and only != ["readme"] and not any(name.startswith(o) for o in only):
             continue
         if name == "min_window":
             win.resize(1100, 700)

@@ -6,3 +6,8 @@ build/
 *.log
 tts_cache/
 !tests/fixtures/*.db
+# 本機開發環境
+venv/
+venv3/
+.vscode/
+.idea/

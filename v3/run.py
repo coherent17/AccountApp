@@ -122,14 +122,22 @@ def main() -> int:
         win.destroy()
 
     win.events.closing += on_closing
-    if close_test:
-        webview.start(devshots.closing, (win, close_test), http_server=True, gui="edgechromium", debug=False)
-    elif shot:
-        webview.start(devshots.run, (win, shot), http_server=True, gui="edgechromium", debug=False)
-    elif smoke:
-        webview.start(devshots.smoke, (win, smoke), http_server=True, gui="edgechromium", debug=False)
+    # 瀏覽器設定檔（WebView2）：正式使用放在 %LOCALAPPDATA%\MyLedger（記住外觀，供啟動畫面使用）；
+    # 自動測試每個程式各用一個暫存資料夾，同時跑多個也不會互相卡住
+    if shot or smoke or close_test:
+        opts = {"private_mode": True, "storage_path": tempfile.mkdtemp(prefix="myledger_wv_")}
     else:
-        webview.start(http_server=True, gui="edgechromium", debug=False)
+        opts = {"private_mode": False,
+                "storage_path": os.path.join(os.environ.get("LOCALAPPDATA") or folder, "MyLedger", "WebView2")}
+    common = {"http_server": True, "gui": "edgechromium", "debug": False, **opts}
+    if close_test:
+        webview.start(devshots.closing, (win, close_test), **common)
+    elif shot:
+        webview.start(devshots.run, (win, shot), **common)
+    elif smoke:
+        webview.start(devshots.smoke, (win, smoke), **common)
+    else:
+        webview.start(**common)
 
     def shutdown():
         if db.conn is None:

@@ -102,17 +102,31 @@ class UpdateApi:
 
     @exposed
     def whats_new(self) -> dict | None:
-        """更新後第一次開啟：傳回這一版的更新說明（只顯示一次）。"""
+        """這個版本第一次開啟：傳回「已更新到…」要顯示的說明（每個版本只顯示一次）。
+        說明優先用更新時從 GitHub 存下的內容，否則用程式內附的 v3/whatsnew.md。
+        全新安裝不顯示（歡迎畫面會記下目前版本）。"""
         db = self._db
+        seen = db.get_setting("last_seen_version", "")
+        db.set_setting("last_seen_version", APP_VERSION)
         raw = db.get_setting("update_notes", "")
-        if not raw:
-            return None
         db.set_setting("update_notes", "")
-        try:
-            info = json.loads(raw)
-        except ValueError:
+        if seen == APP_VERSION:
             return None
-        return info if info.get("version") == APP_VERSION else None
+        notes = ""
+        try:
+            saved = json.loads(raw) if raw else {}
+            if saved.get("version") == APP_VERSION:
+                notes = saved.get("notes", "")
+        except ValueError:
+            pass
+        if not notes:
+            path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whatsnew.md")
+            try:
+                with open(path, encoding="utf-8") as f:
+                    notes = f.read()
+            except OSError:
+                return None
+        return {"version": APP_VERSION, "notes": notes}
 
     @exposed
     def tour_status(self) -> bool:
