@@ -26,7 +26,7 @@ from v3.api_reports import ReportsApi
 from v3.api_settings import SettingsApi
 from v3.api_update import UpdateApi
 from v3.api_txn import TxnApi
-from v3.rpc import DbThread, exposed  # noqa: F401 — DbThread 由 run.py 匯入
+from v3.rpc import DbThread, exposed  # noqa: F401 — DbThread 由 v3/run.py 匯入
 
 
 class ApiBase:

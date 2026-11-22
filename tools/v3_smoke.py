@@ -1,7 +1,7 @@
 """v3 exe 煙霧測試：新資料夾＋每一個舊版本帳本（tests/fixtures），同時跑 4 個，每一頁畫好就截圖。
 
 用法（Windows 的 python，在 src 資料夾）：
-    python tools/v3_smoke.py v3\\dist\\我的理財帳本.exe [輸出資料夾]
+    python tools/v3_smoke.py packaging\\dist\\我的理財帳本.exe [輸出資料夾]
 每一本都要：6 張 exe_*.png、沒有「錯誤紀錄.log」、舊結構的帳本要產生「升級前備份」。任何一本失敗時結束碼為 1。
 """
 

@@ -5,6 +5,7 @@ import { AmountInput, Btn, Card, Check, DataTable, DateInput, Dialog, Field, Ico
          errorBox, info, openMenu, openModal, Skeleton } from "../lib/ui.js";
 import { openChart, openSubject, openYearClose } from "../dialogs/chart.js";
 import { checkUpdates } from "../dialogs/update.js";
+import { openTour } from "../dialogs/tour.js";
 
 export const resolveTheme = (mode) => (mode === "dark" || (mode === "system" && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light");
 
@@ -49,6 +50,7 @@ function Personal({ d, reload }) {
       <${Segmented} value=${d.theme} onChange=${theme} options=${[["light", "淺色", "eye"], ["dark", "深色", "moon"], ["system", "跟隨 Windows 設定", "settings"]]} /></${Field}>
     <${Field} label="動畫效果" hint="若電腦較舊、覺得畫面不夠流暢，或偏好簡潔畫面，可以關閉。">
       <${Check} checked=${d.animations} onChange=${anim}>開啟動畫效果（畫面轉場、數字滾動、圖表動畫）</${Check}></${Field}>
+    <${Field} label="新功能導覽"><div class="row"><${Btn} icon="eye" onClick=${openTour}>重新觀看導覽</${Btn}><span class="muted small">介紹記一筆、搜尋、復原與外觀設定</span></div></${Field}>
     <${Field} label="本位幣" hint="所有報表與資產合計皆以本位幣表示；外幣帳戶依帳戶中設定的匯率換算。">
       <${Select} value=${d.base} onChange=${base} options=${d.currencies} /></${Field}>
   </div></${Card}>`;

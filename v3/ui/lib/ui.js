@@ -1,6 +1,7 @@
 // 共用元件：圖示、按鈕、對話框、表單欄位、表格、右鍵選單。
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { ICONS } from "../icons.js";
+import { catEmoji } from "./caticon.js";
 import { PERIOD_PRESETS, dateLabel, decimalsFor, evalAmount, html, isoOf, num, parseDate, presetRange } from "./core.js";
 
 export const Icon = ({ name, size, cls = "" }) =>
@@ -205,7 +206,7 @@ export function Segmented({ value, onChange, options, cls = "" }) {
 export function Chips({ items, value, onChange, kind }) {
   return html`<div class=${"chips k-" + (kind || "")}>${items.map((it) =>
     html`<button type="button" class=${it.id === value ? "on" : ""} onClick=${() => onChange(it.id)} title=${it.code ? it.code + "　" + it.name : it.name}>
-      ${it.name}</button>`)}</div>`;
+      <span class="emo">${catEmoji(it.name, kind)}</span>${it.name}</button>`)}</div>`;
 }
 
 // ------------------------------------------------------------------ 右鍵選單
@@ -255,8 +256,14 @@ export function MenuButton({ label, icon = "more", items, kind = "" }) {
  * 點標題排序；按一下選取（Ctrl／Shift 多選）；按兩下或 Enter 開啟；右鍵選單；Delete 鍵。
  * 列數多時先畫前 400 列，往下捲動再補上（避免一次畫幾千列）。
  */
+/** 剛儲存的紀錄：在表格中短暫發光，讓她看到新紀錄放在哪裡。 */
+export function flashRow(id) {
+  window.__flashId = id;
+  setTimeout(() => { if (window.__flashId === id) window.__flashId = null; }, 3500);
+}
+
 export function DataTable({ columns, rows, rowKey = (r) => r.id, onActivate, onMenu, onDelete, selected, onSelect,
-                            defaultSort, empty = "沒有資料", rowCls, sticky = true, maxHeight, foot }) {
+                            defaultSort, empty = "沒有資料", emptyAction, rowCls, sticky = true, maxHeight, foot }) {
   const [sort, setSort] = useState(defaultSort || null);
   const [limit, setLimit] = useState(400);
   const anchor = useRef(null);
@@ -308,7 +315,7 @@ export function DataTable({ columns, rows, rowKey = (r) => r.id, onActivate, onM
       <thead><tr>${columns.map((c) => html`<th class=${(c.align || "") + (c.sort ? " sortable" : "")} style=${c.width ? `width:${c.width}` : ""}
           onClick=${() => c.sort && setSort(sort && sort[0] === c.key ? [c.key, !sort[1]] : [c.key, false])}>
           ${c.title}${sort && sort[0] === c.key && html`<span class="arrow">${sort[1] ? "▼" : "▲"}</span>`}</th>`)}</tr></thead>
-      <tbody>${sorted.slice(0, limit).map((r, i) => html`<tr key=${rowKey(r)} class=${(sel.has(rowKey(r)) ? "sel " : "") + (rowCls ? rowCls(r) : "")}
+      <tbody>${sorted.slice(0, limit).map((r, i) => html`<tr key=${rowKey(r)} class=${(sel.has(rowKey(r)) ? "sel " : "") + (rowCls ? rowCls(r) : "") + (window.__flashId != null && rowKey(r) === window.__flashId ? " flash" : "")}
           onMouseDown=${(e) => { if (e.button === 0) click(e, r, i); else if (e.button === 2 && !sel.has(rowKey(r)) && onSelect) { onSelect(new Set([rowKey(r)])); anchor.current = rowKey(r); } }}
           onDblClick=${() => onActivate && onActivate(r)}
           onContextMenu=${(e) => onMenu && onMenu(e, r)}>
@@ -317,7 +324,7 @@ export function DataTable({ columns, rows, rowKey = (r) => r.id, onActivate, onM
       </tbody>
       ${foot && html`<tfoot>${foot}</tfoot>`}
     </table>
-    ${!sorted.length && html`<div class="empty"><${Icon} name="list" size="2.2rem" /><div>${empty}</div></div>`}
+    ${!sorted.length && html`<div class="empty"><div class="empty-ic"><${Icon} name="list" size="1.8rem" /></div><div>${empty}</div>${emptyAction}</div>`}
   </div>`;
 }
 

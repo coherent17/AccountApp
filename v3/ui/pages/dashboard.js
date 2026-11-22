@@ -4,6 +4,7 @@ import { Icon, Skeleton } from "../lib/ui.js";
 import { CountUp, PALETTE, axis, chartBase, useChart, valueAxis } from "../lib/charts.js";
 import { openTxn, openVoucher } from "../dialogs/txn.js";
 import { openDue } from "../dialogs/more.js";
+import { catEmoji } from "../lib/caticon.js";
 import { Btn, ask, errorBox } from "../lib/ui.js";
 import { changed } from "../lib/core.js";
 
@@ -93,6 +94,30 @@ function MiniBars({ months, values, color }) {
       <span>${+m[i].slice(5)}月</span></div>`)}</div>`;
 }
 
+// ------------------------------------------------------------------ 本月洞察、支出排行
+function Insights({ items, go }) {
+  return html`<div class="card rise insights" style="animation-delay:280ms"><h3><${Icon} name="eye" />本月洞察<small>系統幫您留意的事</small></h3>
+    ${items.length === 0 ? html`<div class="muted">記帳一段時間後，這裡會用白話整理出值得注意的事，例如支出變化、超出預算的分類。</div>`
+      : html`<div class="ilist">${items.map((x, i) => html`<div class=${"insight " + x.tone} style=${`animation-delay:${320 + i * 60}ms`}>
+          <span class="i-ic">${x.category ? catEmoji(x.category, "expense") : html`<${Icon} name=${x.icon} />`}</span>
+          <div><b>${x.text}</b>${x.sub && html`<small>${x.sub}</small>`}</div></div>`)}</div>`}
+  </div>`;
+}
+
+function Ranking({ rows }) {
+  const max = Math.max(...rows.map((r) => r.total), 1);
+  return html`<div class="card rise ranking" style="animation-delay:320ms"><h3><${Icon} name="chart" />本月支出排行<small>與上月比較</small></h3>
+    ${rows.length === 0 ? html`<div class="muted">本月還沒有支出紀錄。</div>` : rows.map((r, i) => {
+      const d = r.prev ? (r.total - r.prev) / r.prev : null;
+      return html`<div class="rk" style=${`animation-delay:${360 + i * 50}ms`}>
+        <span class="rk-emo">${catEmoji(r.name, "expense")}</span>
+        <div class="rk-main"><div class="rk-top"><b>${r.name}</b><span class="num">${money(r.total)}</span></div>
+          <div class="rk-bar"><i style=${`width:${Math.max(3, (r.total / max) * 100)}%`}></i></div></div>
+        <span class=${"rk-d " + (d == null || Math.abs(d) < 0.005 ? "" : d > 0 ? "up" : "down")}>${d == null ? "新" : Math.abs(d) < 0.005 ? "持平" : (d > 0 ? "▲" : "▼") + " " + Math.abs(d * 100).toFixed(0) + "%"}</span>
+      </div>`;
+    })}</div>`;
+}
+
 function Delta({ cur, prev, goodWhenUp = true }) {
   if (!prev) return null;
   const d = (cur - prev) / Math.abs(prev);
@@ -164,7 +189,11 @@ function DashboardView({ d, prefsKey, go }) {
 
   return html`
     <div class="head rise">
-      <div><h1>${greeting()}，${META.owner || "您好"}</h1><div class="sub">${longDate(d.today)}</div></div>
+      <div><h1>${greeting()}，${META.owner || "您好"}</h1>
+        <div class="sub">${longDate(d.today)}
+          ${d.today_count > 0
+            ? html`<span class="nudge good"><${Icon} name="check" />今天已記 ${d.today_count} 筆${d.streak > 1 ? html`・連續記帳 ${d.streak} 天 🔥` : ""}</span>`
+            : html`<span class="nudge" onClick=${() => openTxn({ type: "expense" })}><${Icon} name="plus" />今天還沒有記帳，按這裡記一筆</span>`}</div></div>
       <div class="actions">
         <button class="btn t-expense" onClick=${() => openTxn({ type: "expense" })}><${Icon} name="minus" />記支出</button>
         <button class="btn t-income" onClick=${() => openTxn({ type: "income" })}><${Icon} name="plus" />記收入</button>
@@ -206,6 +235,11 @@ function DashboardView({ d, prefsKey, go }) {
       </div>
     </div>
 
+    <div class="grid insights-row">
+      <${Insights} items=${d.insights} go=${go} />
+      <${Ranking} rows=${d.ranking} />
+    </div>
+
     ${d.reminders.length > 0 && html`<div class="card remind rise" style="animation-delay:300ms">
       <h3><${Icon} name="bell" />提醒事項</h3>
       ${d.reminders.map((x) => x.kind === "due" || x.kind === "backup"
@@ -244,7 +278,7 @@ function DashboardView({ d, prefsKey, go }) {
       <table class="list"><thead><tr><th>日期</th><th>傳票號碼</th><th>類型</th><th>分類</th><th>帳戶</th><th>說明</th><th class="r">金額</th></tr></thead>
         <tbody>${d.recent.map((t) => html`<tr onClick=${() => openVoucher(t.id)}>
           <td class="num">${ymd(t.date)}</td><td class="muted num">${t.voucher}</td>
-          <td><span class=${"type b-" + t.type}>${t.type_label}</span></td><td>${t.category}</td><td>${t.account}</td>
+          <td><span class=${"type b-" + t.type}>${t.type_label}</span></td><td>${t.type === "income" || t.type === "expense" ? html`<span class="emo">${catEmoji(t.category, t.type)}</span>` : ""}${t.category}</td><td>${t.account}</td>
           <td class="note" title=${t.note}>${t.note}${t.tags.map((g) => html`<span class="tag">#${g}</span>`)}</td>
           <td class=${"r num c-" + t.type}><b>${money(t.amount, t.currency, t.signed)}</b></td></tr>`)}</tbody></table>
     </div>`;

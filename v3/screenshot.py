@@ -30,17 +30,17 @@ def grab_window(hwnd: int, path: str) -> None:
                           (gdi32.GetDIBits, ctypes.c_int, [H, H, wintypes.UINT, wintypes.UINT, ctypes.c_void_p,
                                                            ctypes.c_void_p, wintypes.UINT]),
                           (user32.PrintWindow, wintypes.BOOL, [H, H, wintypes.UINT]),
-                          (user32.GetWindowRect, wintypes.BOOL, [H, ctypes.POINTER(wintypes.RECT)])):
+                          (user32.GetClientRect, wintypes.BOOL, [H, ctypes.POINTER(wintypes.RECT)])):
         fn.restype, fn.argtypes = res, args
     rect = wintypes.RECT()
-    user32.GetWindowRect(hwnd, ctypes.byref(rect))
+    user32.GetClientRect(hwnd, ctypes.byref(rect))       # 只取內容區（不含 Windows 標題列）
     w, h = rect.right - rect.left, rect.bottom - rect.top
     screen = user32.GetDC(None)
     mem = gdi32.CreateCompatibleDC(screen)
     bmp = gdi32.CreateCompatibleBitmap(screen, w, h)
     old = gdi32.SelectObject(mem, bmp)
     try:
-        user32.PrintWindow(hwnd, mem, 2)       # PW_RENDERFULLCONTENT：含 WebView2 的畫面
+        user32.PrintWindow(hwnd, mem, 3)       # PW_CLIENTONLY | PW_RENDERFULLCONTENT：含 WebView2 的畫面
         info = _BITMAPINFOHEADER(ctypes.sizeof(_BITMAPINFOHEADER), w, -h, 1, 32, 0, 0, 0, 0, 0, 0)
         buf = ctypes.create_string_buffer(w * h * 4)
         gdi32.GetDIBits(mem, bmp, 0, h, buf, ctypes.byref(info), 0)

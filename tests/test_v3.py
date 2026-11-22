@@ -172,6 +172,9 @@ def read_everything(lg: Ledger, where: str):
     ok(a.export_excel(*ok(a.date_range()), [s[0] for s in ok(a.export_form())["sheets"]], out), where)
     assert os.path.getsize(out) > 5000, where
     ok(a.update_settings(), where)
+    ok(a.tour_status(), where)
+    dd = ok(a.dashboard(), where)
+    assert {"today_count", "streak", "ranking", "insights"} <= dd.keys(), where
     ok(a.first_run(), where)
     ok(a.backup_reminder(), where)
 
@@ -321,12 +324,35 @@ def test_welcome_and_sample():
     try:
         assert ok(a.first_run())
         ok(a.welcome_finish("游媽媽", "sample"))
+        assert ok(a.whats_new()) is None                    # 全新安裝不顯示「已更新到…」
         assert not ok(a.first_run()) and ok(a.meta())["owner"] == "游媽媽"
         assert ok(a.dashboard())["sample"]
         ok(a.clear_sample())
         assert not ok(a.dashboard())["sample"]
         names = [x["name"] for x in ok(a.accounts_page(False))["groups"]["asset"]]
         assert names, names
+    finally:
+        lg.close()
+
+
+def test_whats_new_after_update():
+    """每個版本第一次開啟顯示一次「已更新到…」：更新時存下的說明優先，否則用內附的 whatsnew.md。"""
+    from app.version import APP_VERSION
+    lg = Ledger(sample=True)
+    a, db = lg.api, lg.db
+    try:
+        assert "本月洞察" in ok(a.whats_new())["notes"]     # 從沒記錄版本的舊版（v2、3.1）更新上來：顯示內附說明
+        assert ok(a.whats_new()) is None                    # 同一版本不重複顯示
+        assert ok(a.tour_status())
+        ok(a.tour_done())
+        assert not ok(a.tour_status())
+        lg.run(db.set_setting, "last_seen_version", "3.1.0")    # 從舊版更新上來（舊版沒有存說明）
+        w = ok(a.whats_new())
+        assert w["version"] == APP_VERSION and "本月洞察" in w["notes"], w
+        assert ok(a.whats_new()) is None
+        lg.run(db.set_setting, "last_seen_version", "3.1.0")    # 更新時存下的 GitHub 說明優先
+        lg.run(db.set_setting, "update_notes", json.dumps({"version": APP_VERSION, "notes": "* 網路上的說明"}))
+        assert ok(a.whats_new())["notes"] == "* 網路上的說明"
     finally:
         lg.close()
 

@@ -1,6 +1,7 @@
 // 複式分錄（傳票）：多行借貸、借貸平衡才能儲存；投資科目可連結標的與股數，外幣科目輸入原幣金額與匯率；常用範本。
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { META, api, changed, cur, html, isoToday, money, num, toast } from "../lib/core.js";
+import { flashRow } from "../lib/ui.js";
 import { AmountInput, Btn, Combo, DateInput, Dialog, Field, Icon, Select, TagInput, TextInput, ask, errorBox, openModal } from "../lib/ui.js";
 import { openAudit, askVoidReason } from "./txn.js";
 import { printVoucher } from "./print.js";
@@ -181,7 +182,7 @@ function JournalDialog({ f0, opts, close }) {
         if (await ask(`「${res.need_confirm.join("、")}」已有投資標的，但這張分錄沒有選擇標的與股數，金額將不會計入持股與成本。\n\n確定要這樣儲存嗎？`, { yes: "仍要儲存", no: "回去選擇標的" })) save(true);
         return;
       }
-      changed(); toast(`分錄 ${res.voucher} 已儲存，借貸平衡 ✓（Ctrl+Z 可復原）`); close(true);
+      flashRow(res.id); changed(); toast(`分錄 ${res.voucher} 已儲存，借貸平衡 ✓（Ctrl+Z 可復原）`); close(true);
     } catch (e) { setMsg(e.message); } finally { setBusy(false); }
   }
   async function voidIt() {

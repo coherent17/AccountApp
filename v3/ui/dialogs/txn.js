@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import { META, TYPE_LABELS, api, changed, cur, html, isoToday, money, num, toast, ymd } from "../lib/core.js";
 import { openJournal } from "./journal.js";
 import { printVoucher } from "./print.js";
+import { flashRow } from "../lib/ui.js";
 import { AmountInput, Btn, Chips, DataTable, DateInput, Dialog, Field, Icon, Segmented, Select, TagInput, TextInput,
          ask, errorBox, info, openModal } from "../lib/ui.js";
 
@@ -80,6 +81,7 @@ function TxnDialog({ form, opts, close }) {
     setBusy(true);
     try {
       const r = await api("txn_save", data, t ? t.id : null, pending.map((p) => p.path));
+      flashRow(r.id);
       changed();
       const what = { expense: "支出", income: "收入", transfer: "轉帳" }[type] || "紀錄";
       toast(`已${t ? "更新" : "儲存"}${what} ${r.voucher}：${money(amount, c1)}（Ctrl+Z 可復原）`);
