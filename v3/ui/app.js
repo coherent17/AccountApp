@@ -54,10 +54,69 @@ window.__t = {
   },
 };
 
+// 提示訊息：可以復原的操作直接附「復原」按鈕
 function Toasts() {
   const list = useToasts();
-  return html`<div class="toasts">${list.map((t) => html`<div class=${"toast " + t.kind} key=${t.id}>
-    <${Icon} name=${t.kind === "error" ? "alert" : t.kind === "info" ? "info" : "check"} />${t.text}</div>`)}</div>`;
+  return html`<div class="toasts">${list.map((t) => {
+    const canUndo = /（Ctrl\+Z 可復原）/.test(t.text);
+    const text = t.text.replace(/（Ctrl\+Z 可復原）/, "");
+    return html`<div class=${"toast " + t.kind} key=${t.id}>
+      <${Icon} name=${t.kind === "error" ? "alert" : t.kind === "info" ? "info" : "check"} /><span>${text}</span>
+      ${canUndo && html`<button class="undo" onClick=${undo} title="Ctrl+Z">復原</button>`}</div>`;
+  })}</div>`;
+}
+
+// 結束畫面：關閉視窗時顯示「帳本已儲存」，同時完成第二份備份（由 Python 呼叫）
+function farewellHtml(steps, done) {
+  const name = META.owner ? `，${META.owner}` : "";
+  return `<div class="inner">
+    ${done ? `<div class="ok"><svg class="ic" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></div>` : `<div class="mark"><img src="logo.svg" alt=""></div>`}
+    <h1>${done ? "帳本已安全儲存" : "正在儲存帳本…"}</h1>
+    <div class="steps">${steps.map((x) => `<div><svg class="ic" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>${x}</div>`).join("")}</div>
+    <p>${done ? `祝您有美好的一天${name}，下次見！` : "請稍候，馬上就好"}</p>
+    ${done ? "" : `<div class="bar"><i></i></div>`}</div>`;
+}
+window.__farewell = (steps = [], done = false) => {
+  let el = document.getElementById("farewell");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "farewell";
+    el.className = "splash";
+    document.body.appendChild(el);
+  }
+  el.innerHTML = farewellHtml(steps, done);
+  return true;
+};
+
+const SECTIONS = { dashboard: "", transactions: "記帳", accounts: "記帳", investments: "資產", reports: "報表", settings: "" };
+
+function SideBar({ page, go, setPref }) {
+  const r = document.documentElement;
+  const owner = META.owner || "您好";
+  return html`<aside class="side">
+    <div class="brand"><div class="logo"><img src="logo.svg" alt="" /></div>
+      <div><b>我的理財帳本</b><span>個人資產與記帳管理</span></div></div>
+    ${NAV.map(([k, label, ic], i) => html`<button class=${"nav" + (page === k ? " on" : "")} onClick=${() => go(k)}
+        title=${"Ctrl+" + (i + 1)}><${Icon} name=${ic} />${label}</button>`)}
+    <div class="grow"></div>
+    <div class="section-label">快速功能</div>
+    <button class="nav" onClick=${() => openTxn({ type: "expense" })}><${Icon} name="plus" />記一筆<kbd>Ctrl+N</kbd></button>
+    <button class="nav" onClick=${() => openSearch(go)}><${Icon} name="search" />搜尋<kbd>Ctrl+F</kbd></button>
+    <button class="nav" onClick=${undo}><${Icon} name="undo" />復原<kbd>Ctrl+Z</kbd></button>
+    <div class="prefs">
+      <div class="seg mini" title="外觀：切換後立即生效">
+        <button class=${r.dataset.theme === "light" ? "on" : ""} onClick=${() => setPref("light", r.dataset.scale)}>淺色</button>
+        <button class=${r.dataset.theme === "dark" ? "on" : ""} onClick=${() => setPref("dark", r.dataset.scale)}><${Icon} name="moon" />深色</button></div>
+      <div class="seg mini" title="文字大小">
+        ${[["normal", "標準"], ["large", "大"], ["xlarge", "特大"]].map(([k, l]) =>
+          html`<button class=${r.dataset.scale === k ? "on" : ""} onClick=${() => setPref(r.dataset.theme, k)}>${l}</button>`)}</div>
+    </div>
+    <div class="userbox" title="資料只儲存在這台電腦">
+      <div class="avatar">${owner.slice(0, 1)}</div>
+      <div class="grow"><b>${owner}</b><span><span class="dot"></span>版本 ${META.version}</span></div>
+      <button class="iconbtn power" title="結束程式（帳本會自動儲存並備份）" onClick=${() => api("quit_app")}><${Icon} name="power" /></button>
+    </div>
+  </aside>`;
 }
 
 function App() {
@@ -79,9 +138,9 @@ function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+  useEffect(() => { const m = document.querySelector(".main"); if (m) m.scrollTop = 0; }, [page]);
 
   const Page = PAGES[page];
-  const r = document.documentElement;
   const setPref = (t, s) => {
     applyPrefs(t, s);
     api("set_pref", "theme_mode", t);
@@ -91,29 +150,9 @@ function App() {
   window.__setPrefs = (t, s) => { applyPrefs(t, s); force((x) => x + 1); };
 
   return html`<div class="shell">
-    <aside class="side">
-      <div class="brand"><div class="logo"><${Icon} name="book" size="1.35rem" /></div>
-        <div><b>我的理財帳本</b><span>個人資產與記帳管理</span></div></div>
-      ${NAV.map(([k, label, ic], i) => html`<button class=${"nav" + (page === k ? " on" : "")} onClick=${() => go(k)}
-          title=${"Ctrl+" + (i + 1)}><${Icon} name=${ic} />${label}</button>`)}
-      <div class="grow"></div><hr />
-      <button class="nav" onClick=${() => openSearch(go)}><${Icon} name="search" />搜尋<kbd>Ctrl+F</kbd></button>
-      <button class="nav" onClick=${() => openTxn({ type: "expense" })}><${Icon} name="plus" />記一筆<kbd>Ctrl+N</kbd></button>
-      <button class="nav" onClick=${undo}><${Icon} name="undo" />復原<kbd>Ctrl+Z</kbd></button>
-      <div class="prefs">
-        <div class="seg mini" title="外觀：切換後立即生效">
-          <button class=${r.dataset.theme === "light" ? "on" : ""} onClick=${() => setPref("light", r.dataset.scale)}>淺色</button>
-          <button class=${r.dataset.theme === "dark" ? "on" : ""} onClick=${() => setPref("dark", r.dataset.scale)}><${Icon} name="moon" />深色</button></div>
-        <div class="seg mini" title="文字大小">
-          ${[["normal", "標準"], ["large", "大"], ["xlarge", "特大"]].map(([k, l]) =>
-            html`<button class=${r.dataset.scale === k ? "on" : ""} onClick=${() => setPref(r.dataset.theme, k)}>${l}</button>`)}</div>
-      </div>
-      <div class="foot"><span class="dot"></span>版本 ${META.version}<br />資料僅存於本機</div>
-    </aside>
+    <${SideBar} page=${page} go=${go} setPref=${setPref} />
     <main class="main"><div class=${"page" + (FILL.includes(page) ? " fill" : "")}>
-      ${Page ? html`<${Page} go=${go} key=${page} />`
-        : html`<div class="todo"><div><${Icon} name=${NAV.find((n) => n[0] === page)[2]} size="3rem" />
-            <b>${NAV.find((n) => n[0] === page)[1]}</b>這一頁正在製作中，目前請使用 v2 版本。</div></div>`}
+      <div class="pagefx" key=${page}><${Page} go=${go} /></div>
     </div></main>
     <${ModalHost} /><${MenuHost} /><${Toasts} />
   </div>`;
@@ -124,6 +163,7 @@ async function boot() {
     setMeta(await api("meta"));
   window.__folder = META.folder;
   } catch (e) {
+    document.getElementById("splash")?.remove();
     document.getElementById("app").innerHTML = `<div class="boot">無法開啟帳本：${e.message}</div>`;
     return;
   }
@@ -131,11 +171,13 @@ async function boot() {
   applyPrefs(dark ? "dark" : "light", META.font_scale || "large");
   if (META.animations && !matchMedia("(prefers-reduced-motion: reduce)").matches) document.documentElement.classList.add("animate");
   render(html`<${App} />`, document.getElementById("app"));
+  const splash = document.getElementById("splash");               // 啟動畫面：資料準備好後淡出
+  if (splash) setTimeout(() => { splash.classList.add("hide"); setTimeout(() => splash.remove(), 600); }, META.smoke ? 0 : 350);
   if (!META.smoke) {
     if (await api("first_run")) await openWelcome();                       // 第一次開啟：稱呼、基本帳戶或範例資料
     else setTimeout(() => openDue().catch(() => {}), 600);                 // 定期交易到期提醒
     setTimeout(() => checkUpdates(true).catch(() => {}), 4000);            // 每天第一次開啟時檢查新版本（可在設定關閉）
-  }   // 每天第一次開啟時檢查新版本（可在設定關閉）
+  }
 }
 
 if (window.pywebview && window.pywebview.api) boot();

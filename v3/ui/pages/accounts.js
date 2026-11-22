@@ -2,7 +2,7 @@
 import { useState } from "preact/hooks";
 import { META, api, changed, css, html, money, num, pct, toast, useLoad, ymd } from "../lib/core.js";
 import { Kpi } from "../lib/charts.js";
-import { Btn, Card, Check, DataTable, MenuButton, PageHead, ask, errorBox, openMenu } from "../lib/ui.js";
+import { Btn, Card, Check, DataTable, MenuButton, PageHead, ask, errorBox, openMenu, Skeleton } from "../lib/ui.js";
 import { openAccount, openAdjust } from "../dialogs/account.js";
 import { showTransactions } from "./transactions.js";
 import { openReconcile } from "../dialogs/more.js";
@@ -13,7 +13,7 @@ export function Accounts({ go }) {
   const [archived, setArchived] = useState(false);
   const [sel, setSel] = useState(new Set());
   const [d] = useLoad(() => api("accounts_page", archived), [archived]);
-  if (!d) return html`<div class="boot">讀取中…</div>`;
+  if (!d) return html`<${Skeleton} />`;
   const all = [...d.groups.asset, ...d.groups.liability];
   const current = all.find((a) => sel.has(a.id));
 

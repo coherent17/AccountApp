@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import { META, api, changed, css, html, money, num, pct, toast, useLoad, ymd } from "../lib/core.js";
 import { PALETTE, axis, chartBase, useChart, valueAxis } from "../lib/charts.js";
 import { Btn, Card, DataTable, Dialog, Field, Icon, PageHead, PeriodPicker, Segmented, Select, Tabs, TextInput, ask, errorBox,
-         openModal, usePeriod } from "../lib/ui.js";
+         openModal, usePeriod, Skeleton } from "../lib/ui.js";
 import { openVoucher } from "../dialogs/txn.js";
 import { openJournal } from "../dialogs/journal.js";
 import { openAnnual, openPrint } from "../dialogs/print.js";
@@ -23,7 +23,7 @@ export function Reports({ go }) {
   const [meta] = useLoad(() => api("reports_meta"));
   const per = usePeriod("今年", meta ? meta.range : null);
   const [range] = per;
-  if (!meta) return html`<div class="boot">讀取中…</div>`;
+  if (!meta) return html`<${Skeleton} />`;
   const [start, end] = range;
   const P = { bs: BalanceSheet, is: IncomeStatement, cf: CashFlow, monthly: Monthly, cats: Categories, tags: Tags,
               journal: Journal, ledger: Ledger, tb: TrialBalance, tax: Tax }[tab];
@@ -60,7 +60,7 @@ function BalanceSheet({ start, end, meta }) {
   const [mode, setMode] = useState(meta.compare_bs);
   const [d] = useLoad(() => api("report_bs", start, end, mode), [start, end, mode]);
   const change = (m) => { setMode(m); api("set_setting", "report_compare_bs", m); };
-  if (!d) return html`<div class="muted">計算中…</div>`;
+  if (!d) return html`<${Skeleton} kind="block" />`;
   const cmp = !!d.cdate;
   const heads = ["會計科目", ...(d.has_orig ? ["原幣金額"] : []), `金額（${META.base}）`, "占總資產", ...(cmp ? [ymd(d.cdate), "增減金額", "增減 %"] : [])];
   const n = heads.length;
@@ -92,7 +92,7 @@ function IncomeStatement({ start, end, meta }) {
   const [mode, setMode] = useState(meta.compare_is);
   const [d] = useLoad(() => api("report_is", start, end, mode), [start, end, mode]);
   const change = (m) => { setMode(m); api("set_setting", "report_compare_is", m); };
-  if (!d) return html`<div class="muted">計算中…</div>`;
+  if (!d) return html`<${Skeleton} kind="block" />`;
   const cmp = !!d.crange;
   const heads = ["會計科目", "筆數", `本期金額（${META.base}）`, "占收入比", ...(cmp ? [`${ymd(d.crange[0])}～${ymd(d.crange[1])}`, "增減金額", "增減 %"] : [])];
   const rows = d.rows.map((r) => {
@@ -111,7 +111,7 @@ function IncomeStatement({ start, end, meta }) {
 
 function CashFlow({ start, end }) {
   const [cf] = useLoad(() => api("report_cf", start, end), [start, end]);
-  if (!cf) return html`<div class="muted">計算中…</div>`;
+  if (!cf) return html`<${Skeleton} kind="block" />`;
   const rows = [{ style: "total", level: 0, cells: ["期初現金及約當現金", num(cf.opening)] }];
   for (const [title, key, tk] of [["一、生活（營業）活動之現金流量", "operating", "op_total"], ["二、投資活動之現金流量", "investing", "inv_total"],
                                     ["三、籌資活動之現金流量", "financing", "fin_total"], ["四、其他", "other", "other_total"]]) {
@@ -141,7 +141,7 @@ function Monthly({ start, end }) {
              { name: "支出", type: "bar", data: months.map((m) => m.expense), barMaxWidth: 18, itemStyle: { color: css("--expense"), borderRadius: [5, 5, 0, 0] } },
              { name: "結餘", type: "line", data: months.map((m) => m.income - m.expense), smooth: 0.3, symbolSize: 6, lineStyle: { color: css("--primary"), width: 2.5 }, itemStyle: { color: css("--primary") } }],
   }), [d]);
-  if (!d) return html`<div class="muted">計算中…</div>`;
+  if (!d) return html`<${Skeleton} kind="block" />`;
   const ti = months.reduce((s, m) => s + m.income, 0), te = months.reduce((s, m) => s + m.expense, 0), n = Math.max(1, months.length);
   const rows = [...months.map((m) => ({ ...m, label: `${m.ym.slice(0, 4)}年${+m.ym.slice(5)}月` })),
                 { ym: "sum", label: "合計", income: ti, expense: te, _total: true }, { ym: "avg", label: "月平均", income: ti / n, expense: te / n, _total: true }];
@@ -210,7 +210,7 @@ function Tags({ start, end, go }) {
     if (!(await ask(`要從所有紀錄移除標籤「${cur.name}」嗎？\n紀錄本身與金額都不會變動（可按 Ctrl+Z 復原）。`, { yes: "移除標籤", danger: true }))) return;
     const n = await api("tag_delete", cur.name); changed(); toast(`已從 ${n} 筆紀錄移除標籤「${cur.name}」`);
   }
-  if (!rows) return html`<div class="muted">計算中…</div>`;
+  if (!rows) return html`<${Skeleton} kind="block" />`;
   const hasIncome = rows.some((r) => r.income);
   const cols = [
     { key: "name", title: "標籤／專案", render: (r) => html`<span class="tag big">#${r.name}</span>`, sort: (r) => r.name, cls: () => "grow" },
@@ -291,7 +291,7 @@ function Ledger({ start, end, meta, pending }) {
 
 function TrialBalance({ start, end }) {
   const [rows] = useLoad(() => api("report_tb", start, end), [start, end]);
-  if (!rows) return html`<div class="muted">計算中…</div>`;
+  if (!rows) return html`<${Skeleton} kind="block" />`;
   const K = ["open_debit", "open_credit", "period_debit", "period_credit", "debit", "credit"];
   const tot = Object.fromEntries(K.map((k) => [k, rows.reduce((s, r) => s + r[k], 0)]));
   const ok = [["open_debit", "open_credit"], ["period_debit", "period_credit"], ["debit", "credit"]].every(([a, b]) => Math.abs(tot[a] - tot[b]) < 1);
@@ -327,6 +327,6 @@ function Tax({ end, meta }) {
     rows.push({ level: 2, cells: [html`<span class="muted">說明：${ts.realized_note}</span>`], span: 2 });
   }
   return html`<div class="row"><span class="lbl">所得年度</span><${Select} value=${year} onChange=${setYear} options=${meta.years.map((y) => [y, `${y} 年（民國 ${y - 1911} 年）`])} /></div>
-    ${ts ? html`<${Statement} heads=${["項目", `金額（${META.base}）`]} rows=${rows} cls="narrow wrap" />` : html`<div class="muted">計算中…</div>`}
+    ${ts ? html`<${Statement} heads=${["項目", `金額（${META.base}）`]} rows=${rows} cls="narrow wrap" />` : html`<${Skeleton} kind="block" />`}
     <div class="hint">依「設定 → 收支分類」中的「稅務歸類」彙總，方便每年五月申報綜合所得稅時參考。稅法規定時有修訂，實際申報請以財政部最新規定與國稅局資料為準。</div>`;
 }

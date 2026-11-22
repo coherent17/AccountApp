@@ -99,6 +99,11 @@ class ApiBase:
         return list(res or [])
 
     @exposed(db=False)
+    def quit_app(self) -> None:
+        """側邊欄的「結束程式」：與按視窗右上角的 ✕ 相同（會顯示結束畫面並完成備份）。"""
+        self._window.destroy()
+
+    @exposed(db=False)
     def open_url(self, url: str) -> bool:
         import webbrowser
         if not url.startswith("https://"):

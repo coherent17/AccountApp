@@ -50,4 +50,5 @@ export const ICONS = {
  "lock": "<rect x=\"5\" y=\"11\" width=\"14\" height=\"10\" rx=\"2\"/><path d=\"M8 11V7a4 4 0 0 1 8 0v4\"/>",
  "upload": "<path d=\"M12 16V4M7 9l5-5 5 5\"/><path d=\"M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3\"/>",
  "split": "<path d=\"M6 3v6a4 4 0 0 0 4 4h8\"/><path d=\"M6 21v-6a4 4 0 0 1 4-4\"/><path d=\"m15 10 3 3-3 3\"/>",
+ "power": "<path d=\"M12 3v9\"/><path d=\"M6.3 6.3a8 8 0 1 0 11.4 0\"/>",
 };

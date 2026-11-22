@@ -1,7 +1,7 @@
 // 總覽頁：淨資產、本月收支、財務健康、提醒、圖表、預算、最近的紀錄。
 import { META, css, html, longDate, money, pct, rootFontPx, useLoad, api, toast, ymd } from "../lib/core.js";
-import { Icon } from "../lib/ui.js";
-import { CountUp, Kpi, PALETTE, Spark, axis, chartBase, useChart, valueAxis } from "../lib/charts.js";
+import { Icon, Skeleton } from "../lib/ui.js";
+import { CountUp, PALETTE, axis, chartBase, useChart, valueAxis } from "../lib/charts.js";
 import { openTxn, openVoucher } from "../dialogs/txn.js";
 import { openDue } from "../dialogs/more.js";
 import { Btn, ask, errorBox } from "../lib/ui.js";
@@ -19,6 +19,78 @@ async function backupNow() {
 function greeting() {
   const h = new Date().getHours();
   return h < 5 ? "夜深了" : h < 11 ? "早安" : h < 18 ? "午安" : "晚安";
+}
+
+// ------------------------------------------------------------------ 上方的數字卡片（同一個格線，邊緣對齊）
+function HeroCard({ d, savings, prefsKey }) {
+  const vals = d.net_series;
+  const flat = !vals.length || Math.max(...vals) - Math.min(...vals) < 1;
+  const change = vals.length > 1 ? d.net - vals[0] : 0;
+  const ref = useChart(() => ({
+    animation: document.documentElement.classList.contains("animate"),
+    grid: { left: 0, right: 0, top: 8, bottom: 0 },
+    tooltip: { trigger: "axis", backgroundColor: "rgba(15,23,42,.85)", borderWidth: 0, textStyle: { color: "#fff", fontSize: rootFontPx() * 0.8 },
+               valueFormatter: (v) => money(v), extraCssText: "border-radius:10px" },
+    xAxis: { type: "category", show: false, boundaryGap: false, data: d.months.map((m) => `${m.slice(0, 4)}/${+m.slice(5)}`) },
+    yAxis: { type: "value", show: false, min: (v) => v.min - (v.max - v.min) * 0.25 },
+    series: [{ name: "淨資產", type: "line", data: vals, smooth: 0.4, symbol: "circle", symbolSize: 6, showSymbol: false,
+               lineStyle: { color: "rgba(255,255,255,.95)", width: 2.5 }, itemStyle: { color: "#fff" },
+               areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                 { offset: 0, color: "rgba(255,255,255,.38)" }, { offset: 1, color: "rgba(255,255,255,0)" }]) } }],
+  }), [d, prefsKey, flat]);
+  return html`<div class="card hero2 rise">
+    <div class="aurora"></div>
+    <div class="t"><span class="badge-ic"><${Icon} name="scale" /></span>淨資產（業主權益）
+      ${!flat && html`<span class="glass pill2">${change >= 0 ? "▲" : "▼"} ${money(Math.abs(change))}　近 12 個月</span>`}</div>
+    <div class="v"><${CountUp} value=${d.net} format=${(v) => money(v)} /></div>
+    <div class="s">資產總計 − 負債總計</div>
+    ${flat ? html`<div class="hero-empty"><${Icon} name="trend_up" />開始記帳後，這裡會畫出每個月淨資產的變化</div>`
+      : html`<div class="hero-chart" ref=${ref}></div>`}
+    <div class="hero-foot">
+      <div class="glass"><span>本月結餘</span><b class="num">${money(d.month.net, META.base, true)}</b></div>
+      <div class="glass"><span>本月儲蓄率</span><b class="num">${savings == null ? "—" : pct(savings, 0)}</b></div>
+    </div>
+  </div>`;
+}
+
+function StatCard({ title, icon, color, value, sub, delta, delay = 0, children }) {
+  const c = `var(${color})`;
+  return html`<div class="card stat rise" style=${`animation-delay:${delay}ms;--accent:${c}`}>
+    <div class="t"><span class="badge-ic" style=${`background:color-mix(in srgb, ${c} 13%, transparent);color:${c}`}><${Icon} name=${icon} /></span>
+      <span class="grow">${title}</span>${delta}</div>
+    <div class="v" style=${`color:${c}`}><${CountUp} value=${value} format=${(v) => money(v)} /></div>
+    <div class="s">${sub}</div>
+    <div class="viz">${children}</div>
+  </div>`;
+}
+
+/** 資產配置：一條分段的橫條，滑鼠移上去看名稱與占比。 */
+function AllocBar({ items }) {
+  const pos = items.filter((x) => x.value > 0);
+  const total = pos.reduce((s, x) => s + x.value, 0);
+  const pal = PALETTE();
+  if (!total) return html`<div class="viz-empty">尚無資產</div>`;
+  return html`<div class="segbar">${pos.map((x, i) => html`<i style=${`flex:${x.value};background:${pal[i % pal.length]}`}
+      title=${`${x.name}　${money(x.value)}（${pct(x.value / total, 0)}）`}></i>`)}</div>
+    <div class="viz-label">${pos.slice(0, 3).map((x, i) => html`<span><i style=${`background:${pal[i % pal.length]}`}></i>${x.name} ${pct(x.value / total, 0)}</span>`)}</div>`;
+}
+
+/** 負債比率：負債 ÷ 資產。 */
+function RatioBar({ ratio }) {
+  const v = ratio || 0;
+  const col = v <= 0.3 ? "var(--income)" : v <= 0.5 ? "var(--gold)" : "var(--expense)";
+  return html`<div class="meter thick"><i style=${`width:${Math.max(1.5, Math.min(100, v * 100))}%;background:${col}`}></i></div>
+    <div class="viz-label"><span>負債比率 <b style=${`color:${col}`}>${pct(ratio)}</b></span><span class="muted">30% 以下為佳</span></div>`;
+}
+
+/** 近 6 個月的小長條圖（最右邊是本月），滑鼠移上去看金額。 */
+function MiniBars({ months, values, color }) {
+  const m = months.slice(-6), v = values.slice(-6);
+  const max = Math.max(...v, 0);
+  if (!max) return html`<div class="viz-empty">近 6 個月沒有紀錄</div>`;
+  return html`<div class="minibars">${v.map((x, i) => html`<div class="mb" title=${`${+m[i].slice(5)}月　${money(x)}`}>
+      <i style=${`height:${Math.max(4, (x / max) * 100)}%;background:var(${color});opacity:${i === v.length - 1 ? 1 : 0.38}`}></i>
+      <span>${+m[i].slice(5)}月</span></div>`)}</div>`;
 }
 
 function Delta({ cur, prev, goodWhenUp = true }) {
@@ -42,7 +114,7 @@ function Metric({ name, value, hint, level, fill, color, bad = "偏高" }) {
 // ------------------------------------------------------------------ 總覽
 export function Dashboard({ prefsKey, go }) {
   const [d] = useLoad(() => api("dashboard"));
-  if (!d) return html`<div class="boot">讀取中…</div>`;
+  if (!d) return html`<${Skeleton} />`;
   return html`<${DashboardView} d=${d} prefsKey=${prefsKey} go=${go} />`;
 }
 
@@ -104,20 +176,18 @@ function DashboardView({ d, prefsKey, go }) {
       : d.sample && html`<div class="banner rise"><${Icon} name="eye" /><span class="grow">目前顯示的是範例資料，試用完畢後可以一鍵清除，開始記錄您自己的帳。</span>
           <${Btn} kind="primary" onClick=${clearSample}>清除範例資料，開始正式記帳</${Btn}></div>`}
 
-    <div class="grid kpis">
-      <${Kpi} hero title="淨資產（業主權益）" icon="scale" value=${d.net} spark=${d.net_series} prefsKey=${prefsKey}
-              sub=${html`<span>資產總計 − 負債總計</span>`}
-              delta=${d.net_series.length > 1 && html`<span class="pill">${money(d.net - d.net_series[0], META.base, true)}　近 12 個月</span>`} />
-      <${Kpi} title="資產總計" icon="bank" color=${css("--primary")} value=${d.assets} delay=${60} sub="現金、存款、投資、保單…" />
-      <${Kpi} title="負債總計" icon="card" color=${css("--expense")} value=${d.liabilities} delay=${120} sub="信用卡、貸款…" />
-    </div>
-    <div class="grid kpis2">
-      <${Kpi} title="本月收入" icon="trend_up" color=${css("--income")} value=${d.month.income} delay=${160}
-              delta=${html`<${Delta} cur=${d.month.income} prev=${d.prev_month.income} />`} sub=${"上月 " + money(d.prev_month.income)} />
-      <${Kpi} title="本月支出" icon="trend_down" color=${css("--expense")} value=${d.month.expense} delay=${200}
-              delta=${html`<${Delta} cur=${d.month.expense} prev=${d.prev_month.expense} goodWhenUp=${false} />`} sub=${"上月 " + money(d.prev_month.expense)} />
-      <${Kpi} title="本月結餘" icon="dollar" color=${d.month.net >= 0 ? css("--income") : css("--expense")} value=${d.month.net} delay=${240}
-              sub=${savings == null ? "" : "儲蓄率 " + pct(savings, 0)} />
+    <div class="kgrid">
+      <${HeroCard} d=${d} savings=${savings} prefsKey=${prefsKey} />
+      <${StatCard} title="資產總計" icon="bank" color="--primary" value=${d.assets} delay=${60} sub="現金、存款、投資、保單…">
+        <${AllocBar} items=${d.allocation} /></${StatCard}>
+      <${StatCard} title="負債總計" icon="card" color="--expense" value=${d.liabilities} delay=${110} sub="信用卡、貸款…">
+        <${RatioBar} ratio=${r.debt_ratio} /></${StatCard}>
+      <${StatCard} title="本月收入" icon="trend_up" color="--income" value=${d.month.income} delay=${160} sub=${"上月 " + money(d.prev_month.income)}
+        delta=${html`<${Delta} cur=${d.month.income} prev=${d.prev_month.income} />`}>
+        <${MiniBars} months=${d.months} values=${d.monthly.map((x) => x.income)} color="--income" /></${StatCard}>
+      <${StatCard} title="本月支出" icon="trend_down" color="--expense" value=${d.month.expense} delay=${210} sub=${"上月 " + money(d.prev_month.expense)}
+        delta=${html`<${Delta} cur=${d.month.expense} prev=${d.prev_month.expense} goodWhenUp=${false} />`}>
+        <${MiniBars} months=${d.months} values=${d.monthly.map((x) => x.expense)} color="--expense" /></${StatCard}>
     </div>
 
     <div class="card rise" style="animation-delay:260ms">

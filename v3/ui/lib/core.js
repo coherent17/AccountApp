@@ -182,6 +182,7 @@ export function applyPrefs(theme, scale) {
   const r = document.documentElement;
   r.dataset.theme = theme;
   r.dataset.scale = scale;
+  try { localStorage.setItem("prefs", JSON.stringify([theme, scale])); } catch (_) {}   // 下次啟動畫面直接用同樣的外觀
   prefSubs.forEach((f) => f(theme + scale));
 }
 export function usePrefsKey() {

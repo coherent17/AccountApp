@@ -80,4 +80,5 @@ class UpdateApi:
         import sys
         self._dbt.run(self._db.close)
         updater.restart(sys.executable)
+        type(self)._skip_farewell = True      # 更新時直接關閉，不顯示結束畫面
         self._window.destroy()

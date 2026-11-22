@@ -15,7 +15,10 @@ ESC = "window.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}))"
 # (名稱, 截圖前執行的 JS, 等待秒數)
 SCENES = [
     ("dashboard", "__t.go('dashboard')", 3),
-    ("dashboard_lower", "document.querySelector('.main').scrollTop = 99999", 1.5),
+    ("dashboard_hover", "document.querySelectorAll('.stat')[2].dispatchEvent(new MouseEvent('mouseover', {bubbles: true}))", 1),
+    ("dashboard_xlarge", "__t.prefs('light', 'xlarge')", 2.5),
+    ("dashboard_dark2", "__t.prefs('dark', 'large')", 2.5),
+    ("dashboard_lower", "__t.prefs('light', 'large');" +  "document.querySelector('.main').scrollTop = 99999", 1.5),
     ("transactions", "document.querySelector('.main').scrollTop = 0; __t.go('transactions')", 2.5),
     ("transactions_year", "__t.filter({period: '今年'})", 2),
     ("txn_new_expense", "__t.openTxn({type: 'expense'})", 1.5),
@@ -81,6 +84,7 @@ SCENES = [
     ("welcome", ESC + "; __t.openWelcome()", 1.5),
     ("dashboard_dark", ESC + "; __t.prefs('dark', 'large'); __t.go('dashboard')", 3),
     ("min_window", ESC + "; __t.prefs('light', 'xlarge'); __t.go('transactions')", 1),
+    ("min_window_dashboard", "__t.prefs('light', 'large'); __t.go('dashboard')", 3),
 ]
 
 
@@ -127,3 +131,19 @@ def run(win, out: str) -> None:
         f.write("\n".join(errors))
     print("JS errors:" if errors else "no JS errors", *errors, sep="\n", flush=True)
     win.destroy()
+
+
+def closing(win, out: str) -> None:
+    """測試結束畫面：開啟後像按 ✕ 一樣關閉，擷取「正在儲存」與「已安全儲存」兩個畫面。"""
+    import threading
+    os.makedirs(out, exist_ok=True)
+    time.sleep(4)
+    _grab(win, os.path.join(out, "before_close.png"))
+    threading.Thread(target=win.destroy, daemon=True).start()     # 與按視窗的 ✕ 相同：觸發結束畫面
+    time.sleep(0.35)
+    try:
+        _grab(win, os.path.join(out, "farewell_saving.png"))
+        time.sleep(0.9)
+        _grab(win, os.path.join(out, "farewell_done.png"))
+    except Exception as e:  # noqa: BLE001
+        print("grab failed:", e, flush=True)

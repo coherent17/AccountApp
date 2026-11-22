@@ -380,3 +380,12 @@ export function Combo({ value, onChange, options, placeholder = "輸入代號或
       <span class="grow">${o.label}</span>${o.hint && html`<span class="muted small">${o.hint}</span>`}</div>`)}</div>`}
   </div>`;
 }
+
+/** 載入中的骨架畫面（閃爍的灰色區塊），比「讀取中…」文字更穩定，不會跳動。 */
+export function Skeleton({ kind = "page" }) {
+  if (kind === "block") return html`<div class="skeleton"><div class="sk" style="height:22rem"></div></div>`;
+  return html`<div class="skeleton">
+    <div class="row" style="justify-content:space-between"><div class="sk" style="width:16rem;height:3.2rem"></div><div class="sk" style="width:22rem;height:2.9rem"></div></div>
+    <div class="grid" style="grid-template-columns:1.3fr 1fr 1fr"><div class="sk" style="height:9.5rem"></div><div class="sk" style="height:9.5rem"></div><div class="sk" style="height:9.5rem"></div></div>
+    <div class="sk" style="height:20rem"></div></div>`;
+}

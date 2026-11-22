@@ -4,12 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>我的理財帳本</title>
+  <link rel="icon" href="logo.svg">
   <link rel="stylesheet" href="style.css">
   <script>
+    try { const p = JSON.parse(localStorage.getItem("prefs") || "null"); if (p) { document.documentElement.dataset.theme = p[0]; document.documentElement.dataset.scale = p[1]; } } catch (_) {}
     // 畫面程式的錯誤：留給自動測試檢查，並寫進資料夾的「錯誤紀錄.log」
     window.__errors = [];
     const report = (t) => { window.__errors.push(t); try { window.pywebview.api.log_js_error(t); } catch (_) {} };
-    window.addEventListener("error", (e) => report(String(e.message) + " @ " + e.filename + ":" + e.lineno));
+    window.addEventListener("error", (e) => /ResizeObserver loop/.test(e.message) || report(String(e.message) + " @ " + e.filename + ":" + e.lineno));
     window.addEventListener("unhandledrejection", (e) => {
       const r = e.reason;
       if (r && r.user) return;      // 帳務規則的提示（例如「此期間已結帳」）已經顯示給使用者，不是程式錯誤
@@ -23,7 +25,14 @@
   <script src="vendor/echarts.min.js"></script>
 </head>
 <body>
-  <div id="app"><div class="boot">正在開啟帳本…</div></div>
+  <!-- 啟動畫面：在帳本與畫面準備好之前顯示 -->
+  <div id="splash" class="splash"><div class="inner">
+    <div class="mark"><img src="logo.svg" alt=""></div>
+    <h1>我的理財帳本</h1>
+    <p>個人資產與記帳管理</p>
+    <div class="bar"><i></i></div>
+  </div></div>
+  <div id="app"></div>
   <script type="module" src="app.js"></script>
 </body>
 </html>
