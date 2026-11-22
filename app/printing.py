@@ -9,12 +9,9 @@ from __future__ import annotations
 import datetime as dt
 from html import escape
 
-from PySide6.QtGui import QFont, QPageLayout, QPageSize, QTextDocument
-from PySide6.QtPrintSupport import QPrinter
-
 from . import statements as st
 from .database import CURRENCIES, TYPE_LABELS, Database, fmt_shares as fmt_shares_, voucher_no
-from .theme import FONT_FAMILY, fmt_date, fmt_num
+from .fmt import FONT_FAMILY, fmt_date, fmt_num
 
 # 可列印的報表：(代碼, 名稱)
 REPORTS = [
@@ -563,24 +560,28 @@ class Report:
         return f"<html><head><style>{_CSS}</style></head><body>{body}</body></html>"
 
 
-def make_document(html: str) -> QTextDocument:
+# ---------------------------------------------------------------------- Qt 列印（v2 介面；v3 由 Edge 列印同一份 HTML）
+def make_document(html: str):
+    from PySide6.QtGui import QFont, QTextDocument
     doc = QTextDocument()
     doc.setDefaultFont(QFont(FONT_FAMILY, 10))
     doc.setHtml(html)
     return doc
 
 
-def setup_printer(printer: QPrinter, landscape: bool = False) -> QPrinter:
+def setup_printer(printer, landscape: bool = False):
+    from PySide6.QtGui import QPageLayout, QPageSize
     printer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
     printer.setPageOrientation(QPageLayout.Orientation.Landscape if landscape else QPageLayout.Orientation.Portrait)
     return printer
 
 
-def print_html(html: str, printer: QPrinter) -> None:
+def print_html(html: str, printer) -> None:
     make_document(html).print_(printer)
 
 
 def save_pdf(html: str, path: str, landscape: bool = False) -> str:
+    from PySide6.QtPrintSupport import QPrinter
     printer = setup_printer(QPrinter(QPrinter.PrinterMode.HighResolution), landscape)
     printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
     printer.setOutputFileName(path)

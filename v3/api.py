@@ -18,7 +18,9 @@ from app.version import APP_VERSION
 from app.database import CURRENCIES, TYPE_LABELS, ZERO_DECIMAL_CURRENCIES, Database
 from v3.api_accounts import AccountsApi
 from v3.api_dashboard import DashboardApi
+from v3.api_data import DataApi
 from v3.api_invest import InvestApi
+from v3.api_reports import ReportsApi
 from v3.api_txn import TxnApi
 from v3.rpc import DbThread, exposed  # noqa: F401 — DbThread 由 run.py 匯入
 
@@ -90,5 +92,5 @@ class ApiBase:
         return True
 
 
-class Api(InvestApi, AccountsApi, TxnApi, DashboardApi, ApiBase):
+class Api(DataApi, ReportsApi, InvestApi, AccountsApi, TxnApi, DashboardApi, ApiBase):
     """pywebview 的 js_api：所有畫面可呼叫的方法（各頁的方法分在 api_*.py）。"""

@@ -8,14 +8,17 @@ import { Dashboard } from "./pages/dashboard.js";
 import { Transactions } from "./pages/transactions.js";
 import { Accounts } from "./pages/accounts.js";
 import { Investments } from "./pages/investments.js";
+import { Reports } from "./pages/reports.js";
 import { askVoidReason, openAudit, openTxn, openVoucher } from "./dialogs/txn.js";
 import { openAccount, openAdjust } from "./dialogs/account.js";
 import { openPrices, openRates, openSecurity, openSecurityList, openTrade } from "./dialogs/invest.js";
+import { openAnnual, openPrint } from "./dialogs/print.js";
+import { openExport } from "./dialogs/data.js";
 
 const NAV = [["dashboard", "總覽", "home"], ["transactions", "收支明細", "list"], ["accounts", "帳戶管理", "wallet"],
              ["investments", "投資管理", "chart"], ["reports", "財務報表", "excel"], ["settings", "設定", "settings"]];
-const FILL = ["transactions", "investments"];
-const PAGES = { dashboard: Dashboard, transactions: Transactions, accounts: Accounts, investments: Investments };
+const FILL = ["transactions", "investments", "reports"];
+const PAGES = { dashboard: Dashboard, transactions: Transactions, accounts: Accounts, investments: Investments, reports: Reports };
 
 async function undo() {
   const label = await api("undo_label");
@@ -28,7 +31,7 @@ window.__undo = undo;
 // 自動測試與截圖用的掛鉤（v3/devshots.py 透過 evaluate_js 操作畫面）
 const ALL = { start: "1900-01-01", end: "2999-12-31" };
 window.__t = {
-  go: (p) => window.__go(p), openTxn, openAccount, openAdjust, openPrices, openRates, openSecurity, openSecurityList, openTrade,
+  go: (p) => window.__go(p), openTxn, openAccount, openAdjust, openPrices, openRates, openSecurity, openSecurityList, openTrade, openAnnual, openPrint, openExport,
   tab: (label) => [...document.querySelectorAll(".tabs button")].find((b) => b.textContent.includes(label)).click(), openVoucher, openAudit, askVoid: () => askVoidReason(2),
   prefs: (t, s) => window.__setPrefs(t, s),
   editFirst: async () => openVoucher((await api("txn_list", { ...ALL, type: "expense" })).rows[0].id),
