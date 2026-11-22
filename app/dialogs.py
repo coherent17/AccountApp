@@ -198,7 +198,7 @@ class TransactionDialog(BaseDialog):
         # 按鈕列
         bar = QHBoxLayout()
         if self.txn:
-            del_btn = button("作廢這筆", "Danger", icon("trash", C.expense))
+            del_btn = button("作廢這筆", "Danger", "trash")
             del_btn.clicked.connect(self.delete)
             bar.addWidget(del_btn)
             hist = button("修改紀錄", "Link")
@@ -661,7 +661,7 @@ class AdjustDialog(BaseDialog):
         bar.addStretch()
         cancel = button("取消")
         cancel.clicked.connect(self.reject)
-        ok = button("儲存", "Adjust")
+        ok = button("儲存", "Primary")
         ok.setDefault(True)
         ok.clicked.connect(self.save)
         bar.addWidget(cancel)
@@ -848,7 +848,7 @@ class ExportDialog(BaseDialog):
 
         self.root.addWidget(section_title("存檔位置"))
         self.path = QLineEdit()
-        browse = button("瀏覽…", icon=icon("folder"))
+        browse = button("瀏覽…", icon="folder")
         browse.clicked.connect(self.browse)
         prow = QHBoxLayout()
         prow.addWidget(self.path, 1)
@@ -863,7 +863,7 @@ class ExportDialog(BaseDialog):
         bar.addStretch()
         cancel = button("取消")
         cancel.clicked.connect(self.reject)
-        ok = button("匯出", "Income", icon("download", "#FFFFFF"))
+        ok = button("匯出", "Primary", "download")
         ok.setDefault(True)
         ok.clicked.connect(self.do_export)
         bar.addWidget(cancel)

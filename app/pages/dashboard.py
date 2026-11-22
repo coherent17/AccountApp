@@ -49,6 +49,7 @@ class DashboardPage(Page):
 
         # 標題列
         head = QHBoxLayout()
+        head.setSpacing(8)
         col = QVBoxLayout()
         col.setSpacing(2)
         self.hello = QLabel()
@@ -62,11 +63,11 @@ class DashboardPage(Page):
         for text, kind, ttype, ic in (("記支出", "Expense", "expense", "minus"),
                                        ("記收入", "Income", "income", "plus"),
                                        ("轉帳", "Transfer", "transfer", "transfer")):
-            btn = button(text, kind, icon(ic, "#FFFFFF"))
+            btn = button(text, kind, ic)
             btn.setMinimumHeight(46)
             btn.clicked.connect(lambda _=False, t=ttype: self.new_txn(t))
             head.addWidget(btn)
-        adj = button("更新市值", "Adjust", icon("refresh", "#FFFFFF"),
+        adj = button("更新市值", "Adjust", "refresh",
                      "股票、基金等資產市值變動時使用")
         adj.setMinimumHeight(46)
         adj.clicked.connect(self.adjust)
@@ -76,14 +77,10 @@ class DashboardPage(Page):
         # 範例資料提示
         self.sample_banner = QFrame()
         self.sample_banner.setObjectName("SampleBanner")
-        self.sample_banner.setStyleSheet(
-            f"#SampleBanner {{ background: #FFF7E6; border: 1px solid #F5C66B; border-radius: 12px; }}"
-            "#SampleBanner QLabel { background: transparent; }")
         bl = QHBoxLayout(self.sample_banner)
         bl.setContentsMargins(18, 12, 14, 12)
         bt = QLabel("目前顯示的是「範例資料」，僅供試用。熟悉操作後，按右邊按鈕即可清除並開始正式記帳。")
         bt.setWordWrap(True)
-        bt.setStyleSheet("color:#8A5A00; font-weight:700;")
         clear_btn = button("清除範例資料，開始正式記帳", "Primary")
         clear_btn.clicked.connect(self.clear_sample)
         bl.addWidget(bt, 1)
@@ -93,12 +90,12 @@ class DashboardPage(Page):
         # 統計卡片
         grid = QGridLayout()
         grid.setSpacing(16)
-        self.c_net = StatCard("淨資產（業主權益）", C.primary)
-        self.c_assets = StatCard("資產總計", C.income)
-        self.c_liab = StatCard("負債總計", C.expense)
-        self.c_inc = StatCard("本月收入", C.income)
-        self.c_exp = StatCard("本月支出", C.expense)
-        self.c_bal = StatCard("本月結餘", C.gold)
+        self.c_net = StatCard("淨資產（業主權益）", C.primary, icon_name="scale", hero=True)
+        self.c_assets = StatCard("資產總計", C.income, icon_name="bank")
+        self.c_liab = StatCard("負債總計", C.expense, icon_name="card")
+        self.c_inc = StatCard("本月收入", C.income, icon_name="trend_up")
+        self.c_exp = StatCard("本月支出", C.expense, icon_name="trend_down")
+        self.c_bal = StatCard("本月結餘", C.gold, icon_name="dollar")
         for i, card in enumerate((self.c_net, self.c_assets, self.c_liab,
                                   self.c_inc, self.c_exp, self.c_bal)):
             grid.addWidget(card, i // 3, i % 3)
@@ -119,7 +116,7 @@ class DashboardPage(Page):
             t.setObjectName("StatTitle")
             t.setToolTip(tip)
             v = QLabel("—")
-            v.setStyleSheet("font-weight:700;")
+            v.setObjectName("RatioValue")
             v.setToolTip(tip)
             box.addWidget(t, alignment=Qt.AlignmentFlag.AlignHCenter)
             box.addWidget(v, alignment=Qt.AlignmentFlag.AlignHCenter)
@@ -131,7 +128,7 @@ class DashboardPage(Page):
 
         # 提醒事項
         self.remind_card = Card(padding=16)
-        self.remind_card.setStyleSheet(f"#Card {{ border-left: 5px solid {C.gold}; }}")
+        self.remind_card.setObjectName("RemindCard")
         self.remind_card.lay.addWidget(section_title("提醒事項"))
         self.remind_box = QVBoxLayout()
         self.remind_box.setSpacing(8)
@@ -181,7 +178,7 @@ class DashboardPage(Page):
         self.recent = DataTable([
             Column("日期", lambda r: fmt_date(r["date"]), width=120),
             Column("類型", lambda r: TYPE_LABELS[r["type"]], align="center",
-                   color=lambda r: TYPE_COLORS[r["type"]][0], width=100),
+                   color=lambda r: TYPE_COLORS[r["type"]][0], width=100, badge=True),
             Column("分類", lambda r: r["category_name"] or ("→ " + (r["to_account_name"] or "")
                                                             if r["type"] == "transfer" else "評價調整"),
                    width=150),

@@ -20,16 +20,16 @@ class AccountsPage(Page):
         super().__init__(ctx, parent=parent)
         b = self.body
         head, hl = page_header("帳戶管理", "資產與負債科目：銀行、現金、投資、信用卡、貸款等")
-        add = button("新增帳戶", "Primary", icon("plus", "#FFFFFF"))
+        add = button("新增帳戶", "Primary", "plus")
         add.setMinimumHeight(44)
         add.clicked.connect(self.add)
-        adj = button("更新餘額／市值", "Adjust", icon("refresh", "#FFFFFF"))
+        adj = button("更新餘額／市值", "Adjust", "refresh")
         adj.setMinimumHeight(44)
         adj.clicked.connect(lambda: self.adjust(None))
-        chart = button("會計科目表", icon=icon("list"), tooltip="檢視全部會計科目、新增科目（含自訂代號）")
+        chart = button("會計科目表", icon="list", tooltip="檢視全部會計科目、新增科目（含自訂代號）")
         chart.setMinimumHeight(44)
         chart.clicked.connect(self.chart)
-        self.more_btn = button("更多功能 ▾")
+        self.more_btn = button("更多功能")
         self.more_btn.setMinimumHeight(44)
         menu = QMenu(self.more_btn)
         for text, ic, fn in (("銀行對帳（與存摺逐筆核對）", "list", lambda: self.reconcile(None)),
@@ -46,9 +46,9 @@ class AccountsPage(Page):
 
         cards = QHBoxLayout()
         cards.setSpacing(16)
-        self.c_assets = StatCard("資產總計", C.income)
-        self.c_liab = StatCard("負債總計", C.expense)
-        self.c_net = StatCard("淨資產（業主權益）", C.primary)
+        self.c_assets = StatCard("資產總計", C.income, icon_name="bank")
+        self.c_liab = StatCard("負債總計", C.expense, icon_name="card")
+        self.c_net = StatCard("淨資產（業主權益）", C.primary, icon_name="scale", hero=True)
         for c in (self.c_assets, self.c_liab, self.c_net):
             cards.addWidget(c)
         b.addLayout(cards)
@@ -109,7 +109,7 @@ class AccountsPage(Page):
                                    ("編輯", None, "edit", lambda: self.edit(self._current())),
                                    ("封存／取消封存", None, "archive", self.toggle_archive),
                                    ("刪除", "Danger", "trash", self.delete)):
-            btn = button(text, kind, icon(ic, C.expense if kind == "Danger" else C.text))
+            btn = button(text, kind, ic)
             btn.clicked.connect(fn)
             bar.addWidget(btn)
         b.addLayout(bar)

@@ -68,15 +68,15 @@ class TransactionsPage(Page):
         for text, kind, ttype, ic in (("記支出", "Expense", "expense", "minus"),
                                        ("記收入", "Income", "income", "plus"),
                                        ("轉帳", "Transfer", "transfer", "transfer")):
-            btn = button(text, kind, icon(ic, "#FFFFFF"))
+            btn = button(text, kind, ic)
             btn.setMinimumHeight(44)
             btn.clicked.connect(lambda _=False, t=ttype: self.new_txn(t))
             hl.addWidget(btn)
-        jbtn = button("複式分錄", "Primary", icon("list", "#FFFFFF"), "多行借貸傳票，可分割到多個科目")
+        jbtn = button("複式分錄", "Primary", "list", "多行借貸傳票，可分割到多個科目")
         jbtn.setMinimumHeight(44)
         jbtn.clicked.connect(lambda: JournalDialog(self.ctx, parent=self.window()).exec())
         hl.addWidget(jbtn)
-        more = button("更多功能 ▾")
+        more = button("更多功能")
         more.setMinimumHeight(44)
         menu = QMenu(more)
         for text, ic, fn in (("更新餘額／市值", "refresh", lambda: AdjustDialog(self.ctx, parent=self.window()).exec()),
@@ -130,7 +130,7 @@ class TransactionsPage(Page):
                    color=lambda r: C.faint if r["void"] else None),
             Column("傳票號碼", lambda r: voucher_no(r["id"]) + (" 📎" if r["n_attach"] else ""),
                    align="center", width=120, color=lambda r: C.faint),
-            Column("類型", _type_text, align="center", color=_color, width=90),
+            Column("類型", _type_text, align="center", color=_color, width=90, badge=True),
             Column("分類／科目", _cat_text, width=160, color=lambda r: C.faint if r["void"] else None),
             Column("帳戶", _acc_text, width=210, color=lambda r: C.faint if r["void"] else None),
             Column("說明", lambda r: (f"〔作廢：{r['void_reason']}〕" if r["void"] else "") + r["note"],
@@ -153,11 +153,11 @@ class TransactionsPage(Page):
         self.f_net = QLabel()
         for w in (self.f_inc, self.f_exp, self.f_net):
             w.setStyleSheet("font-weight:700;")
-        edit = button("編輯", icon=icon("edit"))
+        edit = button("編輯", icon="edit")
         edit.clicked.connect(lambda: self.edit_txn(self.table.current_row()))
-        dele = button("作廢", "Danger", icon("trash", C.expense))
+        dele = button("作廢", "Danger", "trash")
         dele.clicked.connect(self.void_selected)
-        exp = button("匯出 Excel", "Income", icon("download", "#FFFFFF"))
+        exp = button("匯出 Excel", "Income", "download")
         exp.clicked.connect(self.export)
         # 視窗較窄或字型較大時，按鈕換到第二列，合計金額不會被截斷
         sums = QWidget()

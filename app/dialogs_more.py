@@ -16,7 +16,7 @@ from .database import (CLOSING, CLOSING_SOURCE, INVESTMENT_CATEGORIES, TYPE_LABE
                        voucher_no)
 from .dialogs import BaseDialog, fill_account_combo, open_path
 from .investments import KIND_LABELS, Investments
-from .theme import C, fmt_date, fmt_money, fmt_num, icon
+from .theme import C, TYPE_COLORS, fmt_date, fmt_money, fmt_num, icon
 from .widgets import (AmountEdit, Column, DataTable, ask, button, error, info, iso,
                       make_date_edit, section_title)
 
@@ -176,14 +176,14 @@ class JournalDialog(BaseDialog):
         self.setMinimumWidth(min(limit, int(1260 * scale)))
 
         tools = QHBoxLayout()
-        add = button("新增一行", icon=icon("plus"))
+        add = button("新增一行", icon="plus")
         add.clicked.connect(lambda: self.add_row())
-        rem = button("刪除選取行", icon=icon("trash"))
+        rem = button("刪除選取行", icon="trash")
         rem.clicked.connect(self.remove_row)
-        bal = button("自動平衡差額", icon=icon("refresh"),
+        bal = button("自動平衡差額", icon="refresh",
                      tooltip="把借貸差額自動填入最後一行空白金額")
         bal.clicked.connect(self.auto_balance)
-        subj = button("新增會計科目", "Link", icon("plus"))
+        subj = button("新增會計科目", "Link", "plus")
         subj.clicked.connect(self.new_subject)
         tools.addWidget(add)
         tools.addWidget(rem)
@@ -213,16 +213,16 @@ class JournalDialog(BaseDialog):
 
         bar = QHBoxLayout()
         if txn and not self.readonly:
-            void = button("作廢這張傳票", "Danger", icon("trash", C.expense))
+            void = button("作廢這張傳票", "Danger", "trash")
             void.clicked.connect(self.void)
             bar.addWidget(void)
         if txn and not txn["void"] and txn["source"].startswith("inv:"):
-            self.del_sys = button("刪除這張傳票", "Danger", icon("trash", C.expense),
+            self.del_sys = button("刪除這張傳票", "Danger", "trash",
                                   tooltip="一併刪除產生這張傳票的投資管理交易")
             self.del_sys.clicked.connect(self.delete_system_voucher)
             bar.addWidget(self.del_sys)
         if txn:
-            pr = button("列印傳票", icon=icon("list"))
+            pr = button("列印傳票", icon="list")
             pr.clicked.connect(self.print_voucher)
             bar.addWidget(pr)
         bar.addStretch()
@@ -732,9 +732,9 @@ class TemplateEditDialog(BaseDialog):
         self.table.setMinimumHeight(260)
         self.root.addWidget(self.table)
         tools = QHBoxLayout()
-        add = button("新增一行", icon=icon("plus"))
+        add = button("新增一行", icon="plus")
         add.clicked.connect(lambda: self.add_row())
-        rem = button("刪除選取行", icon=icon("trash"))
+        rem = button("刪除選取行", icon="trash")
         rem.clicked.connect(self.remove_row)
         tools.addWidget(add)
         tools.addWidget(rem)
@@ -825,7 +825,7 @@ class TemplateManagerDialog(BaseDialog):
         for text, fn, ic in (("新增", self.add, "plus"), ("修改", self.edit, None),
                              ("刪除", self.delete, "trash"), ("上移", lambda: self.move(-1), None),
                              ("下移", lambda: self.move(1), None)):
-            b = button(text, icon=icon(ic)) if ic else button(text)
+            b = button(text, icon=ic) if ic else button(text)
             b.clicked.connect(fn)
             tools.addWidget(b)
         tools.addStretch()
@@ -1040,7 +1040,7 @@ class AuditDialog(BaseDialog):
             Column("時間", lambda r: r["at"].replace("T", " ").replace("-", "/"), width=170),
             Column("動作", lambda r: r["action"], align="center", width=110,
                    color=lambda r: {"作廢": C.expense, "刪除": C.expense, "修改": C.adjust,
-                                    "迴轉": C.adjust, "取消作廢": C.income}.get(r["action"])),
+                                    "迴轉": C.adjust, "取消作廢": C.income}.get(r["action"]), badge=True),
             Column("傳票號碼", lambda r: r["voucher"], align="center", width=110),
             Column("內容", lambda r: _detail_text(r), stretch=True),
         ], sortable=False)
@@ -1230,7 +1230,8 @@ class RecurringManagerDialog(BaseDialog):
 
         self.table = DataTable([
             Column("名稱", lambda r: r["name"], bold=True, width=170),
-            Column("類型", lambda r: TYPE_LABELS[r["data"]["type"]], align="center", width=80),
+            Column("類型", lambda r: TYPE_LABELS[r["data"]["type"]], align="center", width=80,
+                   color=lambda r: TYPE_COLORS.get(r["data"]["type"], (C.muted,))[0], badge=True),
             Column("帳戶", lambda r: accs.get(r["data"].get("account_id"), ""), width=150),
             Column("分類／轉入", lambda r: cats.get(r["data"].get("category_id"), "") or
                    accs.get(r["data"].get("to_account_id"), ""), width=130),
@@ -1238,7 +1239,7 @@ class RecurringManagerDialog(BaseDialog):
             Column("頻率", lambda r: f"{FREQ_LABELS[r['freq']]} {r['day']} 日", align="center", width=110),
             Column("下次日期", next_date, align="center", width=120),
             Column("狀態", lambda r: "啟用" if r["active"] else "停用", align="center", width=70,
-                   color=lambda r: C.income if r["active"] else C.faint),
+                   color=lambda r: C.income if r["active"] else C.faint, badge=True),
         ], sortable=False)
         self.table.setMinimumHeight(360)
         self.table.rowActivated.connect(self.edit)
@@ -1249,8 +1250,7 @@ class RecurringManagerDialog(BaseDialog):
                                    ("啟用／停用", None, "eye", self.toggle),
                                    ("刪除", "Danger", "trash", self.delete),
                                    ("檢查到期項目", None, "refresh", self.check_due)):
-            b = button(text, kind, icon(ic, "#FFFFFF" if kind == "Primary" else
-                                        (C.expense if kind == "Danger" else C.text)))
+            b = button(text, kind, ic)
             b.clicked.connect(fn)
             bar.addWidget(b)
         bar.addStretch()
@@ -1429,7 +1429,7 @@ class ReconcileDialog(BaseDialog):
         self.root.addLayout(info_row)
         self.root.addWidget(self.msg)
         bar = QHBoxLayout()
-        hist = button("對帳紀錄", icon=icon("list"))
+        hist = button("對帳紀錄", icon="list")
         hist.clicked.connect(self.history)
         bar.addWidget(hist)
         bar.addStretch()
@@ -1542,9 +1542,9 @@ class ImportDialog(BaseDialog):
         self.rows: list[list] = []
         self.items: list[dict] = []
         top = QHBoxLayout()
-        pick = button("選擇檔案…", "Primary", icon("folder", "#FFFFFF"))
+        pick = button("選擇檔案…", "Primary", "folder")
         pick.clicked.connect(self.pick)
-        tmpl = button("下載匯入範本", icon=icon("excel"))
+        tmpl = button("下載匯入範本", icon="excel")
         tmpl.clicked.connect(self.template)
         self.file_lbl = QLabel("尚未選擇檔案（支援 .xlsx 與 .csv，也可以直接匯入本程式匯出的報表）")
         self.file_lbl.setObjectName("Hint")
@@ -1607,7 +1607,7 @@ class ImportDialog(BaseDialog):
         bar.addStretch()
         c = button("取消")
         c.clicked.connect(self.reject)
-        self.go = button("開始匯入", "Income")
+        self.go = button("開始匯入", "Primary")
         self.go.clicked.connect(self.do_import)
         self.go.setEnabled(False)
         bar.addWidget(c)
@@ -1692,9 +1692,9 @@ class AttachmentsPanel(QWidget):
         self.list.setMaximumHeight(84)
         self.list.itemDoubleClicked.connect(self.open)
         col = QVBoxLayout()
-        add = button("新增附件", icon=icon("plus"))
+        add = button("新增附件", icon="plus")
         add.clicked.connect(self.add)
-        rem = button("移除", icon=icon("trash"))
+        rem = button("移除", icon="trash")
         rem.clicked.connect(self.remove)
         col.addWidget(add)
         col.addWidget(rem)

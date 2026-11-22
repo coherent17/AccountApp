@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QPushButton
 
 PROBE_HOST = ("api.github.com", 443)
 INTERVAL_MS = 5 * 60 * 1000        # 每 5 分鐘檢查一次
-ON_COLOR, OFF_COLOR, WAIT_COLOR = "#34D399", "#F87171", "#94A3B8"
+ON_COLOR, OFF_COLOR, WAIT_COLOR = "#0C9A6A", "#DC444A", "#7D899C"      # 與 theme.C 的收入綠、支出紅、淡灰一致
 
 
 def probe(timeout: float = 4.0) -> bool:

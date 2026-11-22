@@ -9,13 +9,13 @@ import re
 import unicodedata
 from typing import Any, Callable
 
-from PySide6.QtCore import (QAbstractTableModel, QDate, QEvent, QModelIndex, QPoint,
+from PySide6.QtCore import (QAbstractTableModel, QDate, QEvent, QModelIndex, QPoint, QRectF,
                             QSortFilterProxyModel, Qt, QTimer, Signal)
 from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter
-from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCalendarWidget, QComboBox, QFrame,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCalendarWidget, QComboBox, QFrame,
                                QGraphicsDropShadowEffect, QGridLayout, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton,
-                               QSizePolicy, QStyle, QStyledItemDelegate, QTableView,
+                               QSizePolicy, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTableView,
                                QTabWidget, QVBoxLayout, QWidget)
 
 from .theme import C, fmt_num
@@ -248,10 +248,10 @@ def make_date_edit(value: str | None = None) -> DateEdit:
 
 
 # ---------------------------------------------------------------------- 卡片
-def shadow(widget: QWidget, blur: int = 24, alpha: int = 22) -> None:
+def shadow(widget: QWidget, blur: int = 30, alpha: int = 18) -> None:
     eff = QGraphicsDropShadowEffect(widget)
     eff.setBlurRadius(blur)
-    eff.setOffset(0, 4)
+    eff.setOffset(0, 6)
     eff.setColor(QColor(15, 23, 42, alpha))
     widget.setGraphicsEffect(eff)
 
@@ -441,20 +441,28 @@ class FitTabWidget(QTabWidget):
 
 
 class StatCard(Card):
-    def __init__(self, title: str, accent: str = C.primary, parent=None):
-        super().__init__(parent, padding=16)
-        self.setMinimumWidth(170)
+    """統計卡片：左上角是彩色圖示，下方是標題、數字與補充說明。hero=True 為主色漸層的重點卡片。"""
+
+    def __init__(self, title: str, accent: str = C.primary, parent=None, icon_name: str = "dollar",
+                 hero: bool = False):
+        super().__init__(parent, padding=18)
+        self.hero = hero
+        if hero:
+            self.setObjectName("HeroCard")
+            shadow(self, 34, 60)
+            self.graphicsEffect().setColor(QColor(48, 86, 211, 70))
+        self.setMinimumWidth(148)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         top = QHBoxLayout()
-        dot = QLabel()
-        dot.setFixedSize(10, 10)
-        dot.setStyleSheet(f"background:{accent}; border-radius:5px;")
-        self.dot = dot
+        top.setSpacing(10)
+        self.badge = QLabel()
+        self.badge.setFixedSize(34, 34)
+        self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._icon_name = icon_name
         self.title = FitLabel(title)
         self.title.setObjectName("StatTitle")
-        top.addWidget(dot)
-        top.addWidget(self.title)
-        top.addStretch()
+        top.addWidget(self.badge)
+        top.addWidget(self.title, 1)
         self.value = FitLabel("—")
         self.value.setObjectName("StatValue")
         self.sub = FitLabel("")
@@ -462,11 +470,31 @@ class StatCard(Card):
         self.sub.setToolTip("")
         self.lay.setSpacing(6)
         self.lay.addLayout(top)
+        self.lay.addSpacing(2)
         self.lay.addWidget(self.value)
         self.lay.addWidget(self.sub)
+        self.set_accent(accent)
+
+    def _fits_badge(self) -> bool:
+        need = self.badge.width() + 10 + self.title.fontMetrics().horizontalAdvance(self.title.text()) + 40
+        return self.width() >= need
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        # 卡片太窄時隱藏圖示，把空間留給標題；同一排的卡片一起顯示或隱藏，高度才一致
+        par = self.parentWidget()
+        row = [c for c in par.findChildren(StatCard) if c.parentWidget() is par and abs(c.y() - self.y()) < 4] \
+            if par else [self]
+        show = all(c._fits_badge() for c in row)
+        for c in row:
+            if c.badge.isVisibleTo(c) != show:
+                c.badge.setVisible(show)
 
     def set_accent(self, color: str) -> None:
-        self.dot.setStyleSheet(f"background:{color}; border-radius:5px;")
+        from .theme import icon as _icon, soft
+        fg, bg = ("#FFFFFF", "rgba(255, 255, 255, 46)") if self.hero else (color, soft(color, 0.12))
+        self.badge.setStyleSheet(f"background:{bg}; border-radius:10px;")
+        self.badge.setPixmap(_icon(self._icon_name, fg, 40).pixmap(19, 19))
 
     def set_money(self, amount: float, code: str, sub: str = "", color: str | None = None) -> None:
         from .animations import CountUp
@@ -474,13 +502,13 @@ class StatCard(Card):
         if not hasattr(self, "_counter"):
             self._counter = CountUp(self.value, lambda v: fmt_money(v, code), self)
         self._counter.formatter = lambda v: fmt_money(v, code)
-        self.value.setStyleSheet(f"color:{color};" if color else "")
+        self.value.setStyleSheet(f"color:{color};" if color and not self.hero else "")
         self.sub.setText(sub or " ")
         self._counter.set(amount)
 
     def set(self, value: str, sub: str = "", color: str | None = None) -> None:
         self.value.setText(value)
-        self.value.setStyleSheet(f"color:{color};" if color else "")
+        self.value.setStyleSheet(f"color:{color};" if color and not self.hero else "")
         self.sub.setText(sub or " ")
 
 
@@ -492,6 +520,7 @@ def page_header(title: str, subtitle: str = "") -> tuple[QWidget, QHBoxLayout]:
     outer.setSpacing(2)
     lay = QHBoxLayout()
     lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(8)
     t = QLabel(title)
     t.setObjectName("PageTitle")
     lay.addWidget(t)
@@ -512,9 +541,13 @@ def section_title(text: str) -> QLabel:
 
 
 def button(text: str, kind: str | None = None, icon=None, tooltip: str = "") -> QPushButton:
+    """按鈕。icon 可以是圖示名稱（依按鈕樣式自動配色）或 QIcon。"""
     b = QPushButton(text)
     if kind:
         b.setObjectName(kind)
+    if isinstance(icon, str):
+        from .theme import BUTTON_ICON_COLORS, icon as _icon
+        icon = _icon(icon, BUTTON_ICON_COLORS.get(kind or "", C.text))
     if icon is not None:
         b.setIcon(icon)
     if tooltip:
@@ -569,8 +602,10 @@ class Column:
     def __init__(self, title: str, value: Callable[[dict], Any], align: str = "left",
                  color: Callable[[dict], str | None] | None = None,
                  sort: Callable[[dict], Any] | None = None, bold: bool = False,
-                 width: int | None = None, stretch: bool = False, elide: bool | None = None):
+                 width: int | None = None, stretch: bool = False, elide: bool | None = None,
+                 badge: bool = False):
         self.title = title
+        self.badge = badge      # 以圓角色塊（標籤）顯示，顏色取自 color
         # 備註、說明等長文字：寬度不足時可以省略（滑鼠提示有全文）
         self.elide = elide if elide is not None else title in ("備註", "說明", "摘要", "內容", "說明／備註")
         self.value = value
@@ -662,13 +697,63 @@ class SortProxy(QSortFilterProxyModel):
 
 
 class _RowDelegate(QStyledItemDelegate):
-    """樣式表會忽略資料列的底色，這裡先自行填上（例如日記帳以傳票分組底色）。"""
+    """樣式表會忽略資料列的底色，這裡先自行填上（例如日記帳以傳票分組底色）；
+    標籤欄（Column.badge）畫成圓角色塊。"""
+    BADGE_PAD = 6
+
+    def _badge(self, index) -> bool:
+        cols = getattr(self.parent(), "columns", None)
+        return bool(cols) and 0 <= index.column() < len(cols) and cols[index.column()].badge
+
+    def sizeHint(self, option, index):
+        h = super().sizeHint(option, index)
+        if self._badge(index):
+            h.setWidth(h.width() + 2 * self.BADGE_PAD)
+        return h
 
     def paint(self, painter, option, index):
         bg = index.data(Qt.ItemDataRole.BackgroundRole)
-        if bg is not None and not option.state & QStyle.StateFlag.State_Selected:
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        if bg is not None and not selected:
             painter.fillRect(option.rect, bg)
-        super().paint(painter, option, index)
+        text = index.data(Qt.ItemDataRole.DisplayRole)
+        if not (text and self._badge(index)):
+            return super().paint(painter, option, index)
+        # 先畫底（選取色、分隔線），再畫標籤
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.text = ""
+        w = option.widget
+        (w.style() if w else QApplication.style()).drawControl(
+            QStyle.ControlElement.CE_ItemViewItem, opt, painter, w)
+        brush = index.data(Qt.ItemDataRole.ForegroundRole)
+        color = brush.color() if brush is not None else QColor(C.muted)
+        f = QFont(option.font)
+        f.setBold(True)
+        f.setPointSizeF(f.pointSizeF() * 0.88)
+        fm = QFontMetrics(f)
+        tw = fm.horizontalAdvance(text) + 2 * self.BADGE_PAD
+        th = fm.height() + 4
+        r = option.rect
+        align = index.data(Qt.ItemDataRole.TextAlignmentRole) or 0
+        if int(align) & int(Qt.AlignmentFlag.AlignHCenter):
+            x = r.x() + (r.width() - tw) // 2
+        elif int(align) & int(Qt.AlignmentFlag.AlignRight):
+            x = r.right() - tw - 6
+        else:
+            x = r.x() + 6
+        pill = QRectF(max(r.x() + 2, x), r.y() + (r.height() - th) / 2, min(tw, r.width() - 4), th)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        soft = QColor(color)
+        soft.setAlpha(30)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(soft)
+        painter.drawRoundedRect(pill, th / 2, th / 2)
+        painter.setPen(color)
+        painter.setFont(f)
+        painter.drawText(pill, Qt.AlignmentFlag.AlignCenter, text)
+        painter.restore()
 
 
 class DataTable(QTableView):
