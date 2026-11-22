@@ -7,9 +7,7 @@ import os
 from PySide6.QtCore import QObject, QStandardPaths, Signal
 
 from .database import Database
-
-APP_NAME = "我的理財帳本"
-APP_VERSION = "2.11.0"
+from .version import APP_NAME, APP_VERSION  # noqa: F401 — 其他模組由這裡匯入
 
 
 def data_dir() -> str:
