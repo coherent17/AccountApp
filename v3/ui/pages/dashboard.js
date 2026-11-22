@@ -1,7 +1,7 @@
 // 總覽頁：淨資產、本月收支、財務健康、提醒、圖表、預算、最近的紀錄。
 import { META, css, html, longDate, money, pct, rootFontPx, useLoad, api, toast, ymd } from "../lib/core.js";
-import { Icon, Skeleton } from "../lib/ui.js";
-import { CountUp, PALETTE, axis, chartBase, useChart, valueAxis } from "../lib/charts.js";
+import { Icon, Skeleton, Tip } from "../lib/ui.js";
+import { CountUp, PALETTE, axis, barFill, chartBase, useChart, valueAxis } from "../lib/charts.js";
 import { openTxn, openVoucher } from "../dialogs/txn.js";
 import { openDue } from "../dialogs/more.js";
 import { catEmoji } from "../lib/caticon.js";
@@ -154,9 +154,9 @@ function DashboardView({ d, prefsKey, go }) {
     xAxis: axis(monthLabels), yAxis: valueAxis(),
     series: [
       { name: "收入", type: "bar", data: d.monthly.map((x) => x.income), barGap: "15%", barMaxWidth: 16,
-        itemStyle: { color: css("--income"), borderRadius: [5, 5, 0, 0] } },
+        itemStyle: { color: barFill("--income"), borderRadius: [6, 6, 2, 2] } },
       { name: "支出", type: "bar", data: d.monthly.map((x) => x.expense), barMaxWidth: 16,
-        itemStyle: { color: css("--expense"), borderRadius: [5, 5, 0, 0] } },
+        itemStyle: { color: barFill("--expense"), borderRadius: [6, 6, 2, 2] } },
     ],
   }), [d, prefsKey]);
 

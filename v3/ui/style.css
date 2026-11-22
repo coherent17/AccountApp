@@ -908,3 +908,79 @@ html.animate .tour-body { animation: pagein .4s ease both; }
 .dots i { width: .55rem; height: .55rem; border-radius: 999px; background: var(--line-strong); cursor: pointer; transition: all .25s; }
 .dots i.on { width: 1.6rem; background: var(--primary); }
 .chips { grid-template-columns: repeat(auto-fill, minmax(8.4rem, 1fr)); }
+
+/* =====================================================================
+   3.3 設計層：頁首、分頁、期間快捷鍵、提示框、卡片一致性
+   ===================================================================== */
+/* 頁首：彩色圖示方塊 */
+.head { align-items: center; }
+.ph { display: flex; align-items: center; gap: 1rem; min-width: 0; }
+.ph-ic { width: 3.1rem; height: 3.1rem; border-radius: 1rem; display: grid; place-items: center; color: #fff; flex: none;
+  background: linear-gradient(140deg, color-mix(in srgb, var(--c) 82%, #fff), var(--c) 55%, color-mix(in srgb, var(--c) 75%, #000));
+  box-shadow: 0 10px 22px -10px var(--c), inset 0 1px 0 rgba(255, 255, 255, .35); }
+.ph-ic .ic { width: 1.5rem; height: 1.5rem; stroke-width: 2.1; }
+html.animate .ph-ic { animation: popin .5s cubic-bezier(.2, 1.3, .4, 1) both; }
+.head h1 { line-height: 1.15; }
+.head .sub { margin-top: .3rem; }
+
+/* 分頁：一列的膠囊軌道，放不下時可左右捲動（不再換成兩行） */
+.tabs { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: .25rem; padding: .3rem; border: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  background: var(--surface-2); border-radius: 14px; scrollbar-width: none; align-self: flex-start; max-width: 100%; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button { flex: none; border-radius: 10px; padding: .55rem .95rem; font-size: .95rem; color: var(--text-2); }
+.tabs button .ic { color: var(--text-3); }
+.tabs button:hover { background: var(--surface); color: var(--text); }
+.tabs button.on { background: var(--surface); color: var(--primary); box-shadow: var(--shadow-sm), 0 0 0 1px var(--line); }
+.tabs button.on .ic { color: var(--primary); }
+.tabs button.on::after { display: none; }
+[data-theme="dark"] .tabs button.on { background: var(--surface-3); }
+
+/* 期間快捷鍵 */
+.pchips { display: inline-flex; gap: .2rem; padding: .22rem; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); flex-wrap: wrap; }
+.pchips button { border: 0; background: none; font: 600 .88rem var(--font); color: var(--text-2); padding: .42rem .75rem; border-radius: 9px; cursor: pointer; white-space: nowrap; }
+.pchips button:hover { color: var(--text); background: var(--surface); }
+.pchips button.on { background: var(--primary); color: #fff; box-shadow: 0 6px 14px -8px var(--primary); }
+
+/* 提示框 */
+.tip { display: flex; gap: .7rem; align-items: flex-start; padding: .75rem 1rem; border-radius: 14px; font-size: .84rem; line-height: 1.7; color: var(--text-2);
+  background: color-mix(in srgb, var(--primary) 4%, var(--surface)); border: 1px solid color-mix(in srgb, var(--primary) 12%, var(--line)); }
+.tip-ic { width: 1.6rem; height: 1.6rem; flex: none; border-radius: 8px; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary); margin-top: .05rem; }
+.tip-ic .ic { width: 1rem; height: 1rem; }
+.card .tip { background: var(--surface-2); border-color: var(--line); }
+
+/* 數字卡片（帳戶、投資）與總覽的卡片一致：懸停時上緣出現顏色、輕微浮起 */
+.kpi:not(.hero) { min-height: 8.6rem; }
+.kpi:not(.hero)::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--accent); opacity: 0; transition: opacity .25s; }
+html.animate .kpi { transition: transform .25s cubic-bezier(.2, .8, .2, 1), box-shadow .25s; }
+html.animate .kpi:not(.hero):hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
+html.animate .kpi:not(.hero):hover::before { opacity: 1; }
+.kpi .v { font-family: var(--num-font); font-weight: 800; letter-spacing: -.01em; }
+.kpis5 .kpi .v { font-size: 1.55rem; }
+
+/* 占比：橫向小長條 */
+.share2 { display: flex; align-items: center; gap: .55rem; justify-content: flex-end; min-width: 7.5rem; }
+.share2 i { width: 3.6rem; height: .4rem; border-radius: 999px; background: var(--surface-3); overflow: hidden; display: block; }
+.share2 b { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--primary), var(--primary-2)); }
+
+/* 頁面底色：右上角柔和的光暈 */
+.main { background: radial-gradient(700px 360px at 100% 0%, color-mix(in srgb, var(--primary) 6%, transparent), transparent 70%); }
+
+/* 側邊欄：目前頁面的指示條帶一點動態 */
+html.animate .nav.on::before { animation: navbar .35s cubic-bezier(.2, .8, .2, 1) both; transform-origin: center; }
+@keyframes navbar { from { transform: scaleY(0); } }
+.legend .lg-name { color: var(--text); font-family: "Segoe UI Emoji", var(--font); }
+.legend div { padding: .25rem 0; border-bottom: 1px dashed color-mix(in srgb, var(--line) 70%, transparent); }
+.legend div:last-child { border-bottom: 0; }
+.tabs-wrap { position: relative; display: flex; align-items: center; max-width: 100%; align-self: flex-start; }
+.tabs-wrap .tabs { align-self: auto; }
+.tab-arrow { position: absolute; top: 50%; transform: translateY(-50%); z-index: 2; width: 2.2rem; height: 2.2rem; border-radius: 50%;
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--text-2); display: grid; place-items: center; cursor: pointer; box-shadow: var(--shadow-md); }
+.tab-arrow:hover { color: var(--primary); border-color: var(--primary); }
+.tab-arrow.l { left: -.5rem; } .tab-arrow.r { right: -.5rem; }
+.tab-arrow.l .ic { transform: rotate(90deg); } .tab-arrow.r .ic { transform: rotate(-90deg); }
+/* 非填滿頁面（帳戶、投資）中的表格：最多佔畫面七成高，超過時在表格內捲動 */
+.page:not(.fill) .table-card { flex: none; max-height: 70vh; min-height: 12rem; }
+.page:not(.fill) .hold { overflow: visible; }
+.page:not(.fill) .hold > .card:first-child { max-height: none; }
+.alloc.row-chart { grid-template-columns: 13rem 1fr; max-width: none; gap: 1.5rem; }
+.alloc.row-chart .legend { grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); column-gap: 2rem; align-content: center; }

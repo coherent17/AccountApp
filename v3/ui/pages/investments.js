@@ -3,7 +3,7 @@ import { useEffect, useState } from "preact/hooks";
 import { META, api, changed, css, html, money, num, pct, toast, useLoad, ymd } from "../lib/core.js";
 import { Kpi, PALETTE, chartBase, useChart } from "../lib/charts.js";
 import { Btn, Card, DataTable, DateInput, Icon, MenuButton, PageHead, PeriodPicker, Select, Tabs, TypeBadge, ask, errorBox, info,
-         openMenu, usePeriod, Skeleton } from "../lib/ui.js";
+         openMenu, usePeriod, Skeleton, Tip } from "../lib/ui.js";
 import { openPrices, openSecurity, openSecurityList, openTrade } from "../dialogs/invest.js";
 import { openVoucher } from "../dialogs/txn.js";
 
@@ -34,7 +34,7 @@ export function Investments({ go }) {
   const showEvents = (sid) => { setEvSec(sid); setTab("events"); };
 
   return html`<div class="page-fill">
-    <${PageHead} title="投資管理" sub="投資明細帳：持股、平均成本、已實現與未實現損益、股利">
+    <${PageHead} icon="chart" color="var(--adjust)" title="投資管理" sub="投資明細帳：持股、平均成本、已實現與未實現損益、股利">
       <${Btn} kind="expense" icon="plus" big onClick=${() => trade("buy")}>買進</${Btn}>
       <${Btn} kind="income" icon="minus" big onClick=${() => trade("sell")}>賣出</${Btn}>
       <${MenuButton} label="股利" icon="gift" kind="adjust" items=${[
@@ -96,7 +96,7 @@ function Holdings({ d, asOf, setAsOf, trade, showEvents }) {
         <div class="legend">${data.map((h, i) => html`<div><i style=${`background:${pal[i % pal.length]}`}></i>${h.name}<span class="num">${pct(h.base_value / total, 0)}</span></div>`)}</div></div>
       </${Card}>`}
     </div>
-    <div class="hint">帳面價值＝成本＋已認列的評價。評價以預估淨售價計算（市價×股數，扣除預估賣出手續費與證交稅），成本已含買進手續費，因此未實現損益已包含買賣的手續費與稅。按兩下可查看該標的的交易紀錄，按右鍵可買賣或登錄股利。</div>`;
+    <${Tip}>帳面價值＝成本＋已認列的評價。評價以預估淨售價計算（市價×股數，扣除預估賣出手續費與證交稅），成本已含買進手續費，因此未實現損益已包含買賣的手續費與稅。按兩下可查看該標的的交易紀錄，按右鍵可買賣或登錄股利。</${Tip}>`;
 }
 
 function Events({ d, sid, setSid }) {
@@ -132,7 +132,7 @@ function Events({ d, sid, setSid }) {
       onMenu=${(e, r) => openMenu(e, [r.txn_id ? { label: "開啟分錄傳票", icon: "book", run: () => openVoucher(r.txn_id) } : null,
                                         { label: "刪除這筆交易", icon: "trash", danger: true, run: () => del(r) }])}
       empty=${rows ? "這個期間沒有投資交易" : "讀取中…"} /></div>
-    <div class="hint">在這裡輸入的買賣、股利與市價評價會自動產生會計分錄（收支明細中類型顯示為「投資」）。「買進／賣出／股利（分錄）」是在複式分錄中連結標的的交易，按兩下可開啟該傳票。賣出不迴轉未實現評價損益，所售股份的評價會在下次市價評價時一併調整。輸入錯誤時請刪除該筆交易（分錄請作廢該傳票），系統會自動重算之後的成本與分錄。</div>`;
+    <${Tip}>在這裡輸入的買賣、股利與市價評價會自動產生會計分錄（收支明細中類型顯示為「投資」）。「買進／賣出／股利（分錄）」是在複式分錄中連結標的的交易，按兩下可開啟該傳票。賣出不迴轉未實現評價損益，所售股份的評價會在下次市價評價時一併調整。輸入錯誤時請刪除該筆交易（分錄請作廢該傳票），系統會自動重算之後的成本與分錄。</${Tip}>`;
 }
 
 function Realized({ d }) {
@@ -183,5 +183,5 @@ function Performance({ showEvents }) {
         <span>${t.xirr != null ? html`年化報酬率（XIRR）<span class=${"num " + sgn(t.xirr)}>${pctS(t.xirr)}</span>` : html`<span class="muted">持有 ${held}，未滿一年不計算年化報酬率</span>`}</span></div>`}</div>
     <div class="card table-card"><${DataTable} columns=${cols} rows=${rows} rowKey=${(r) => r.id ?? "total"} rowCls=${(r) => (r._total ? "total" : "")}
       onActivate=${(r) => r.id && showEvents(r.id)} empty="尚無投資交易。" /></div>
-    <div class="hint">總損益＝已實現損益＋股利（扣除補充保費）＋未實現損益；總報酬率＝總損益 ÷ 投入金額（買進成本含手續費）。年化報酬率以 XIRR（內部報酬率）計算，考慮每筆買進、賣出與股利的日期，相當於「這筆錢每年平均賺幾 %」，可以和定存利率比較；持有未滿一年不換算年化。按兩下可查看該標的的交易紀錄。</div>`;
+    <${Tip}>總損益＝已實現損益＋股利（扣除補充保費）＋未實現損益；總報酬率＝總損益 ÷ 投入金額（買進成本含手續費）。年化報酬率以 XIRR（內部報酬率）計算，考慮每筆買進、賣出與股利的日期，相當於「這筆錢每年平均賺幾 %」，可以和定存利率比較；持有未滿一年不換算年化。按兩下可查看該標的的交易紀錄。</${Tip}>`;
 }

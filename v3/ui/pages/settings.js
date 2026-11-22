@@ -13,7 +13,7 @@ export function Settings() {
   const [d, reload] = useLoad(() => api("settings_page"));
   if (!d) return html`<${Skeleton} />`;
   return html`
-    <${PageHead} title="設定" sub="個人資料、收支分類與預算、結帳、備份與還原" />
+    <${PageHead} icon="settings" color="var(--transfer)" title="設定" sub="個人資料、收支分類與預算、結帳、備份與還原" />
     <${Personal} d=${d} reload=${reload} />
     <${Categories} d=${d} />
     <${Closing} d=${d} />

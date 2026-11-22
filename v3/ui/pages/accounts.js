@@ -2,7 +2,7 @@
 import { useState } from "preact/hooks";
 import { META, api, changed, css, html, money, num, pct, toast, useLoad, ymd } from "../lib/core.js";
 import { Kpi } from "../lib/charts.js";
-import { Btn, Card, Check, DataTable, MenuButton, PageHead, ask, errorBox, openMenu, Skeleton } from "../lib/ui.js";
+import { Btn, Card, Check, DataTable, MenuButton, PageHead, ask, errorBox, openMenu, Skeleton, Tip } from "../lib/ui.js";
 import { openAccount, openAdjust } from "../dialogs/account.js";
 import { showTransactions } from "./transactions.js";
 import { openReconcile } from "../dialogs/more.js";
@@ -52,7 +52,7 @@ export function Accounts({ go }) {
     { key: "value", title: `折合${META.base}`, align: "r", nowrap: true, sort: (a) => a.value,
       render: (a) => html`<b class=${"num " + (a.value < 0 ? "c-expense" : "")}>${num(a.value)}</b>` },
     { key: "share", title: "占比", align: "r", sort: (a) => a.share,
-      render: (a) => html`<div class="share"><span class="num">${pct(a.share)}</span><i style=${`width:${Math.max(0, Math.min(100, a.share * 100))}%`}></i></div>` },
+      render: (a) => html`<div class="share2"><i><b style=${`width:${Math.max(2, Math.min(100, a.share * 100))}%`}></b></i><span class="num">${pct(a.share)}</span></div>` },
     { key: "maturity", title: "到期日", align: "c", nowrap: true, sort: (a) => a.maturity,
       render: (a) => html`<span class=${a.maturity_soon ? "c-expense" : "muted"}>${ymd(a.maturity)}</span>` },
     { key: "note", title: "備註", elide: true, cls: () => "grow muted",
@@ -68,7 +68,7 @@ export function Accounts({ go }) {
   </${Card}>`;
 
   return html`
-    <${PageHead} title="帳戶管理" sub="資產與負債科目：銀行、現金、投資、信用卡、貸款等">
+    <${PageHead} icon="wallet" color="var(--income)" title="帳戶管理" sub="資產與負債科目：銀行、現金、投資、信用卡、貸款等">
       <${Btn} icon="list" big onClick=${openChart} title="檢視全部會計科目、新增科目（含自訂代號）">會計科目表</${Btn}>
       <${MenuButton} label="更多功能" items=${[{ label: "銀行對帳（與存摺逐筆核對）", icon: "check", run: () => openReconcile(current ? current.id : null) },
                                             { label: "更新匯率", icon: "refresh", run: openRates }]} />
@@ -90,5 +90,5 @@ export function Accounts({ go }) {
       <${Btn} icon="archive" disabled=${!current} onClick=${() => toggleArchive(current)}>${current && current.archived ? "取消封存" : "封存"}</${Btn}>
       <${Btn} kind="danger" icon="trash" disabled=${!current} onClick=${() => del(current)}>刪除</${Btn}>
     </div>
-    <div class="hint">說明：資產帳戶的收入會增加餘額、支出會減少餘額；信用卡等負債帳戶刷卡（支出）會增加欠款，從銀行轉帳繳款會減少欠款。按兩下帳戶可修改，按右鍵有更多功能。</div>`;
+    <${Tip}>資產帳戶的收入會增加餘額、支出會減少餘額；信用卡等負債帳戶刷卡（支出）會增加欠款，從銀行轉帳繳款會減少欠款。按兩下帳戶可修改，按右鍵有更多功能。</${Tip}>`;
 }
