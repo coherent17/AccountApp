@@ -195,9 +195,9 @@ def export_workbook(db: Database, path: str, start: str, end: str, sheets=None) 
 
     # ================================================================ 收支明細
     s = _Sheet(ws_det)
-    r = s.title("收支明細表", sub, 12)
+    r = s.title("收支明細表", sub, 13)
     heads = ["日期", "傳票號碼", "類型", "分類／對方科目", "帳戶", "轉入帳戶", "摘要",
-             "幣別", "原幣金額", "匯率", f"收入（{base}）", f"支出（{base}）"]
+             "幣別", "原幣金額", "匯率", f"收入（{base}）", f"支出（{base}）", "標籤／專案"]
     s.header(r, heads)
     hdr_row = r
     txns = list(reversed(db.query_transactions(start=start, end=end)))
@@ -236,21 +236,22 @@ def export_workbook(db: Database, path: str, start: str, end: str, sheets=None) 
                color=GREEN)
         s.cell(r, 12, f'=IF(C{r}="支出",ROUND(I{r}*J{r},2),0)', bfmt, fill=fill,
                color=RED)
+        s.cell(r, 13, "、".join(t.get("tags") or []) or None, None, fill=fill)
     last = max(r, first)
     if not txns:
         r += 1
         s.cell(r, 1, "本期間沒有任何紀錄", border=False)
     r += 1
     s.cell(r, 7, "合計（篩選後自動重算）", bold=True, fill=FILL_TOTAL, align="right")
-    for col in range(1, 13):
+    for col in range(1, 14):
         if col not in (7, 11, 12):
             s.cell(r, col, None, fill=FILL_TOTAL)
     s.cell(r, 11, f"=SUBTOTAL(9,K{first}:K{last})", bfmt, bold=True, fill=FILL_TOTAL)
     s.cell(r, 12, f"=SUBTOTAL(9,L{first}:L{last})", bfmt, bold=True, fill=FILL_TOTAL)
-    s.total_border(r, 1, 12, double=True)
-    ws_det.auto_filter.ref = f"A{hdr_row}:L{last}"
+    s.total_border(r, 1, 13, double=True)
+    ws_det.auto_filter.ref = f"A{hdr_row}:M{last}"
     ws_det.freeze_panes = f"A{hdr_row + 1}"
-    s.widths([14, 13, 11, 19, 20, 16, 26, 8, 14, 10, 15, 15])
+    s.widths([14, 13, 11, 19, 20, 16, 26, 8, 14, 10, 15, 15, 18])
     s.print_setup(hdr_row, landscape=True)
 
     D = "'收支明細'!"

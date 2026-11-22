@@ -51,6 +51,13 @@ def _type_text(r: dict) -> str:
     return TYPE_LABELS[r["type"]]
 
 
+def _note_text(r: dict) -> str:
+    text = (f"〔作廢：{r['void_reason']}〕" if r["void"] else "") + r["note"]
+    if r.get("tags"):        # 說明在前、標籤在後（欄寬不夠時省略的是標籤，不是說明）
+        text += ("　" if text else "") + "　".join(f"#{t}" for t in r["tags"])
+    return text
+
+
 def _color(r: dict) -> str:
     if r["void"]:
         return C.faint
@@ -79,7 +86,8 @@ class TransactionsPage(Page):
         more = button("更多功能")
         more.setMinimumHeight(44)
         menu = QMenu(more)
-        for text, ic, fn in (("更新餘額／市值", "refresh", lambda: AdjustDialog(self.ctx, parent=self.window()).exec()),
+        for text, ic, fn in (("復原上一步（Ctrl+Z）", "undo", lambda: self.window().undo()),
+                             ("更新餘額／市值", "refresh", lambda: AdjustDialog(self.ctx, parent=self.window()).exec()),
                              ("定期交易（每月固定收支）", "restore", self.recurring),
                              ("匯入 Excel／CSV", "excel", lambda: ImportDialog(self.ctx, self.window()).exec()),
                              ("修改紀錄（稽核軌跡）", "eye", lambda: AuditDialog(self.ctx, parent=self.window()).exec()),
@@ -105,6 +113,9 @@ class TransactionsPage(Page):
         self.account.setMinimumWidth(150)
         self.category = QComboBox()
         self.category.setMinimumWidth(130)
+        self.tag = QComboBox()
+        self.tag.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.tag.setToolTip("只顯示有這個標籤／專案的紀錄")
         self.keyword = QLineEdit()
         self.keyword.setPlaceholderText("搜尋說明、分類、帳戶…")
         self.keyword.addAction(icon("search", C.muted), QLineEdit.ActionPosition.LeadingPosition)
@@ -120,7 +131,7 @@ class TransactionsPage(Page):
         # 視窗較窄或字型較大時自動分成兩列，日期與篩選欄位不會被壓縮
         fc.lay.addWidget(ResponsiveRow([lbl, self.period, self.d1, QLabel("～"), self.d2], [self.show_void],
                                        spacing=10))
-        fc.lay.addWidget(ResponsiveRow([lbl2, self.ttype, self.account, self.category],
+        fc.lay.addWidget(ResponsiveRow([lbl2, self.ttype, self.account, self.category, self.tag],
                                        [(self.keyword, 1), clear], spacing=10))
         b.addWidget(fc)
 
@@ -133,8 +144,7 @@ class TransactionsPage(Page):
             Column("類型", _type_text, align="center", color=_color, width=90, badge=True),
             Column("分類／科目", _cat_text, width=160, color=lambda r: C.faint if r["void"] else None),
             Column("帳戶", _acc_text, width=210, color=lambda r: C.faint if r["void"] else None),
-            Column("說明", lambda r: (f"〔作廢：{r['void_reason']}〕" if r["void"] else "") + r["note"],
-                   stretch=True, color=lambda r: C.faint if r["void"] else None),
+            Column("說明", _note_text, stretch=True, color=lambda r: C.faint if r["void"] else None),
             Column("金額", _amount_text, align="right", sort=lambda r: _signed(r) * (r["rate"] or 1),
                    color=_color, bold=True, width=180),
         ])
@@ -185,7 +195,7 @@ class TransactionsPage(Page):
         self._timer.setInterval(250)
         self._timer.timeout.connect(self.reload)
         self.period.currentTextChanged.connect(self._period_changed)
-        for w in (self.ttype, self.account, self.category):
+        for w in (self.ttype, self.account, self.category, self.tag):
             w.currentIndexChanged.connect(self._timer.start)
         self.show_void.toggled.connect(self._timer.start)
         self.d1.dateChanged.connect(self._custom_date)
@@ -218,7 +228,8 @@ class TransactionsPage(Page):
     def _fill_combos(self) -> None:
         cur_a = self.account.currentData()
         cur_c = self.category.currentData()
-        for combo in (self.account, self.category):
+        cur_t = self.tag.currentData()
+        for combo in (self.account, self.category, self.tag):
             combo.blockSignals(True)
             combo.clear()
         self.account.addItem("全部帳戶", None)
@@ -228,7 +239,15 @@ class TransactionsPage(Page):
         for c in self.db.list_categories(include_archived=True):
             prefix = "收入｜" if c["kind"] == "income" else "支出｜"
             self.category.addItem(prefix + c["name"], c["id"])
-        for combo, val in ((self.account, cur_a), (self.category, cur_c)):
+        self.tag.addItem("全部標籤", None)
+        for t in self.db.all_tags():
+            self.tag.addItem(icon("tag", C.primary), t["name"], t["name"])
+        self.tag.setVisible(self.tag.count() > 1 or cur_t is not None)
+        # 依最長的標籤名稱設定寬度（含圖示、內距與下拉箭頭），選取後不會被截斷
+        fm = self.tag.fontMetrics()
+        longest = max((fm.horizontalAdvance(self.tag.itemText(i)) for i in range(self.tag.count())), default=0)
+        self.tag.setMinimumWidth(min(longest + 90, 320))
+        for combo, val in ((self.account, cur_a), (self.category, cur_c), (self.tag, cur_t)):
             i = combo.findData(val)
             combo.setCurrentIndex(i if i >= 0 else 0)
             combo.blockSignals(False)
@@ -251,7 +270,8 @@ class TransactionsPage(Page):
                                           account_id=self.account.currentData(),
                                           category_id=self.category.currentData(),
                                           keyword=self.keyword.text() or None,
-                                          include_void=self.show_void.isChecked())
+                                          include_void=self.show_void.isChecked(),
+                                          tag=self.tag.currentData())
         self.table.set_rows(rows)
         base = self.ctx.base
         inc = sum(r["inc"] for r in rows)
@@ -264,8 +284,19 @@ class TransactionsPage(Page):
         self.f_exp.setStyleSheet(f"font-weight:700; color:{C.expense};")
         self.f_net.setText(f"結餘 {fmt_money(inc - exp, base)}")
 
-    def apply_filter(self, account_id=None, category_id=None, period=None, **_):
+    def apply_filter(self, account_id=None, category_id=None, period=None, tag=None, start=None, end=None, **_):
         self._fill_combos()
+        self.tag.setCurrentIndex(max(0, self.tag.findData(tag)) if tag else 0)
+        if start and end:
+            self.period.blockSignals(True)
+            self.period.setCurrentText("自訂期間")
+            self.period.blockSignals(False)
+            self._loading = True
+            self.d1.setDate(qdate(start))
+            self.d2.setDate(qdate(end))
+            self._loading = False
+            self._timer.start()
+            return
         if account_id is not None:
             self.account.setCurrentIndex(max(0, self.account.findData(account_id)))
         if category_id is not None:
@@ -274,7 +305,7 @@ class TransactionsPage(Page):
         self._period_changed(self.period.currentText())
 
     def clear_filters(self) -> None:
-        for combo in (self.ttype, self.account, self.category):
+        for combo in (self.ttype, self.account, self.category, self.tag):
             combo.setCurrentIndex(0)
         self.keyword.clear()
         self.show_void.setChecked(False)
@@ -303,8 +334,10 @@ class TransactionsPage(Page):
                     ("category", ln["category_id"]) if ln["category_id"] else ("special", ln["special"])
                 prefill.append({"key": key, "debit": ln["debit"], "credit": ln["credit"], "memo": ln["memo"],
                                 "orig": ln["orig"]})
-            JournalDialog(self.ctx, prefill=prefill, note=txn["note"], parent=self.window()).exec()
+            JournalDialog(self.ctx, prefill=prefill, note=txn["note"], tags=self.db.get_tags(row["id"]),
+                          parent=self.window()).exec()
             return
+        txn["tags"] = self.db.get_tags(row["id"])
         TransactionDialog(self.ctx, txn=txn, copy=True, parent=self.window()).exec()
 
     def void_selected(self) -> None:
@@ -327,7 +360,7 @@ class TransactionsPage(Page):
             error(self, str(e))
             return
         self.ctx.changed()
-        self.ctx.toast.emit(f"已作廢 {len(rows)} 筆傳票")
+        self.ctx.toast.emit(f"已作廢 {len(rows)} 筆傳票（Ctrl+Z 可復原）")
 
     def delete_inv_vouchers(self, rows: list[dict]) -> None:
         """投資管理自動產生的傳票：刪除產生它的投資交易，之後的成本與分錄自動重算。"""
@@ -408,6 +441,11 @@ class TransactionsPage(Page):
             else:
                 items += [None, ("迴轉（產生反向分錄）", "refresh", lambda: self.reverse(row)),
                           ("作廢", "trash", self.void_selected)]
+        if not row["source"]:
+            items += [None, ("加上標籤／專案…", "tag", self.tag_selected)]
+            sel_tags = sorted({t for r in self.table.selected_rows() for t in r.get("tags") or []})
+            for t in sel_tags[:8]:
+                items.append((f"移除標籤「{t}」", "minus", lambda _=False, t=t: self.untag_selected(t)))
         items += [None, ("修改紀錄", "eye", lambda: AuditDialog(self.ctx, row["id"], self.window()).exec())]
         for it in items:
             if it is None:
@@ -418,6 +456,27 @@ class TransactionsPage(Page):
             a.triggered.connect(fn)
             m.addAction(a)
         m.exec(self.table.viewport().mapToGlobal(pos))
+
+    def tag_selected(self) -> None:
+        rows = [r for r in self.table.selected_rows() if not r["source"]]
+        if not rows:
+            return
+        from ..dialogs_more import TagPickDialog
+        dlg = TagPickDialog(self.ctx, len(rows), self.window())
+        if not dlg.exec():
+            return
+        try:
+            n = self.db.add_tag([r["id"] for r in rows], dlg.tag)
+        except ValueError as e:
+            error(self, str(e))
+            return
+        self.ctx.changed()
+        self.ctx.toast.emit(f"已為 {n} 筆紀錄加上標籤「{dlg.tag}」" if n else "選取的紀錄都已經有這個標籤")
+
+    def untag_selected(self, tag: str) -> None:
+        n = self.db.remove_tag_from([r["id"] for r in self.table.selected_rows()], tag)
+        self.ctx.changed()
+        self.ctx.toast.emit(f"已從 {n} 筆紀錄移除標籤「{tag}」")
 
     def export(self) -> None:
         ExportDialog(self.ctx, self.window(), iso(self.d1.date()), iso(self.d2.date())).exec()

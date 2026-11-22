@@ -159,3 +159,4 @@ def load_sample_data(db: Database) -> None:
     db.set_setting("first_run_done", "1")
     db.set_setting("sample_data", "1")
     db.set_setting("last_account_id", cash)
+    db.clear_undo()

@@ -73,7 +73,7 @@ class DonutChart(ChartView):
         for i, (name, v) in enumerate(items):
             sl = series.append(f"{name}  {v / total:.0%}", v)
             sl.setBrush(QColor(C.chart[i % len(C.chart)]))
-            sl.setPen(QPen(QColor("white"), 3))
+            sl.setPen(QPen(QColor(C.chart_edge), 3))
             sl.setLabelVisible(False)
         if not items:
             sl = series.append("尚無資料", 1)
@@ -140,7 +140,7 @@ class LineChart(ChartView):
         line.setPen(pen)
         dots = QScatterSeries()
         dots.setMarkerSize(9)
-        dots.setColor(QColor("white"))
+        dots.setColor(QColor(C.surface))
         dots.setBorderColor(QColor(color))
         numeric = len(labels) > 16 and all(str(lb).isdigit() for lb in labels)
         for i, v in enumerate(values):

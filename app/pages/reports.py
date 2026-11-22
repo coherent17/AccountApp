@@ -114,7 +114,11 @@ class ReportsPage(Page):
         super().__init__(ctx, scroll=False, parent=parent)
         b = self.body
         head, hl = page_header("財務報表", "資產負債表、收支損益表、分類帳與試算表")
-        prt = button("列印／PDF", icon="list")
+        ann = button("年度財務報告", "Primary", "book", "一鍵產生整年度的完整報告（封面、四大報表、比率、投資績效…）")
+        ann.setMinimumHeight(44)
+        ann.clicked.connect(self.annual_report)
+        hl.addWidget(ann)
+        prt = button("列印／PDF", icon="print")
         prt.setMinimumHeight(44)
         prt.clicked.connect(self.print_reports)
         hl.addWidget(prt)
@@ -251,6 +255,57 @@ class ReportsPage(Page):
         lay.addLayout(left, 7)
         lay.addWidget(cc, 4)
         self.tabs.addTab(w, "分類與預算")
+
+        # 標籤／專案
+        w = QWidget()
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(0, 12, 0, 0)
+        lay.setSpacing(16)
+        left = QVBoxLayout()
+        self.tag_hint = QLabel("標籤把跨分類的紀錄歸在一起，例如一趟旅行、房屋修繕。記帳時在「標籤」欄輸入，"
+                               "或在收支明細選取多筆後按右鍵「加上標籤」。金額與收支損益表同一來源。")
+        self.tag_hint.setObjectName("Hint")
+        self.tag_hint.setWordWrap(True)
+        left.addWidget(self.tag_hint)
+        self.tag_table = DataTable([
+            Column("標籤／專案", lambda r: r["name"], bold=True, stretch=True),
+            Column("筆數", lambda r: r["count"], align="right", width=70),
+            Column("收入", lambda r: fmt_num(r["income"], ctx.base) if r["income"] else "—", align="right",
+                   sort=lambda r: r["income"], width=120, color=lambda r: C.income if r["income"] else None),
+            Column("支出", lambda r: fmt_num(r["expense"], ctx.base) if r["expense"] else "—", align="right",
+                   sort=lambda r: r["expense"], width=120, color=lambda r: C.expense if r["expense"] else None),
+            Column("淨額", lambda r: fmt_num(r["net"], ctx.base, signed=True), align="right", bold=True,
+                   sort=lambda r: r["net"], width=120, color=lambda r: C.income if r["net"] >= 0 else C.expense),
+        ])
+        self.tag_table.selectionModel().currentRowChanged.connect(lambda *_: self.refresh_tag_detail())
+        self.tag_table.rowActivated.connect(lambda r: self.open_tag(r))
+        left.addWidget(self.tag_table, 1)
+        tb = QHBoxLayout()
+        self.tag_open = button("查看明細", "Primary", "list")
+        self.tag_open.clicked.connect(lambda: self.open_tag(self.tag_table.current_row()))
+        self.tag_rename = button("重新命名…", icon="edit")
+        self.tag_rename.clicked.connect(self.rename_tag)
+        self.tag_delete = button("移除標籤…", "Danger", "trash")
+        self.tag_delete.clicked.connect(self.delete_tag)
+        for x in (self.tag_open, self.tag_rename, self.tag_delete):
+            tb.addWidget(x)
+        tb.addStretch()
+        left.addLayout(tb)
+        tc = Card()
+        self.tag_detail_title = section_title("科目明細")
+        tc.lay.addWidget(self.tag_detail_title)
+        self.tag_detail = DataTable([
+            Column("科目", lambda r: f"{r['code']}　{r['name']}", stretch=True),
+            Column("筆數", lambda r: r["count"], align="right", width=60),
+            Column("金額", lambda r: fmt_num(r["total"], ctx.base), align="right", width=120,
+                   color=lambda r: C.income if r["kind"] == "income" else C.expense),
+        ])
+        tc.lay.addWidget(self.tag_detail, 1)
+        self.tag_chart = DonutChart(height=200)
+        tc.lay.addWidget(self.tag_chart)
+        lay.addLayout(left, 7)
+        lay.addWidget(tc, 4)
+        self.tabs.addTab(w, "標籤／專案")
 
         # 日記帳
         w = QWidget()
@@ -436,6 +491,7 @@ class ReportsPage(Page):
         handlers = {"資產負債表": self.refresh_bs, "收支損益表": self.refresh_is,
                     "現金流量表": self.refresh_cf, "月度收支": self.refresh_monthly,
                     "分類與預算": self.refresh_categories, "試算表": self.refresh_tb,
+                    "標籤／專案": self.refresh_tags,
                     "日記帳": self.refresh_journal,
                     "報稅彙總": self.refresh_tax}
         handlers[name](start, end)
@@ -663,6 +719,72 @@ class ReportsPage(Page):
         if rest:
             items.append(("其他", rest))
         self.cat_chart.set_data(items)
+
+    # ------------------------------------------------------------------ 標籤／專案
+    def refresh_tags(self, start: str, end: str) -> None:
+        cur = (self.tag_table.current_row() or {}).get("name")
+        rows = self.db.tag_summary(start, end)
+        self.tag_table.set_rows(rows)
+        self.tag_table.setColumnHidden(2, not any(r["income"] for r in rows))   # 沒有收入時隱藏收入欄
+        self.tag_table.fit_columns()
+        if rows:
+            self.tag_table.select_where(lambda r: r["name"] == cur)
+        for x in (self.tag_open, self.tag_rename, self.tag_delete):
+            x.setEnabled(bool(rows))
+        self.refresh_tag_detail()
+
+    def refresh_tag_detail(self) -> None:
+        r = self.tag_table.current_row()
+        if not r:
+            self.tag_detail_title.setText("科目明細")
+            self.tag_detail.set_rows([])
+            self.tag_chart.set_data([])
+            return
+        start, end = self.range()
+        rows = self.db.tag_categories(r["name"], start, end)
+        self.tag_detail_title.setText(f"「{r['name']}」{fmt_date(r['first'])} ～ {fmt_date(r['last'])}")
+        self.tag_detail_title.setWordWrap(True)
+        self.tag_detail.set_rows(rows)
+        self.tag_chart.set_data([(x["name"], x["total"]) for x in rows if x["kind"] == "expense"][:8])
+
+    def open_tag(self, row: dict | None) -> None:
+        if row:
+            start, end = self.range()
+            self.ctx.navigate.emit("transactions", {"tag": row["name"], "start": start, "end": end})
+
+    def rename_tag(self) -> None:
+        r = self.tag_table.current_row()
+        if not r:
+            return
+        from PySide6.QtWidgets import QInputDialog
+        from ..widgets import error
+        new, ok = QInputDialog.getText(self, "重新命名標籤", f"「{r['name']}」改名為（與已有標籤同名時會合併）：",
+                                       text=r["name"])
+        if not ok or not new.strip() or new.strip() == r["name"]:
+            return
+        try:
+            n = self.db.rename_tag(r["name"], new)
+        except ValueError as e:
+            error(self, str(e))
+            return
+        self.ctx.changed()
+        self.ctx.toast.emit(f"已將 {n} 筆紀錄的標籤改為「{new.strip()}」")
+
+    def delete_tag(self) -> None:
+        r = self.tag_table.current_row()
+        if not r:
+            return
+        from ..widgets import ask
+        if not ask(self, f"要從所有紀錄移除標籤「{r['name']}」嗎？\n紀錄本身與金額都不會變動（可按 Ctrl+Z 復原）。",
+                   yes="移除標籤", danger=True):
+            return
+        n = self.db.delete_tag(r["name"])
+        self.ctx.changed()
+        self.ctx.toast.emit(f"已從 {n} 筆紀錄移除標籤「{r['name']}」")
+
+    def annual_report(self) -> None:
+        from ..dialogs_print import AnnualReportDialog
+        AnnualReportDialog(self.ctx, self.window()).exec()
 
     # ------------------------------------------------------------------ 分類帳
     def refresh_ledger_accounts(self, start=None, end=None, select=None) -> None:

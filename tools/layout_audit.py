@@ -54,6 +54,10 @@ sys.excepthook = lambda t, e, tb: errors.append("".join(traceback.format_excepti
 if len(sys.argv) <= 2:
     ctx.db.set_setting("owner_name", "游媽媽")
     load_sample_data(ctx.db)
+    # 標籤：讓收支明細的標籤篩選與「標籤／專案」分頁有內容可檢查（名稱刻意取長一點）
+    _rows = ctx.db.query_transactions(ttype="expense")
+    ctx.db.add_tag([r["id"] for r in _rows[:6]], "日本關西自由行 2026")
+    ctx.db.add_tag([r["id"] for r in _rows[3:9]], "房屋修繕")
 ctx.db.set_setting("first_run_done", "1")
 animations.set_enabled(False)
 try:
@@ -288,8 +292,9 @@ def dialogs() -> list[tuple[str, callable]]:
                                     SecurityTypesDialog, TradeDialog)
     from app.dialogs_more import (AuditDialog, DueRecurringDialog, ImportDialog, JournalDialog,
                                   RecurringEditDialog, RecurringManagerDialog, ReconcileDialog,
-                                  TemplateEditDialog, TemplateManagerDialog, VoidDialog, YearCloseDialog)
-    from app.dialogs_print import PrintDialog
+                                  TagPickDialog, TemplateEditDialog, TemplateManagerDialog, VoidDialog,
+                                  YearCloseDialog)
+    from app.dialogs_print import AnnualReportDialog, PrintDialog
     from app.dialogs_search import SearchDialog
     from app.dialogs_update import UpdateDialog
     from app.investments import Investments
@@ -324,6 +329,8 @@ def dialogs() -> list[tuple[str, callable]]:
         ("匯出", lambda: ExportDialog(ctx, win)),
         ("歡迎", lambda: WelcomeDialog(ctx, win)),
         ("列印", lambda: PrintDialog(ctx, lo, hi, win)),
+        ("年度財務報告", lambda: AnnualReportDialog(ctx, win)),
+        ("加上標籤", lambda: TagPickDialog(ctx, 3, win)),
         ("複式分錄", lambda: JournalDialog(ctx, parent=win)),
         ("編輯分錄", lambda: JournalDialog(ctx, txn=jtx, parent=win) if jtx else None),
         ("範本管理", lambda: TemplateManagerDialog(ctx, win)),

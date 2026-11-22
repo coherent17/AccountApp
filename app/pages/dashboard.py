@@ -281,7 +281,19 @@ class DashboardPage(Page):
         _clear_layout(self.remind_box)
         due = self.db.due_recurring()
         mats = self.db.upcoming_maturities(60)
-        self.remind_card.setVisible(bool(due or mats))
+        from .. import backup
+        bk = backup.status(self.db)
+        self.remind_card.setVisible(bool(due or mats or bk["remind"]))
+        if bk["remind"]:
+            row = QHBoxLayout()
+            when = f"上次成功是 {bk['days']} 天前" if bk["days"] is not None else "還沒有成功備份過"
+            lbl = QLabel(f"💾　第二份備份（隨身碟／OneDrive）{when}，請插上隨身碟後按「立即備份」。")
+            lbl.setWordWrap(True)
+            btn = button("立即備份", "Primary")
+            btn.clicked.connect(self.extra_backup)
+            row.addWidget(lbl, 1)
+            row.addWidget(btn)
+            self.remind_box.addLayout(row)
         if due:
             row = QHBoxLayout()
             names = "、".join(dict.fromkeys(r["name"] for r, _ in due))
@@ -302,6 +314,18 @@ class DashboardPage(Page):
             if d <= 7:
                 lbl.setStyleSheet(f"color:{C.expense}; font-weight:700;")
             self.remind_box.addWidget(lbl)
+
+    def extra_backup(self) -> None:
+        from .. import backup
+        from ..widgets import error
+        try:
+            backup.run(self.db, self.ctx.folder)
+        except OSError as e:
+            error(self, f"第二份備份失敗：{e}")
+            self.ctx.changed()
+            return
+        self.ctx.toast.emit("第二份備份完成")
+        self.ctx.changed()
 
     def post_due(self) -> None:
         from ..dialogs_more import DueRecurringDialog

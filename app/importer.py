@@ -186,20 +186,21 @@ def build_rows(db: Database, rows: list[list], header_idx: int, mapping: dict,
 
 def do_import(db: Database, items: list[dict]) -> tuple[int, int]:
     ok = skipped = 0
-    for it in items:
-        if it["error"]:
-            skipped += 1
-            continue
-        cid = it["category_id"]
-        if not cid:
-            existing = db.find_category(it["type"], it["category_name"])
-            cid = existing["id"] if existing else db.add_category(it["category_name"], it["type"])
-        try:
-            db.add_transaction(date=it["date"], type=it["type"], account_id=it["account_id"],
-                               amount=it["amount"], category_id=cid, note=it["note"], log="匯入")
-            ok += 1
-        except ValueError:
-            skipped += 1
+    with db.undo_group(f"匯入 {sum(1 for it in items if not it['error'])} 筆紀錄"):
+        for it in items:
+            if it["error"]:
+                skipped += 1
+                continue
+            cid = it["category_id"]
+            if not cid:
+                existing = db.find_category(it["type"], it["category_name"])
+                cid = existing["id"] if existing else db.add_category(it["category_name"], it["type"])
+            try:
+                db.add_transaction(date=it["date"], type=it["type"], account_id=it["account_id"],
+                                   amount=it["amount"], category_id=cid, note=it["note"], log="匯入")
+                ok += 1
+            except ValueError:
+                skipped += 1
     return ok, skipped
 
 

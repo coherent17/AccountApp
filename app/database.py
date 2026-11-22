@@ -27,9 +27,12 @@ import json
 import os
 import shutil
 import sqlite3
+from contextlib import contextmanager
 from typing import Iterable
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
+# 第 8 版以前的資料庫升級後要重編投資系統分錄；第 9 版只新增「標籤」資料表，不需重編
+RESTATE_BELOW = 8
 
 ASSET_CATEGORIES = [
     "現金", "銀行存款", "定期存款", "外幣存款", "短期投資", "股票", "基金", "債券",
@@ -275,6 +278,12 @@ CREATE TABLE IF NOT EXISTS sec_events (
     note            TEXT    NOT NULL DEFAULT '',
     created_at      TEXT    NOT NULL
 );
+CREATE TABLE IF NOT EXISTS txn_tags (
+    txn_id INTEGER NOT NULL,
+    tag    TEXT    NOT NULL,
+    PRIMARY KEY (txn_id, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_txn_tags_tag ON txn_tags(tag);
 CREATE INDEX IF NOT EXISTS idx_txn_date ON transactions(date);
 CREATE INDEX IF NOT EXISTS idx_txn_account ON transactions(account_id);
 CREATE INDEX IF NOT EXISTS idx_txn_to_account ON transactions(to_account_id);
@@ -370,6 +379,9 @@ class Database:
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         self.conn: sqlite3.Connection | None = None
         self._restating = False
+        self.undo_stack: list[dict] = []      # 本次開啟期間可以「復原」的操作（不存檔）
+        self._undo_group: dict | None = None
+        self._undo_off = 0
         self._open()
 
     # ================================================================== 連線與升級
@@ -390,10 +402,12 @@ class Database:
             self._migrate_v4_to_v5()
         if has_tables and version < 8:
             self._migrate_v7_to_v8()
+        if has_tables and version < 9:
+            self._migrate_v8_to_v9()
         self.conn.executescript(_TABLES)
         self.conn.executescript(_VIEWS)
         # 結構已升級；投資分錄重編完成才標記為新版本，中途失敗時下次開啟只重做重編
-        restate = bool(has_tables) and version < SCHEMA_VERSION
+        restate = bool(has_tables) and version < RESTATE_BELOW
         self.conn.execute(f"PRAGMA user_version = {4 if restate else SCHEMA_VERSION}")
         for key, value in DEFAULT_SETTINGS.items():
             self.conn.execute(
@@ -452,6 +466,12 @@ class Database:
                           " AND abs(fee_min - ?) < 1e-9 AND abs(tax_rate - ?) < 1e-9",
                           (name, fee_rate, fee_min, tax_rate))
         c.commit()
+
+    def _migrate_v8_to_v9(self) -> None:
+        """第 9 版：傳票可加上「標籤／專案」（新資料表 txn_tags，原有資料不變）。"""
+        self.conn.execute("CREATE TABLE IF NOT EXISTS txn_tags (txn_id INTEGER NOT NULL, tag TEXT NOT NULL,"
+                          " PRIMARY KEY (txn_id, tag))")
+        self.conn.commit()
 
     def _restate_investments(self, version: int) -> None:
         """依新規則重編所有投資系統分錄（含已結帳期間，以維持帳與明細一致）：
@@ -819,6 +839,191 @@ class Database:
             (_now(), action, txn_id, voucher_no(txn_id), summary,
              json.dumps(detail, ensure_ascii=False, default=str) if detail is not None else ""))
 
+    # ================================================================== 復原（Ctrl+Z）
+    # 只記在記憶體中：關閉程式後就清空。實際復原由 app/undo.py 執行（作廢新增的傳票、還原修改前內容、
+    # 取消作廢、刪除新增的投資交易…），每一步都照常寫入修改紀錄。
+    UNDO_LIMIT = 50
+
+    def _record(self, label: str, op: dict) -> None:
+        if self._undo_off or self._restating:
+            return
+        if self._undo_group is not None:
+            self._undo_group["ops"].append(op)
+            return
+        self.undo_stack.append({"label": label, "ops": [op]})
+        del self.undo_stack[:-self.UNDO_LIMIT]
+
+    @contextmanager
+    def undo_group(self, label: str):
+        """把多個操作合成一個「復原」步驟（例如一次作廢多筆、匯入、定期交易入帳）。"""
+        if self._undo_group is not None or self._undo_off:
+            yield
+            return
+        self._undo_group = {"label": label, "ops": []}
+        try:
+            yield
+        finally:
+            group, self._undo_group = self._undo_group, None
+            if group["ops"]:
+                self.undo_stack.append(group)
+                del self.undo_stack[:-self.UNDO_LIMIT]
+
+    @contextmanager
+    def undo_paused(self):
+        self._undo_off += 1
+        try:
+            yield
+        finally:
+            self._undo_off -= 1
+
+    def clear_undo(self) -> None:
+        self.undo_stack.clear()
+
+    def short_label(self, txn_id: int) -> str:
+        """「V000123 支出 120 餐飲」之類的簡短說明（復原提示用）。"""
+        t = self.get_transaction(txn_id)
+        if not t:
+            return voucher_no(txn_id)
+        what = t["note"] or ""
+        if not what and t["category_id"]:
+            c = self.get_category(t["category_id"])
+            what = c["name"] if c else ""
+        what = what if len(what) <= 14 else what[:13] + "…"
+        return f"{voucher_no(txn_id)} {TYPE_LABELS[t['type']]} {t['amount']:,.0f}" + (f"（{what}）" if what else "")
+
+    def _snapshot(self, txn_id: int) -> dict:
+        return {"txn": self.get_transaction(txn_id), "lines": self.get_lines(txn_id), "tags": self.get_tags(txn_id)}
+
+    # ================================================================== 標籤／專案
+    MAX_TAGS = 10
+
+    @staticmethod
+    def parse_tags(value) -> list[str]:
+        """「日本旅遊 2026、房屋修繕」→ ["日本旅遊 2026", "房屋修繕"]。以逗號、頓號、分號分隔，去掉 #。"""
+        if value is None:
+            return []
+        parts = value if isinstance(value, (list, tuple, set)) else \
+            str(value).replace("，", ",").replace("、", ",").replace("；", ",").replace(";", ",").split(",")
+        out: list[str] = []
+        for p in parts:
+            tag = " ".join(str(p).replace("#", " ").split())[:30]
+            if tag and tag not in out:
+                out.append(tag)
+        return out
+
+    def get_tags(self, txn_id: int) -> list[str]:
+        return [r["tag"] for r in self._q("SELECT tag FROM txn_tags WHERE txn_id = ? ORDER BY rowid", (txn_id,))]
+
+    def tags_of(self, ids: Iterable[int]) -> dict[int, list[str]]:
+        ids = list(ids)
+        out: dict[int, list[str]] = {}
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            for r in self._q(f"SELECT txn_id, tag FROM txn_tags WHERE txn_id IN ({','.join('?' * len(chunk))})"
+                             " ORDER BY rowid", chunk):
+                out.setdefault(r["txn_id"], []).append(r["tag"])
+        return out
+
+    def _write_tags(self, txn_id: int, tags: list[str]) -> bool:
+        if len(tags) > self.MAX_TAGS:
+            raise ValueError(f"每筆傳票最多 {self.MAX_TAGS} 個標籤")
+        if tags == self.get_tags(txn_id):
+            return False
+        self.conn.execute("DELETE FROM txn_tags WHERE txn_id = ?", (txn_id,))
+        self.conn.executemany("INSERT INTO txn_tags(txn_id, tag) VALUES (?, ?)", [(txn_id, t) for t in tags])
+        return True
+
+    def set_tags(self, txn_id: int, tags, log: bool = True) -> None:
+        """設定一張傳票的標籤。標籤只用於分析，不影響金額，所以已結帳期間的傳票也可以加標籤。"""
+        t = self.get_transaction(txn_id)
+        if not t:
+            raise ValueError("找不到這筆傳票")
+        if t["source"]:
+            raise ValueError("系統自動產生的傳票（投資、年度結帳）不能加標籤")
+        tags = self.parse_tags(tags)
+        old = self.get_tags(txn_id)
+        if not self._write_tags(txn_id, tags):
+            return
+        if log:
+            self._log("修改標籤", txn_id, "、".join(tags) or "（無標籤）", {"修改前": "、".join(old)})
+        self._record(f"修改標籤 {voucher_no(txn_id)}", {"kind": "tags", "tid": txn_id, "tags": old})
+        self.conn.commit()
+
+    def add_tag(self, ids: Iterable[int], tag: str) -> int:
+        """一次為多筆傳票加上同一個標籤，傳回實際加上的筆數（系統傳票略過）。"""
+        tag = (self.parse_tags(tag) or [""])[0]
+        if not tag:
+            raise ValueError("請輸入標籤名稱")
+        n = 0
+        with self.undo_group(f"加上標籤「{tag}」"):
+            for i in ids:
+                t = self.get_transaction(i)
+                if not t or t["source"]:
+                    continue
+                cur = self.get_tags(i)
+                if tag not in cur:
+                    self.set_tags(i, cur + [tag])
+                    n += 1
+        return n
+
+    def remove_tag_from(self, ids: Iterable[int], tag: str) -> int:
+        n = 0
+        with self.undo_group(f"移除標籤「{tag}」"):
+            for i in ids:
+                cur = self.get_tags(i)
+                if tag in cur:
+                    self.set_tags(i, [x for x in cur if x != tag])
+                    n += 1
+        return n
+
+    def all_tags(self) -> list[dict]:
+        """所有標籤與使用次數（只算未作廢的傳票），常用的排前面。"""
+        return self._q("SELECT g.tag AS name, SUM(CASE WHEN t.void = 0 THEN 1 ELSE 0 END) AS count,"
+                       " MAX(t.date) AS last FROM txn_tags g JOIN transactions t ON t.id = g.txn_id"
+                       " GROUP BY g.tag ORDER BY last DESC, g.tag")
+
+    def rename_tag(self, old: str, new: str) -> int:
+        """重新命名標籤（新名稱已存在時合併）。"""
+        new = (self.parse_tags(new) or [""])[0]
+        if not new:
+            raise ValueError("請輸入新的標籤名稱")
+        ids = [r["txn_id"] for r in self._q("SELECT txn_id FROM txn_tags WHERE tag = ?", (old,))]
+        with self.undo_group(f"標籤「{old}」改名為「{new}」"):
+            for i in ids:
+                cur = self.get_tags(i)
+                self.set_tags(i, [new if x == old else x for x in cur])
+        return len(ids)
+
+    def delete_tag(self, tag: str) -> int:
+        ids = [r["txn_id"] for r in self._q("SELECT txn_id FROM txn_tags WHERE tag = ?", (tag,))]
+        return self.remove_tag_from(ids, tag)
+
+    def tag_summary(self, start: str, end: str) -> list[dict]:
+        """各標籤在期間內的收入、支出（本位幣，與收支損益表同一來源 v_cat_post）與傳票筆數。"""
+        rows = self._q(
+            "SELECT g.tag AS name, COUNT(DISTINCT t.id) AS count, MIN(t.date) AS first, MAX(t.date) AS last"
+            "  FROM txn_tags g JOIN transactions t ON t.id = g.txn_id"
+            " WHERE t.void = 0 AND t.date BETWEEN ? AND ? GROUP BY g.tag", (start, end))
+        sums = {(r["tag"], r["kind"]): r["v"] for r in self._q(
+            "SELECT g.tag, p.kind, SUM(p.base) AS v FROM v_cat_post p JOIN txn_tags g ON g.txn_id = p.txn_id"
+            " WHERE p.date BETWEEN ? AND ? GROUP BY g.tag, p.kind", (start, end))}
+        for r in rows:
+            r["income"] = money_round(sums.get((r["name"], "income"), 0.0))
+            r["expense"] = money_round(sums.get((r["name"], "expense"), 0.0))
+            r["net"] = money_round(r["income"] - r["expense"])
+        return sorted(rows, key=lambda r: (-r["expense"] - r["income"], r["name"]))
+
+    def tag_categories(self, tag: str, start: str, end: str) -> list[dict]:
+        """某個標籤在期間內依收支科目的明細。"""
+        rows = self._q(
+            "SELECT p.category_id AS id, c.name, c.kind, c.code, SUM(p.base) AS total, COUNT(DISTINCT p.txn_id) AS count"
+            "  FROM v_cat_post p JOIN txn_tags g ON g.txn_id = p.txn_id JOIN categories c ON c.id = p.category_id"
+            " WHERE g.tag = ? AND p.date BETWEEN ? AND ? GROUP BY p.category_id"
+            " ORDER BY c.kind DESC, total DESC", (tag, start, end))
+        for r in rows:
+            r["total"] = money_round(r["total"])
+        return rows
+
     def list_audit(self, txn_id: int | None = None, limit: int = 500) -> list[dict]:
         if txn_id:
             return self._q("SELECT * FROM audit_log WHERE txn_id = ? ORDER BY id DESC", (txn_id,))
@@ -883,9 +1088,10 @@ class Database:
             "category_id": category_id, "note": (t.get("note") or "").strip(),
         }
 
-    def add_transaction(self, source: str = "", log: str = "新增", **t) -> int:
+    def add_transaction(self, source: str = "", log: str = "新增", tags=None, **t) -> int:
         v = self._validate_txn(t)
         self._check_open(v["date"])
+        tags = self.parse_tags(tags)
         now = _now()
         cur = self.conn.execute(
             "INSERT INTO transactions(date, type, account_id, to_account_id, amount, to_amount,"
@@ -894,12 +1100,16 @@ class Database:
              v["to_amount"], v["category_id"], v["note"], source, now, now),
         )
         tid = cur.lastrowid
+        if tags and not source:
+            self._write_tags(tid, tags)
         if log:
             self._log(log, tid, self.describe(tid))
+        if not source:
+            self._record(f"{log or '新增'} {self.short_label(tid)}", {"kind": "added", "tid": tid})
         self.conn.commit()
         return tid
 
-    def update_transaction(self, txn_id: int, **t) -> None:
+    def update_transaction(self, txn_id: int, tags=None, **t) -> None:
         old = self.get_transaction(txn_id)
         if not old:
             raise ValueError("找不到這筆傳票")
@@ -909,13 +1119,17 @@ class Database:
         v = self._validate_txn(t)
         self._check_open(v["date"])
         before = self.describe(txn_id)
+        snap = self._snapshot(txn_id)
         self.conn.execute(
             "UPDATE transactions SET date = ?, type = ?, account_id = ?, to_account_id = ?,"
             " amount = ?, to_amount = ?, category_id = ?, note = ?, updated_at = ? WHERE id = ?",
             (v["date"], v["type"], v["account_id"], v["to_account_id"], v["amount"],
              v["to_amount"], v["category_id"], v["note"], _now(), txn_id),
         )
+        if tags is not None:
+            self._write_tags(txn_id, self.parse_tags(tags))
         self._log("修改", txn_id, self.describe(txn_id), {"修改前": before})
+        self._record(f"修改 {self.short_label(txn_id)}", {"kind": "edited", "tid": txn_id, "snap": snap})
         self.conn.commit()
 
     def _guard_editable(self, t: dict) -> None:
@@ -985,7 +1199,7 @@ class Database:
         return out
 
     def add_journal(self, date: str, note: str, lines: list[dict], source: str = "",
-                    log: str = "新增", txn_id: int | None = None) -> int:
+                    log: str = "新增", txn_id: int | None = None, tags=None) -> int:
         """新增分錄。txn_id 只供系統重編傳票時沿用原傳票號碼。"""
         _dt.date.fromisoformat(date)
         self._check_open(date)
@@ -999,9 +1213,14 @@ class Database:
             (txn_id, date, first_acc, total, (note or "").strip(), source, now, now))
         tid = cur.lastrowid
         self._insert_lines(tid, items)
+        tags = self.parse_tags(tags)
+        if tags and not source:
+            self._write_tags(tid, tags)
         if log:
             self._log(log, tid, self.describe(tid))
         self._sync_securities({x["security_id"] for x in items if x["security_id"]}, date)
+        if not source and txn_id is None:
+            self._record(f"{log or '新增'} {self.short_label(tid)}", {"kind": "added", "tid": tid})
         self.conn.commit()
         return tid
 
@@ -1034,7 +1253,7 @@ class Database:
         for sid in sids:
             inv.rebuild(sid, from_date)
 
-    def update_journal(self, txn_id: int, date: str, note: str, lines: list[dict]) -> None:
+    def update_journal(self, txn_id: int, date: str, note: str, lines: list[dict], tags=None) -> None:
         old = self.get_transaction(txn_id)
         if not old or old["type"] != "journal":
             raise ValueError("找不到這筆分錄")
@@ -1042,6 +1261,7 @@ class Database:
         self._check_open(date)
         items = self._normalize_lines(lines)
         before = self.describe(txn_id)
+        snap = self._snapshot(txn_id)
         total = round(sum(x["debit"] for x in items), 2)
         first_acc = next(x["account_id"] for x in items if x["account_id"])
         self.conn.execute(
@@ -1050,8 +1270,11 @@ class Database:
         sids = self.linked_securities(txn_id) | {x["security_id"] for x in items if x["security_id"]}
         self.conn.execute("DELETE FROM txn_lines WHERE txn_id = ?", (txn_id,))
         self._insert_lines(txn_id, items)
+        if tags is not None:
+            self._write_tags(txn_id, self.parse_tags(tags))
         self._log("修改", txn_id, self.describe(txn_id), {"修改前": before})
         self._sync_securities(sids, min(date, old["date"]))
+        self._record(f"修改 {self.short_label(txn_id)}", {"kind": "edited", "tid": txn_id, "snap": snap})
         self.conn.commit()
 
     def get_lines(self, txn_id: int) -> list[dict]:
@@ -1071,9 +1294,11 @@ class Database:
             self._check_open(t["date"])
         sids: set[int] = set()
         first = None
+        done: list[tuple[int, list]] = []
         for i in ids:
             t = self.get_transaction(i)
             if t and not t["void"]:
+                done.append((i, self._q("SELECT * FROM recon_items WHERE txn_id = ?", (i,))))
                 self.conn.execute("UPDATE transactions SET void = 1, void_reason = ?, updated_at = ?"
                                   " WHERE id = ?", (reason.strip(), _now(), i))
                 self.conn.execute("DELETE FROM recon_items WHERE txn_id = ?", (i,))
@@ -1087,6 +1312,11 @@ class Database:
         except ValueError as e:
             raise ValueError(f"無法作廢：作廢後會造成之後的賣出股數超過持股（{e}）。"
                              "請先作廢之後的賣出分錄。") from None
+        if done:
+            label = f"作廢 {self.short_label(done[0][0])}" if len(done) == 1 else f"作廢 {len(done)} 筆傳票"
+            with self.undo_group(label):
+                for i, recon in done:
+                    self._record(label, {"kind": "voided", "tid": i, "recon": recon})
         self.conn.commit()
 
     def unvoid_transaction(self, txn_id: int) -> None:
@@ -1100,6 +1330,8 @@ class Database:
                           " WHERE id = ?", (_now(), txn_id))
         self._log("取消作廢", txn_id, self.describe(txn_id))
         self._sync_securities(self.linked_securities(txn_id), t["date"])
+        self._record(f"取消作廢 {self.short_label(txn_id)}",
+                     {"kind": "unvoided", "tid": txn_id, "reason": t["void_reason"]})
         self.conn.commit()
 
     def reverse_transaction(self, txn_id: int, date: str | None = None) -> int:
@@ -1149,6 +1381,7 @@ class Database:
                 first = min(first or d, d)
             self.conn.execute("DELETE FROM txn_lines WHERE txn_id = ?", (i,))
             self.conn.execute("DELETE FROM recon_items WHERE txn_id = ?", (i,))
+            self.conn.execute("DELETE FROM txn_tags WHERE txn_id = ?", (i,))
             self.conn.execute("DELETE FROM transactions WHERE id = ?", (i,))
             self._log("刪除", i, desc)
         self._sync_securities(sids, first or "")
@@ -1160,7 +1393,7 @@ class Database:
     # ================================================================== 查詢
     def query_transactions(self, start=None, end=None, ttype=None, account_id=None,
                            category_id=None, keyword=None, limit=None,
-                           include_void: bool = False) -> list[dict]:
+                           include_void: bool = False, tag: str | None = None) -> list[dict]:
         base = self.base_currency
         sql = """
             SELECT t.*,
@@ -1200,13 +1433,17 @@ class Database:
             sql += (" AND (t.category_id = ? OR EXISTS (SELECT 1 FROM txn_lines l"
                     " WHERE l.txn_id = t.id AND l.category_id = ?))")
             params += [category_id, category_id]
+        if tag:
+            sql += " AND EXISTS (SELECT 1 FROM txn_tags g WHERE g.txn_id = t.id AND g.tag = ?)"
+            params.append(tag)
         if keyword:
             like = f"%{keyword.strip()}%"
             sql += (" AND (t.note LIKE ? OR c.name LIKE ? OR a.name LIKE ? OR COALESCE(ta.name, '') LIKE ?"
                     " OR EXISTS (SELECT 1 FROM txn_lines l LEFT JOIN accounts la ON la.id = l.account_id"
                     " LEFT JOIN categories lc ON lc.id = l.category_id WHERE l.txn_id = t.id AND"
-                    " (la.name LIKE ? OR lc.name LIKE ? OR l.memo LIKE ?)))")
-            params += [like] * 7
+                    " (la.name LIKE ? OR lc.name LIKE ? OR l.memo LIKE ?))"
+                    " OR EXISTS (SELECT 1 FROM txn_tags g WHERE g.txn_id = t.id AND g.tag LIKE ?))")
+            params += [like] * 8
         sql += " ORDER BY t.date DESC, t.id DESC"
         if limit:
             sql += f" LIMIT {int(limit)}"
@@ -1228,7 +1465,9 @@ class Database:
                     label = ln["cn"] or SPECIALS.get(ln["special"], CLOSING)[1]
                     if label not in others:
                         others.append(label)
+        tags = self.tags_of(r["id"] for r in rows)
         for r in rows:
+            r["tags"] = tags.get(r["id"], [])
             if r["type"] == "journal":
                 accs, others = names.get(r["id"], ([], []))
                 r["account_name"] = "、".join(accs)
@@ -1832,13 +2071,19 @@ class Database:
             data["amount"] = amount
         data["date"] = date
         data.setdefault("note", rec["name"])
-        tid = self.add_transaction(log="定期交易入帳", **data)
+        old = self._q1("SELECT last_date FROM recurring WHERE id = ?", (rec["id"],))
+        with self.undo_group(f"定期交易入帳「{rec['name']}」"):
+            tid = self.add_transaction(log="定期交易入帳", **data)
+            self._record("", {"kind": "recurring", "rec_id": rec["id"], "last_date": old["last_date"] if old else ""})
         self.conn.execute("UPDATE recurring SET last_date = ? WHERE id = ? AND last_date < ?",
                           (date, rec["id"], date))
         self.conn.commit()
         return tid
 
     def skip_recurring(self, rec: dict, date: str) -> None:
+        old = self._q1("SELECT last_date FROM recurring WHERE id = ?", (rec["id"],))
+        self._record(f"略過定期交易「{rec['name']}」",
+                     {"kind": "recurring", "rec_id": rec["id"], "last_date": old["last_date"] if old else ""})
         self.conn.execute("UPDATE recurring SET last_date = ? WHERE id = ? AND last_date < ?",
                           (date, rec["id"], date))
         self.conn.commit()
@@ -1938,6 +2183,7 @@ class Database:
             raise ValueError("所選檔案不是有效的理財帳本備份檔。")
         safety = self.path + ".before-restore"
         self.backup_to(safety)
+        self.clear_undo()
         self.close()
         try:
             shutil.copyfile(src, self.path)
@@ -1953,7 +2199,8 @@ class Database:
             "DELETE FROM txn_lines; DELETE FROM recon_items; DELETE FROM reconciliations;"
             "DELETE FROM attachments; DELETE FROM sec_events; DELETE FROM securities;"
             "DELETE FROM recurring; DELETE FROM transactions; DELETE FROM accounts;"
-            "DELETE FROM categories; DELETE FROM audit_log; DELETE FROM sqlite_sequence;")
+            "DELETE FROM categories; DELETE FROM audit_log; DELETE FROM txn_tags; DELETE FROM sqlite_sequence;")
+        self.clear_undo()
         self._insert_default_categories()
         self._ensure_codes()
         self.conn.execute("UPDATE settings SET value = '0' WHERE key = 'sample_data'")
