@@ -89,8 +89,8 @@ class StatementTree(QTreeWidget):
         if style in ("section", "subtotal", "total", "grand"):
             for i in range(len(values)):
                 item.setFont(i, self._bold)
-        bg = {"section": C.surface_alt, "subtotal": "#F1F5FB", "total": "#E4ECF9",
-              "grand": "#DCE6F7"}.get(style)
+        bg = {"section": C.surface_alt, "subtotal": C.row_sub, "total": C.row_total,
+              "grand": C.row_grand}.get(style)
         if bg:
             for i in range(len(values)):
                 item.setBackground(i, QBrush(QColor(bg)))
@@ -114,11 +114,11 @@ class ReportsPage(Page):
         super().__init__(ctx, scroll=False, parent=parent)
         b = self.body
         head, hl = page_header("財務報表", "資產負債表、收支損益表、分類帳與試算表")
-        prt = button("列印／PDF", icon=icon("list"))
+        prt = button("列印／PDF", icon="list")
         prt.setMinimumHeight(44)
         prt.clicked.connect(self.print_reports)
         hl.addWidget(prt)
-        exp = button("匯出 Excel 報表", "Income", icon("download", "#FFFFFF"))
+        exp = button("匯出 Excel 報表", "Income", "download")
         exp.setMinimumHeight(44)
         exp.clicked.connect(self.export)
         hl.addWidget(exp)
@@ -263,7 +263,7 @@ class ReportsPage(Page):
         self.jnl_kw.setFixedWidth(300)
         self.jnl_kw.textChanged.connect(lambda _: self.refresh_journal(*self.range()))
         top.addWidget(self.jnl_kw)
-        add_j = button("新增分錄", "Primary", icon("plus", "#FFFFFF"))
+        add_j = button("新增分錄", "Primary", "plus")
         add_j.clicked.connect(self.new_journal)
         top.addWidget(add_j)
         top.addSpacing(16)
@@ -715,7 +715,7 @@ class ReportsPage(Page):
         rows = []
         d = c = 0.0
         for n, e in enumerate(entries):
-            bg = C.surface if n % 2 == 0 else "#F2F6FC"
+            bg = C.surface if n % 2 == 0 else C.row_sub
             for i, ln in enumerate(e["lines"]):
                 rows.append({"id": e["id"], "date": e["date"], "voucher": e["voucher"],
                              "summary": e["summary"], "code": ln["code"], "name": ln["name"],
@@ -739,7 +739,7 @@ class ReportsPage(Page):
         rows = self.db.trial_balance(start, end)
         tot = {k: round(sum(r[k] for r in rows), 2) for k in
                ("open_debit", "open_credit", "period_debit", "period_credit", "debit", "credit")}
-        total = {"code": "", "name": "合計", "group": "", "_bold": True, "_bg": "#E4ECF9", **tot}
+        total = {"code": "", "name": "合計", "group": "", "_bold": True, "_bg": C.row_total, **tot}
         self.tb.set_rows(rows + [total])
         d, c = tot["debit"], tot["credit"]
         ok = all(abs(tot[a] - tot[b]) < 1 for a, b in (("open_debit", "open_credit"),

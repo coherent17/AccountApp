@@ -21,7 +21,8 @@ from .pages.reports import ReportsPage
 from .pages.settings import SettingsPage
 from .pages.transactions import TransactionsPage
 from .sample_data import load_sample_data
-from .theme import FONT_FAMILY, FONT_SCALES, app_icon, arrow_file, icon, stylesheet
+from .theme import C, FONT_FAMILY, FONT_SCALES, app_icon, arrow_file, check_file, icon, stylesheet
+from .widgets import hline
 from .widgets import error
 
 NAV = [
@@ -57,7 +58,7 @@ class MainWindow(QMainWindow):
         sl.setSpacing(6)
         logo_row = QHBoxLayout()
         logo = QLabel()
-        logo.setPixmap(app_icon().pixmap(40, 40))
+        logo.setPixmap(app_icon().pixmap(42, 42))
         title_col = QVBoxLayout()
         title_col.setSpacing(0)
         t = QLabel(APP_NAME)
@@ -79,7 +80,7 @@ class MainWindow(QMainWindow):
         for key, label, ic, cls in NAV:
             btn = QPushButton("  " + label)
             btn.setObjectName("NavButton")
-            btn.setIcon(icon(ic, "#C3CDE2"))
+            btn.setIcon(icon(ic, C.sidebar_text))
             btn.setIconSize(btn.iconSize() * 1.3)
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -91,6 +92,8 @@ class MainWindow(QMainWindow):
             self.pages[key] = page
             self.stack.addWidget(page)
         sl.addStretch()
+        sl.addWidget(hline())
+        sl.addSpacing(4)
         find = _shortcut_button("搜尋", "Ctrl+F", "search")
         find.setToolTip("一次搜尋傳票、會計科目、投資標的與定期交易（摘要、金額、傳票號碼、代號、日期…）")
         find.clicked.connect(self.open_search)
@@ -164,7 +167,7 @@ class MainWindow(QMainWindow):
         btn.setChecked(True)
         self._current_key = key
         for k, b in self.nav_buttons.items():
-            b.setIcon(icon(dict((n[0], n[2]) for n in NAV)[k], "#FFFFFF" if k == key else "#C3CDE2"))
+            b.setIcon(icon(dict((n[0], n[2]) for n in NAV)[k], C.primary if k == key else C.sidebar_text))
         if animate:
             page_transition(self.stack, self.pages[key], self)
         else:
@@ -230,7 +233,7 @@ def _shortcut_button(text: str, keys: str, ic: str) -> QPushButton:
     row.setContentsMargins(18, 12, 14, 12)
     row.setSpacing(10)
     pic = QLabel()
-    pic.setPixmap(icon(ic, "#C3CDE2").pixmap(22, 22))
+    pic.setPixmap(icon(ic, C.sidebar_text).pixmap(22, 22))
     pic.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
     name = QLabel(text)
     name.setObjectName("NavText")
@@ -265,7 +268,7 @@ def apply_theme(app: QApplication, ctx: AppContext) -> None:
     f = QFont(FONT_FAMILY)
     f.setPointSizeF(pt)
     app.setFont(f)
-    app.setStyleSheet(stylesheet(pt, arrow_file()))
+    app.setStyleSheet(stylesheet(pt, arrow_file(), check_file()))
     QTimer.singleShot(0, refit_layouts)
     from . import animations
     animations.set_enabled(ctx.db.get_setting("animations", "1") == "1")

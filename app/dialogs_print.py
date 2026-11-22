@@ -70,7 +70,7 @@ class PrintDialog(BaseDialog):
         bar.addStretch()
         for text, kind, ic, fn in (("取消", None, None, self.reject), ("預覽列印", None, "list", self.do_preview),
                                    ("存成 PDF", None, "download", self.do_pdf), ("列印", "Primary", None, self.do_print)):
-            b = button(text, kind, icon(ic) if ic else None)
+            b = button(text, kind, ic or None)
             b.clicked.connect(fn)
             bar.addWidget(b)
         self.root.addLayout(bar)

@@ -34,7 +34,8 @@ class ChartView(QChartView):
         chart = QChart()
         chart.setBackgroundVisible(False)
         chart.setMargins(QMargins(4, 4, 4, 4))
-        chart.legend().setFont(_font(11))
+        chart.legend().setFont(_font(10.5))
+        chart.legend().setLabelColor(QColor(C.muted))
         chart.legend().setAlignment(Qt.AlignmentFlag.AlignBottom)
         chart.setAnimationOptions(QChart.AnimationOption.SeriesAnimations)
         chart.setAnimationDuration(500)
@@ -67,12 +68,12 @@ class DonutChart(ChartView):
         ch = self.reset()
         total = sum(v for _, v in items) or 1
         series = QPieSeries()
-        series.setHoleSize(0.58)
-        series.setPieSize(0.86)
+        series.setHoleSize(0.62)
+        series.setPieSize(0.88)
         for i, (name, v) in enumerate(items):
             sl = series.append(f"{name}  {v / total:.0%}", v)
             sl.setBrush(QColor(C.chart[i % len(C.chart)]))
-            sl.setPen(QPen(QColor("white"), 2))
+            sl.setPen(QPen(QColor("white"), 3))
             sl.setLabelVisible(False)
         if not items:
             sl = series.append("尚無資料", 1)
@@ -91,7 +92,7 @@ class BarChart(ChartView):
                  unit: str | None = None, x_title: str = "月份") -> None:
         ch = self.reset()
         bars = QBarSeries()
-        bars.setBarWidth(0.7)
+        bars.setBarWidth(0.62)
         top = 0.0
         div, auto_unit = _scale([v for _, vals, _ in series_data for v in vals])
         if unit:
@@ -108,17 +109,14 @@ class BarChart(ChartView):
         ch.addSeries(bars)
         ax = QBarCategoryAxis()
         ax.append(labels)
-        ax.setLabelsFont(_font(9))
-        ax.setGridLineVisible(False)
+        _style_axis(ax, grid=False)
         if x_title:
             _axis_title(ax, x_title)
         ay = QValueAxis()
         ay.setRange(0, _nice_max(top * 1.08))
         ay.setTickCount(5)
         ay.setLabelFormat("%.0f")
-        ay.setLabelsFont(_font(9))
-        ay.setGridLineColor(QColor(C.border))
-        ay.setLineVisible(False)
+        _style_axis(ay, grid=True)
         ch.addAxis(ax, Qt.AlignmentFlag.AlignBottom)
         ch.addAxis(ay, Qt.AlignmentFlag.AlignLeft)
         bars.attachAxis(ax)
@@ -157,16 +155,14 @@ class LineChart(ChartView):
             ax.setRange(int(labels[0]), int(labels[-1]))
             ax.setTickCount(min(8, len(labels)))
             ax.setLabelFormat("%d")
-            ax.setLabelsFont(_font(9))
-            ax.setGridLineVisible(False)
+            _style_axis(ax, grid=False)
             _axis_title(ax, x_title)
             labels = []
         else:
             ax = QBarCategoryAxis()
         if not numeric:
             ax.append(labels)
-            ax.setLabelsFont(_font(9))
-            ax.setGridLineVisible(False)
+            _style_axis(ax, grid=False)
             _axis_title(ax, x_title)
         lo = min(values) if values else 0
         hi = max(values) if values else 1
@@ -175,9 +171,7 @@ class LineChart(ChartView):
         ay.setRange(lo - pad if lo - pad < 0 or lo > pad * 3 else 0, hi + pad)
         ay.setTickCount(5)
         ay.setLabelFormat("%.0f")
-        ay.setLabelsFont(_font(9))
-        ay.setGridLineColor(QColor(C.border))
-        ay.setLineVisible(False)
+        _style_axis(ay, grid=True)
         ch.addAxis(ax, Qt.AlignmentFlag.AlignBottom)
         ch.addAxis(ay, Qt.AlignmentFlag.AlignLeft)
         for s in (line, dots):
@@ -193,6 +187,18 @@ def _scale(values: list[float]) -> tuple[float, str]:
     if top >= 1e5:
         return 1e4, "單位：萬元"
     return 1, "單位：元"
+
+
+def _style_axis(axis, grid: bool) -> None:
+    axis.setLabelsFont(_font(9))
+    axis.setLabelsColor(QColor(C.muted))
+    axis.setGridLineVisible(grid)
+    if grid:
+        pen = QPen(QColor(C.border), 1, Qt.PenStyle.DashLine)
+        axis.setGridLinePen(pen)
+        axis.setLineVisible(False)
+    else:
+        axis.setLinePenColor(QColor(C.border_strong))
 
 
 def _axis_title(ay, text: str) -> None:

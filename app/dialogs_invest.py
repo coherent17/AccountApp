@@ -193,9 +193,9 @@ class SecurityTypesDialog(BaseDialog):
             self.add_row(t)
         self.root.addWidget(self.table)
         tools = QHBoxLayout()
-        add = button("新增類型", icon=icon("plus"))
+        add = button("新增類型", icon="plus")
         add.clicked.connect(lambda: self.add_row())
-        rem = button("刪除選取類型", icon=icon("trash"))
+        rem = button("刪除選取類型", icon="trash")
         rem.clicked.connect(self.remove_row)
         tools.addWidget(add)
         tools.addWidget(rem)
@@ -296,7 +296,7 @@ class SecurityListDialog(BaseDialog):
         for text, fn, ic in (("新增標的", self.add, "plus"), ("編輯選取標的", lambda: self.edit(self.table.current_row()),
                                                              "edit"),
                              ("管理類型", self.kinds, "list")):
-            b = button(text, icon=icon(ic))
+            b = button(text, icon=ic)
             b.clicked.connect(fn)
             bar.addWidget(b)
         self.archive_btn = button("封存／取消封存")
@@ -556,7 +556,7 @@ class PriceDialog(BaseDialog):
         top.addWidget(self.date)
         top.addStretch()
         if online_enabled(ctx):
-            self.fetch_btn = button("從網路取得收盤價", icon=icon("download"))
+            self.fetch_btn = button("從網路取得收盤價", icon="download")
             self.fetch_btn.clicked.connect(self.fetch)
             top.addWidget(self.fetch_btn)
         self.root.addLayout(top)
@@ -671,7 +671,7 @@ class RateDialog(BaseDialog):
         top.addWidget(section_title("外幣匯率"))
         top.addStretch()
         if online_enabled(ctx) and codes:
-            self.fetch_btn = button("從網路取得參考匯率", icon=icon("download"))
+            self.fetch_btn = button("從網路取得參考匯率", icon="download")
             self.fetch_btn.clicked.connect(self.fetch)
             top.addWidget(self.fetch_btn)
         self.root.addLayout(top)

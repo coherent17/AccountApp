@@ -103,7 +103,7 @@ class InvestmentsPage(Page):
         head, hl = page_header("投資管理", "投資明細帳：持股、平均成本、已實現與未實現損益、股利")
         for text, kind, key, ic in (("買進", "Expense", "buy", "plus"), ("賣出", "Income", "sell", "minus"),
                                      ("股利", "Adjust", "div", "download")):
-            btn = button(text, kind, icon(ic, "#FFFFFF"))
+            btn = button(text, kind, ic)
             btn.setMinimumHeight(44)
             if key == "div":
                 menu = QMenu(btn)
@@ -115,10 +115,10 @@ class InvestmentsPage(Page):
             else:
                 btn.clicked.connect(lambda _=False, k=key: self.trade(k))
             hl.addWidget(btn)
-        price = button("市價評價", "Primary", icon("refresh", "#FFFFFF"))
+        price = button("市價評價", "Primary", "refresh")
         price.setMinimumHeight(44)
         price.clicked.connect(self.prices)
-        add = button("標的設定", icon=icon("edit"))
+        add = button("標的設定", icon="edit")
         add.setToolTip("新增投資標的，或選擇已設定的標的修改內容、類型、費率與稅率")
         add.setMinimumHeight(44)
         add.clicked.connect(self.manage_securities)
@@ -127,12 +127,12 @@ class InvestmentsPage(Page):
         b.addWidget(head)
 
         cards = QHBoxLayout()
-        cards.setSpacing(16)
-        self.c_mv = StatCard("投資帳面價值", C.primary)
-        self.c_cost = StatCard("投資成本", C.muted)
-        self.c_unr = StatCard("未實現損益", C.adjust)
-        self.c_real = StatCard("今年已實現損益", C.income)
-        self.c_div = StatCard("今年股利收入", C.gold)
+        cards.setSpacing(12)
+        self.c_mv = StatCard("投資帳面價值", C.primary, icon_name="pie")
+        self.c_cost = StatCard("投資成本", C.muted, icon_name="layers")
+        self.c_unr = StatCard("未實現損益", C.adjust, icon_name="trend_up")
+        self.c_real = StatCard("今年已實現損益", C.income, icon_name="coins")
+        self.c_div = StatCard("今年股利收入", C.gold, icon_name="gift")
         for c in (self.c_mv, self.c_cost, self.c_unr, self.c_real, self.c_div):
             cards.addWidget(c)
         b.addLayout(cards)
@@ -206,7 +206,7 @@ class InvestmentsPage(Page):
         self.ev_filter.currentIndexChanged.connect(self.load_events)
         self.ev_period = PeriodBar("全部", self._data_range)
         self.ev_period.changed.connect(self.load_events)
-        delete = button("刪除選取交易", "Danger", icon("trash", C.expense))
+        delete = button("刪除選取交易", "Danger", "trash")
         delete.clicked.connect(self.delete_event)
         # 視窗較窄時期間與刪除按鈕換到第二列
         lay.addWidget(ResponsiveRow([QLabel("標的"), self.ev_filter, 6], [self.ev_period], spacing=10,
@@ -217,7 +217,7 @@ class InvestmentsPage(Page):
             Column("類別", lambda r: KIND_LABELS[r["kind"]], align="center", width=132,
                    color=lambda r: {"buy": C.expense, "sell": C.income, "cash_div": C.gold,
                                     "stock_div": C.adjust, "jbuy": C.expense,
-                                    "jsell": C.income, "jdiv": C.gold}.get(r["kind"], C.muted)),
+                                    "jsell": C.income, "jdiv": C.gold}.get(r["kind"], C.muted), badge=True),
             Column("股數", lambda r: fmt_shares(r["shares"]) if r["shares"] else "", align="right", width=90),
             Column("價格", lambda r: f"{r['price']:,.3f}" if r["price"] else "", align="right", width=100),
             Column("手續費／稅", lambda r: fmt_num(r["fee"] + r["tax"], base) if r["fee"] + r["tax"] else "",
@@ -380,7 +380,7 @@ class InvestmentsPage(Page):
         t = p["total"]
         rows = sorted(p["rows"], key=lambda r: (r["shares"] <= 1e-9, r["code"]))
         if rows:
-            rows.append({"id": None, "code": "", "name": "投資組合合計", "rate": 1, "_bold": True, "_bg": "#E4ECF9",
+            rows.append({"id": None, "code": "", "name": "投資組合合計", "rate": 1, "_bold": True, "_bg": C.row_total,
                          **{k: t[k] for k in ("invested", "value", "realized", "dividends", "unrealized", "gain",
                                               "total_return", "xirr", "years")}})
         self.perf.set_rows(rows)

@@ -77,7 +77,7 @@ class SettingsPage(Page):
         ch.setObjectName("Hint")
         ch.setWordWrap(True)
         ct.addWidget(ch, 1)
-        chart_btn = button("會計科目表", "Primary", icon("list", "#FFFFFF"))
+        chart_btn = button("會計科目表", "Primary", "list")
         chart_btn.clicked.connect(self.open_chart)
         ct.addWidget(chart_btn)
         outer.addLayout(ct)
@@ -94,7 +94,7 @@ class SettingsPage(Page):
                     Column("分類名稱", lambda r: r["name"], stretch=True,
                            color=lambda r: C.faint if r["archived"] else None),
                     Column("狀態", lambda r: "已隱藏" if r["archived"] else "使用中", align="center",
-                           width=90, color=lambda r: C.faint if r["archived"] else C.income)]
+                           width=90, color=lambda r: C.faint if r["archived"] else C.income, badge=True)]
             if kind == "expense":
                 cols.insert(2, Column("每月預算", lambda r: fmt_money(r["budget"], ctx.base)
                                       if r["budget"] else "—", align="right", width=130))
@@ -178,7 +178,7 @@ class SettingsPage(Page):
         self.update_auto = QCheckBox("開啟程式時自動檢查是否有新版本（一天最多一次）")
         self.update_auto.toggled.connect(self.set_update_auto)
         gl.addWidget(self.update_auto, 3, 1, 1, 2)
-        chk = button("立即檢查新版本", icon=icon("refresh"))
+        chk = button("立即檢查新版本", icon="refresh")
         chk.clicked.connect(self.check_update)
         gl.addWidget(chk, 3, 3)
         uh = QLabel(f"目前版本 {APP_VERSION}。檢查時只會向 GitHub 查詢最新版本號碼；有新版本時會顯示更新內容，"
@@ -197,7 +197,7 @@ class SettingsPage(Page):
         self.path_label = QLabel()
         self.path_label.setWordWrap(True)
         self.path_label.setObjectName("Hint")
-        open_folder = button("開啟資料夾", icon=icon("folder"))
+        open_folder = button("開啟資料夾", icon="folder")
         open_folder.clicked.connect(lambda: open_path(self.ctx.folder))
         gl.addWidget(QLabel("資料位置"), 0, 0)
         gl.addWidget(self.path_label, 0, 1)
@@ -211,8 +211,7 @@ class SettingsPage(Page):
                                    ("開啟自動備份資料夾", None, "folder",
                                     lambda: open_path(self.ctx.backup_dir)),
                                    ("清除所有資料…", "Danger", "trash", self.reset)):
-            btn = button(text, kind, icon(ic, "#FFFFFF" if kind == "Primary" else
-                                          (C.expense if kind == "Danger" else C.text)))
+            btn = button(text, kind, ic)
             btn.clicked.connect(fn)
             row.addWidget(btn)
         row.addStretch()

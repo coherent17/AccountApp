@@ -22,32 +22,48 @@ FONT_SCALES = {
 
 
 class C:
-    bg = "#F3F5F9"
+    """設計配色（v2.10.0）：沉穩的墨藍為主色，收入綠、支出紅、轉帳灰藍、評價紫；
+    每個顏色都有淡色底（*_soft），用於標籤、按鈕底色與圖示底。"""
+    bg = "#F4F6FA"
     surface = "#FFFFFF"
-    surface_alt = "#F8FAFC"
-    border = "#E3E8EF"
-    border_strong = "#CBD3DF"
-    text = "#1E293B"
-    muted = "#64748B"
-    faint = "#94A3B8"
-    sidebar = "#1C2840"
-    sidebar_hover = "#26355A"
-    sidebar_active = "#2F4372"
-    sidebar_text = "#C3CDE2"
-    primary = "#2563EB"
-    primary_hover = "#1D4FD8"
-    primary_soft = "#E8F0FE"
-    income = "#0F9D6E"
-    income_soft = "#E3F6EF"
-    expense = "#E0464B"
-    expense_soft = "#FDECEC"
-    transfer = "#5B6B82"
-    transfer_soft = "#EDF1F6"
-    adjust = "#7C4DDB"
-    adjust_soft = "#F1EBFD"
-    gold = "#D99A1E"
-    chart = ["#2563EB", "#0F9D6E", "#F59E0B", "#E0464B", "#7C4DDB", "#0EA5B7",
-             "#EC4899", "#84CC16", "#64748B", "#F97316", "#14B8A6", "#A855F7"]
+    surface_alt = "#F7F9FC"
+    border = "#E4E8EF"
+    border_strong = "#CFD6E1"
+    border_hover = "#AEB8C8"
+    text = "#111827"
+    muted = "#5B6880"
+    faint = "#7D899C"
+    sidebar = "#FFFFFF"
+    sidebar_hover = "#F1F4F9"
+    sidebar_active = "#E9EFFE"
+    sidebar_text = "#475569"
+    primary = "#3056D3"
+    primary_hover = "#2546B5"
+    primary_soft = "#EAF0FE"
+    primary_deep = "#4B3CC4"
+    income = "#0C9A6A"
+    income_soft = "#E5F6EF"
+    expense = "#DC444A"
+    expense_soft = "#FDEEEE"
+    transfer = "#55647C"
+    transfer_soft = "#EEF1F6"
+    adjust = "#7350DD"
+    adjust_soft = "#F1EDFE"
+    gold = "#D4880B"
+    gold_soft = "#FDF4E2"
+    row_alt = "#FAFBFD"
+    row_line = "#EEF1F6"
+    row_sub = "#F6F8FC"
+    row_total = "#ECF1FD"
+    row_grand = "#E1E9FC"
+    chart = ["#3056D3", "#0C9A6A", "#F0A020", "#DC444A", "#7350DD", "#0EA5B7",
+             "#E45FA2", "#7CB518", "#64748B", "#F07A2E", "#14B8A6", "#A35BE8"]
+
+
+def soft(color: str, alpha: float = 0.12) -> str:
+    """色彩的半透明版本（樣式表用），例如圖示底色。"""
+    c = QColor(color)
+    return f"rgba({c.red()}, {c.green()}, {c.blue()}, {int(alpha * 255)})"
 
 
 TYPE_COLORS = {
@@ -58,119 +74,149 @@ TYPE_COLORS = {
     "journal": (C.primary, C.primary_soft),
 }
 
+# 按鈕樣式（objectName）→ 圖示顏色
+BUTTON_ICON_COLORS = {
+    "Primary": "#FFFFFF", "Income": C.income, "Expense": C.expense, "Transfer": C.transfer,
+    "Adjust": C.adjust, "Danger": C.expense, "Link": C.primary,
+}
 
-def stylesheet(pt: float, arrow: str = "") -> str:
+
+def _tinted(name: str, fg: str, bg: str, line: str, hover: str) -> str:
+    return (f"QPushButton#{name} {{ background: {bg}; color: {fg}; border: 1px solid {line}; font-weight: 700; }}"
+            f"QPushButton#{name}:hover {{ background: {hover}; border-color: {fg}; }}"
+            f"QPushButton#{name}:pressed {{ background: {line}; }}")
+
+
+def stylesheet(pt: float, arrow: str = "", check: str = "") -> str:
     s = pt
-    big = s * 1.15
+    big = s * 1.12
+    gb_top = int(s * 2.6)
     return f"""
     * {{ font-family: "{FONT_FAMILY}", "Microsoft JhengHei"; font-size: {s}pt; color: {C.text}; }}
     QMainWindow, QDialog, #PageRoot {{ background: {C.bg}; }}
-    QToolTip {{ background: {C.text}; color: white; border: none; padding: 6px 8px; border-radius: 6px; }}
+    QToolTip {{ background: #1F2937; color: white; border: none; padding: 7px 10px; border-radius: 8px; }}
 
     /* ---------- 側邊欄 ---------- */
-    #Sidebar {{ background: {C.sidebar}; }}
+    #Sidebar {{ background: {C.sidebar}; border: none; border-right: 1px solid {C.border}; }}
     #Sidebar QLabel {{ color: {C.sidebar_text}; background: transparent; }}
-    #AppTitle {{ color: white; font-size: {s * 1.35}pt; font-weight: 700; }}
-    #AppSubtitle {{ color: {C.faint}; font-size: {s * 0.85}pt; }}
+    #Sidebar QLabel#AppTitle {{ color: {C.text}; font-size: {s * 1.3}pt; font-weight: 700; }}
+    #Sidebar QLabel#AppSubtitle {{ color: {C.faint}; font-size: {s * 0.82}pt; }}
+    #Sidebar QLabel#SidebarSection {{ color: {C.faint}; font-size: {s * 0.8}pt; font-weight: 700;
+        padding: 0 0 0 14px; }}
     #NavButton {{
         background: transparent; color: {C.sidebar_text}; border: none; text-align: left;
-        padding: 12px 18px; border-radius: 10px; font-size: {big}pt;
+        padding: 11px 16px; border-radius: 10px; font-size: {big}pt;
     }}
-    #NavButton:hover {{ background: {C.sidebar_hover}; color: white; }}
-    #NavButton:checked {{ background: {C.sidebar_active}; color: white; font-weight: 700; }}
-    #Sidebar QLabel#NavText {{ font-size: {big}pt; }}
-    #Sidebar QLabel#NavKey {{ color: {C.faint}; font-size: {s * 0.85}pt; }}
+    #NavButton:hover {{ background: {C.sidebar_hover}; color: {C.text}; }}
+    #NavButton:checked {{ background: {C.sidebar_active}; color: {C.primary}; font-weight: 700; }}
+    #Sidebar QLabel#NavText {{ font-size: {big}pt; color: {C.sidebar_text}; }}
+    #Sidebar QLabel#NavKey {{ color: {C.faint}; font-size: {s * 0.78}pt; background: {C.surface_alt};
+        border: 1px solid {C.border}; border-radius: 5px; padding: 1px 5px; }}
     #SidebarExport {{
-        background: {C.income}; color: white; border: none; border-radius: 10px;
-        padding: 12px 14px; font-weight: 700; font-size: {s}pt;
+        background: {C.primary}; color: white; border: none; border-radius: 10px;
+        padding: 11px 14px; font-weight: 700; font-size: {s}pt;
     }}
-    #SidebarExport:hover {{ background: #0B8A60; }}
-    #SidebarFoot {{ color: {C.faint}; font-size: {s * 0.8}pt; }}
+    #SidebarExport:hover {{ background: {C.primary_hover}; }}
+    #Sidebar QLabel#SidebarFoot {{ color: {C.faint}; font-size: {s * 0.78}pt; }}
 
     /* ---------- 頁面 ---------- */
-    #PageTitle {{ font-size: {s * 1.75}pt; font-weight: 700; color: {C.text}; }}
-    #PageSubtitle {{ color: {C.muted}; font-size: {s}pt; }}
-    #SectionTitle {{ font-size: {s * 1.2}pt; font-weight: 700; color: {C.text}; }}
+    #PageTitle {{ font-size: {s * 1.7}pt; font-weight: 700; color: {C.text}; }}
+    #PageSubtitle {{ color: {C.muted}; font-size: {s * 0.95}pt; }}
+    #SectionTitle {{ font-size: {s * 1.12}pt; font-weight: 700; color: {C.text}; }}
     #Muted {{ color: {C.muted}; }}
-    #Hint {{ color: {C.muted}; font-size: {s * 0.9}pt; }}
+    #Hint {{ color: {C.muted}; font-size: {s * 0.88}pt; }}
 
-    #Card {{ background: {C.surface}; border: 1px solid {C.border}; border-radius: 14px; }}
+    #Card {{ background: {C.surface}; border: 1px solid {C.border}; border-radius: 16px; }}
     #Card QLabel {{ background: transparent; }}
-    #StatTitle {{ color: {C.muted}; font-size: {s * 0.95}pt; }}
-    #StatValue {{ font-size: {s * 1.7}pt; font-weight: 700; }}
-    #StatSub {{ color: {C.faint}; font-size: {s * 0.85}pt; }}
+    #StatTitle {{ color: {C.muted}; font-size: {s * 0.92}pt; }}
+    #StatValue {{ font-size: {s * 1.65}pt; font-weight: 700; }}
+    #StatSub {{ color: {C.faint}; font-size: {s * 0.84}pt; }}
+    #HeroCard {{ border: none; border-radius: 16px;
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {C.primary}, stop:1 {C.primary_deep}); }}
+    #HeroCard QLabel {{ background: transparent; color: white; }}
+    #HeroCard QLabel#StatTitle, #HeroCard QLabel#StatSub {{ color: rgba(255, 255, 255, 200); }}
+    #RatioValue {{ font-size: {s * 1.3}pt; font-weight: 700; }}
+    #RemindCard {{ background: {C.gold_soft}; border: 1px solid #F1D29A; border-radius: 16px; }}
+    #RemindCard QLabel {{ background: transparent; }}
+    #SampleBanner {{ background: {C.gold_soft}; border: 1px solid #F1D29A; border-radius: 14px; }}
+    #SampleBanner QLabel {{ background: transparent; color: #7A4F00; font-weight: 700; }}
 
     /* ---------- 按鈕 ---------- */
     QPushButton {{
-        background: {C.surface}; border: 1px solid {C.border_strong}; border-radius: 9px;
-        padding: 8px 16px; min-height: 22px;
+        background: {C.surface}; border: 1px solid {C.border_strong}; border-radius: 10px;
+        padding: 8px 16px; min-height: 22px; color: {C.text};
     }}
-    QPushButton:hover {{ background: {C.surface_alt}; border-color: {C.primary}; }}
-    QPushButton:pressed {{ background: {C.primary_soft}; }}
+    QPushButton:hover {{ background: {C.surface_alt}; border-color: {C.border_hover}; }}
+    QPushButton:pressed {{ background: {C.row_line}; }}
     QPushButton:disabled {{ color: {C.faint}; background: {C.surface_alt}; border-color: {C.border}; }}
-    QPushButton#Primary {{ background: {C.primary}; color: white; border: none; font-weight: 700; }}
-    QPushButton#Primary:hover {{ background: {C.primary_hover}; }}
-    QPushButton#Income {{ background: {C.income}; color: white; border: none; font-weight: 700; }}
-    QPushButton#Income:hover {{ background: #0B8A60; }}
-    QPushButton#Expense {{ background: {C.expense}; color: white; border: none; font-weight: 700; }}
-    QPushButton#Expense:hover {{ background: #C93A3F; }}
-    QPushButton#Transfer {{ background: {C.transfer}; color: white; border: none; font-weight: 700; }}
-    QPushButton#Transfer:hover {{ background: #4A586C; }}
-    QPushButton#Adjust {{ background: {C.adjust}; color: white; border: none; font-weight: 700; }}
-    QPushButton#Adjust:hover {{ background: #6A3CC8; }}
-    QPushButton#Danger {{ color: {C.expense}; border-color: #F3B7B9; }}
+    QPushButton#Primary {{ background: {C.primary}; color: white; border: 1px solid {C.primary}; font-weight: 700; }}
+    QPushButton#Primary:hover {{ background: {C.primary_hover}; border-color: {C.primary_hover}; }}
+    QPushButton#Primary:disabled {{ background: #A9B8E8; border-color: #A9B8E8; }}
+    {_tinted("Income", C.income, C.income_soft, "#C5EADB", "#D6F1E6")}
+    {_tinted("Expense", C.expense, C.expense_soft, "#F7CFD1", "#FBE1E2")}
+    {_tinted("Transfer", C.transfer, C.transfer_soft, "#D9DFE9", "#E3E8F0")}
+    {_tinted("Adjust", C.adjust, C.adjust_soft, "#DCD2FA", "#E7E0FD")}
+    QPushButton#Danger {{ color: {C.expense}; border-color: #F2C3C5; }}
     QPushButton#Danger:hover {{ background: {C.expense_soft}; border-color: {C.expense}; }}
     QPushButton#Link {{ background: transparent; border: none; color: {C.primary}; padding: 4px 6px; }}
     QPushButton#Link:hover {{ text-decoration: underline; }}
+    QPushButton::menu-indicator {{ subcontrol-origin: padding; subcontrol-position: right center;
+        right: 6px; image: url({arrow}); width: 12px; height: 12px; }}
 
     QPushButton#Segment {{
-        background: {C.surface_alt}; border: 1px solid {C.border}; border-radius: 10px;
+        background: {C.surface}; border: 1px solid {C.border}; border-radius: 10px;
         padding: 10px 6px; font-size: {big}pt; color: {C.muted};
     }}
+    QPushButton#Segment:hover {{ border-color: {C.border_hover}; color: {C.text}; }}
     QPushButton#Segment:checked {{ color: white; font-weight: 700; border: none; }}
     QPushButton#Segment[ttype="expense"]:checked {{ background: {C.expense}; }}
     QPushButton#Segment[ttype="income"]:checked {{ background: {C.income}; }}
     QPushButton#Segment[ttype="transfer"]:checked {{ background: {C.transfer}; }}
 
     QPushButton#Chip {{
-        background: {C.surface}; border: 1px solid {C.border}; border-radius: 16px;
+        background: {C.surface}; border: 1px solid {C.border}; border-radius: 17px;
         padding: 7px 10px; color: {C.text};
     }}
-    QPushButton#Chip:hover {{ border-color: {C.primary}; }}
-    QPushButton#Chip:checked {{ background: {C.primary_soft}; border: 2px solid {C.primary};
-        color: {C.primary}; font-weight: 700; }}
+    QPushButton#Chip:hover {{ border-color: {C.primary}; background: {C.primary_soft}; }}
+    QPushButton#Chip:checked {{ background: {C.primary}; border: 2px solid {C.primary};
+        color: white; font-weight: 700; }}
 
     /* ---------- 輸入 ---------- */
     QLineEdit, QComboBox, QDateEdit, QSpinBox, QDoubleSpinBox, QPlainTextEdit {{
-        background: {C.surface}; border: 1px solid {C.border_strong}; border-radius: 8px;
-        padding: 7px 10px; min-height: 22px; selection-background-color: {C.primary};
+        background: {C.surface}; border: 1px solid {C.border_strong}; border-radius: 10px;
+        padding: 7px 11px; min-height: 22px; selection-background-color: {C.primary};
         selection-color: white;
     }}
+    QLineEdit:hover, QComboBox:hover, QDateEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover,
+    QPlainTextEdit:hover {{ border-color: {C.border_hover}; }}
     QLineEdit:focus, QComboBox:focus, QDateEdit:focus, QSpinBox:focus,
-    QDoubleSpinBox:focus, QPlainTextEdit:focus {{ border: 2px solid {C.primary}; padding: 6px 9px; }}
+    QDoubleSpinBox:focus, QPlainTextEdit:focus {{ border: 2px solid {C.primary}; padding: 6px 10px; }}
     QLineEdit:disabled, QComboBox:disabled, QDateEdit:disabled, QSpinBox:disabled,
-    QDoubleSpinBox:disabled {{ background: {C.surface_alt}; color: {C.muted}; }}
+    QDoubleSpinBox:disabled {{ background: {C.surface_alt}; color: {C.muted}; border-color: {C.border}; }}
+    QLineEdit[readOnly="true"] {{ background: {C.surface_alt}; }}
     QLineEdit#AmountEdit {{ font-size: {s * 1.6}pt; font-weight: 700; padding: 8px 12px; }}
+    QLineEdit#AmountEdit:focus {{ padding: 7px 11px; }}
     QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button,
     QDoubleSpinBox::down-button {{ width: 0; border: none; }}
     QComboBox::drop-down, QDateEdit::drop-down {{ border: none; width: 30px; }}
     QComboBox::down-arrow, QDateEdit::down-arrow {{ image: url({arrow}); width: 14px; height: 14px; }}
     QComboBox::down-arrow:on {{ top: 1px; }}
     QComboBox QAbstractItemView {{
-        background: white; border: 1px solid {C.border_strong}; outline: none;
+        background: white; border: 1px solid {C.border_strong}; outline: none; border-radius: 8px;
         selection-background-color: {C.primary_soft}; selection-color: {C.text}; padding: 4px;
     }}
-    QComboBox QAbstractItemView::item {{ min-height: 30px; padding: 2px 8px; }}
+    QComboBox QAbstractItemView::item {{ min-height: 32px; padding: 2px 8px; border-radius: 6px; }}
     QCheckBox, QRadioButton {{ spacing: 8px; background: transparent; padding: 4px 10px 4px 0; }}
     QRadioButton::indicator {{ width: 16px; height: 16px; border-radius: 10px;
         border: 2px solid {C.border_strong}; background: white; }}
     QRadioButton::indicator:hover {{ border-color: {C.primary}; }}
     QRadioButton::indicator:checked {{ border: 6px solid {C.primary}; width: 8px; height: 8px; }}
-    QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 5px;
+    QCheckBox::indicator {{ width: 18px; height: 18px; border-radius: 6px;
         border: 2px solid {C.border_strong}; background: white; }}
     QCheckBox::indicator:hover {{ border-color: {C.primary}; }}
-    QCheckBox::indicator:checked {{ background: {C.primary}; border: 4px solid {C.primary_soft};
-        width: 12px; height: 12px; }}
+    QCheckBox::indicator:checked {{ background: {C.primary}; border: 2px solid {C.primary};
+        image: url({check}); }}
+    QCheckBox::indicator:disabled {{ background: {C.surface_alt}; border-color: {C.border}; }}
 
     QCalendarWidget QWidget {{ alternate-background-color: {C.surface_alt}; }}
     QCalendarWidget QToolButton {{ color: {C.text}; background: transparent; padding: 6px;
@@ -182,54 +228,60 @@ def stylesheet(pt: float, arrow: str = "") -> str:
 
     /* ---------- 表格 ---------- */
     QTableView, QTreeWidget, QListWidget {{
-        background: {C.surface}; border: 1px solid {C.border}; border-radius: 12px;
-        gridline-color: transparent; alternate-background-color: {C.surface_alt};
+        background: {C.surface}; border: 1px solid {C.border}; border-radius: 14px;
+        gridline-color: transparent; alternate-background-color: {C.row_alt};
         selection-background-color: {C.primary_soft}; selection-color: {C.text}; outline: none;
     }}
-    QTableView::item, QTreeWidget::item {{ padding: 6px 8px; border-bottom: 1px solid #EEF1F5; }}
-    QListWidget::item {{ padding: 8px 10px; border-radius: 6px; }}
+    QTableView::item, QTreeWidget::item {{ padding: 6px 8px; border-bottom: 1px solid {C.row_line}; }}
+    QTableView::item:selected, QTreeWidget::item:selected {{ background: {C.primary_soft}; color: {C.text}; }}
+    QListWidget::item {{ padding: 8px 10px; border-radius: 8px; }}
     QListWidget::item:selected {{ background: {C.primary_soft}; color: {C.text}; }}
+    QListWidget::item:hover {{ background: {C.surface_alt}; }}
     QHeaderView {{ background: transparent; }}
     QHeaderView::section {{
         background: {C.surface_alt}; color: {C.muted}; border: none;
-        border-bottom: 1px solid {C.border}; padding: 9px 8px; font-weight: 700;
+        border-bottom: 1px solid {C.border}; padding: 10px 8px; font-weight: 700;
     }}
+    QHeaderView::section:hover {{ color: {C.text}; }}
     QTableCornerButton::section {{ background: {C.surface_alt}; border: none; }}
 
     /* ---------- 分頁 ---------- */
-    QTabWidget::pane {{ border: none; background: transparent; top: -1px; }}
+    QTabWidget::pane {{ border: none; border-top: 1px solid {C.border}; background: transparent; top: -1px; }}
+    QTabBar {{ qproperty-drawBase: 0; }}
     QTabBar::tab {{
         background: transparent; color: {C.muted}; padding: 10px 16px; margin-right: 2px;
         border: none; border-bottom: 3px solid transparent; font-size: {big}pt;
     }}
     QTabBar::tab:selected {{ color: {C.primary}; border-bottom: 3px solid {C.primary}; font-weight: 700; }}
-    QTabBar::tab:hover {{ color: {C.text}; }}
+    QTabBar::tab:hover:!selected {{ color: {C.text}; border-bottom: 3px solid {C.border_strong}; }}
 
     /* ---------- 捲軸 ---------- */
     QScrollArea {{ background: transparent; border: none; }}
     QScrollArea > QWidget > QWidget {{ background: transparent; }}
-    QScrollBar:vertical {{ background: transparent; width: 12px; margin: 2px; }}
-    QScrollBar::handle:vertical {{ background: {C.border_strong}; border-radius: 4px; min-height: 30px; }}
-    QScrollBar::handle:vertical:hover {{ background: {C.faint}; }}
-    QScrollBar:horizontal {{ background: transparent; height: 12px; margin: 2px; }}
-    QScrollBar::handle:horizontal {{ background: {C.border_strong}; border-radius: 4px; min-width: 30px; }}
+    QScrollBar:vertical {{ background: transparent; width: 12px; margin: 3px; }}
+    QScrollBar::handle:vertical {{ background: {C.border_strong}; border-radius: 3px; min-height: 36px; }}
+    QScrollBar::handle:vertical:hover {{ background: {C.border_hover}; }}
+    QScrollBar:horizontal {{ background: transparent; height: 12px; margin: 3px; }}
+    QScrollBar::handle:horizontal {{ background: {C.border_strong}; border-radius: 3px; min-width: 36px; }}
+    QScrollBar::handle:horizontal:hover {{ background: {C.border_hover}; }}
     QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
     QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 
-    QProgressBar {{ background: {C.surface_alt}; border: none; border-radius: 6px; height: 12px;
+    QProgressBar {{ background: {C.row_line}; border: none; border-radius: 5px; height: 10px;
         text-align: center; font-size: {s * 0.8}pt; color: transparent; }}
-    QProgressBar::chunk {{ background: {C.primary}; border-radius: 6px; }}
+    QProgressBar::chunk {{ background: {C.primary}; border-radius: 5px; }}
     QProgressBar[over="true"]::chunk {{ background: {C.expense}; }}
 
     QMessageBox {{ background: {C.surface}; }}
     QMessageBox QLabel {{ font-size: {big}pt; }}
-    QMenu {{ background: white; border: 1px solid {C.border_strong}; padding: 6px; border-radius: 8px; }}
-    QMenu::item {{ padding: 8px 24px 8px 14px; border-radius: 6px; }}
-    QMenu::item:selected {{ background: {C.primary_soft}; color: {C.text}; }}
+    QMenu {{ background: white; border: 1px solid {C.border}; padding: 6px; border-radius: 10px; }}
+    QMenu::item {{ padding: 9px 26px 9px 14px; border-radius: 7px; }}
+    QMenu::item:selected {{ background: {C.primary_soft}; color: {C.primary}; }}
     QMenu::separator {{ height: 1px; background: {C.border}; margin: 4px 8px; }}
-    QGroupBox {{ background: {C.surface}; border: 1px solid {C.border}; border-radius: 12px;
-        margin-top: 14px; padding: 18px 14px 14px 14px; font-weight: 700; }}
-    QGroupBox::title {{ subcontrol-origin: margin; left: 14px; padding: 0 6px; color: {C.text}; }}
+    QGroupBox {{ background: {C.surface}; border: 1px solid {C.border}; border-radius: 16px;
+        margin-top: {gb_top}px; padding: 18px 16px 16px 16px; font-weight: 700; font-size: {s * 1.08}pt; }}
+    QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left; left: 4px; top: 0;
+        padding: 0 0 0 0; color: {C.text}; }}
     """
 
 
@@ -260,6 +312,23 @@ _ICONS = {
     "down": '<path d="m6 9 6 6 6-6"/>',
     "copy": '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',
     "excel": '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="m9 8 6 8M15 8l-6 8"/>',
+    "check": '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+    "trend_up": '<path d="m3 17 6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
+    "trend_down": '<path d="m3 7 6 6 4-4 8 8"/><path d="M15 17h6v-6"/>',
+    "scale": '<path d="M12 4v16M7 20h10M5 7h14"/><path d="m5 7-3 6a3 3 0 0 0 6 0z"/>'
+             '<path d="m19 7-3 6a3 3 0 0 0 6 0z"/>',
+    "bank": '<path d="M3 9.5 12 4l9 5.5z"/><path d="M5.5 10v7M10 10v7M14 10v7M18.5 10v7"/><path d="M3 20h18"/>',
+    "card": '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h4"/>',
+    "dollar": '<path d="M12 3v18"/><path d="M16.5 7H10a3 3 0 0 0 0 6h4a3 3 0 0 1 0 6H7"/>',
+    "pie": '<path d="M20.5 14A8.5 8.5 0 1 1 10 3.5V14z"/><path d="M14 3.2A8.5 8.5 0 0 1 20.8 10H14z"/>',
+    "layers": '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>',
+    "coins": '<ellipse cx="9" cy="7" rx="6" ry="3"/><path d="M3 7v4c0 1.7 2.7 3 6 3s6-1.3 6-3V7"/>'
+             '<path d="M9 14v3c0 1.7 2.7 3 6 3s6-1.3 6-3v-4c0-1.7-2.7-3-6-3"/>',
+    "gift": '<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M5 12v8h14v-8M12 8v12"/>'
+            '<path d="M12 8c-2-4-6-4-6-1.5S9 8 12 8zm0 0c2-4 6-4 6-1.5S15 8 12 8z"/>',
+    "bell": '<path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+    "heart": '<path d="M12 20s-8-4.6-8-10.2A4.3 4.3 0 0 1 12 7a4.3 4.3 0 0 1 8 2.8C20 15.4 12 20 12 20z"/>',
+    "print": '<path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/>',
 }
 
 
@@ -278,31 +347,51 @@ def icon(name: str, color: str = C.text, size: int = 64) -> QIcon:
     return QIcon(pm)
 
 
-def arrow_file() -> str:
-    """將下拉箭頭圖示存成暫存檔，供樣式表使用。"""
+def icon_file(name: str, color: str, tag: str) -> str:
+    """將圖示存成暫存檔，供樣式表使用（例如下拉箭頭、核取方塊的勾）。"""
     import os
     import tempfile
-    path = os.path.join(tempfile.gettempdir(), "my_ledger_arrow_v1.png")
+    path = os.path.join(tempfile.gettempdir(), f"my_ledger_{tag}.png")
     if not os.path.exists(path):
-        icon("down", C.muted, 32).pixmap(32, 32).save(path, "PNG")
+        icon(name, color, 32).pixmap(32, 32).save(path, "PNG")
     return path.replace("\\", "/")
 
 
+def arrow_file() -> str:
+    return icon_file("down", C.muted, "arrow_v3")
+
+
+def check_file() -> str:
+    return icon_file("check", "#FFFFFF", "check_v3")
+
+
 def app_icon() -> QIcon:
+    """程式圖示：墨藍漸層底、白色帳本頁與金色錢幣。"""
+    from PySide6.QtGui import QLinearGradient, QPen
     size = 256
     pm = QPixmap(size, size)
     pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(QColor(C.primary))
-    p.drawRoundedRect(QRectF(8, 8, 240, 240), 56, 56)
+    g = QLinearGradient(0, 0, size, size)
+    g.setColorAt(0, QColor("#4169E8"))
+    g.setColorAt(1, QColor(C.primary_deep))
+    p.setBrush(g)
+    p.drawRoundedRect(QRectF(8, 8, 240, 240), 60, 60)
+    p.setBrush(QColor(255, 255, 255, 70))
+    p.drawRoundedRect(QRectF(76, 50, 120, 150), 18, 18)
     p.setBrush(QColor("#FFFFFF"))
-    p.drawRoundedRect(QRectF(58, 96, 140, 98), 16, 16)
-    p.setBrush(QColor(C.gold))
-    p.drawEllipse(QRectF(150, 128, 34, 34))
-    p.setBrush(QColor("#BFD3FB"))
-    p.drawRoundedRect(QRectF(70, 64, 116, 26), 10, 10)
+    p.drawRoundedRect(QRectF(60, 64, 120, 150), 18, 18)
+    pen = QPen(QColor("#C9D5F7"), 11, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    for y in (104, 132, 160):
+        p.drawLine(86, y, 154 if y != 160 else 124, y)
+    p.setPen(QPen(QColor("#FFFFFF"), 8))
+    p.setBrush(QColor("#F4B13D"))
+    p.drawEllipse(QRectF(140, 146, 70, 70))
+    p.setPen(QPen(QColor("#B97A06"), 8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+    p.drawLine(175, 166, 175, 196)
     p.end()
     return QIcon(pm)
 
