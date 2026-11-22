@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-「我的理財帳本」: a Traditional Chinese desktop ledger (PySide6 + SQLite + openpyxl) for a retired professional accountant (游媽媽). It is shipped as a single Windows exe built with PyInstaller, published on GitHub Releases as `MyLedger.exe`. Users think in accounting terms (會計科目, 借貸, 日記帳/分類帳/試算表, 短期投資/長期投資), so keep UI text and features framed that way, and keep all user-facing text in Traditional Chinese.
+「我的理財帳本」: a Traditional Chinese desktop ledger (SQLite + openpyxl; since v3.0.0 the UI is a web UI in Edge WebView2 via pywebview, see "v3 UI" below; the PySide6 UI in `app/` is v2 and is no longer shipped) for a retired professional accountant (游媽媽). It is shipped as a single Windows exe built with PyInstaller, published on GitHub Releases as `MyLedger.exe`. Users think in accounting terms (會計科目, 借貸, 日記帳/分類帳/試算表, 短期投資/長期投資), so keep UI text and features framed that way, and keep all user-facing text in Traditional Chinese.
 
 The app is still evolving: expect more feature requests from her. Each release replaces the exe on her PC and must open her existing data **without crashing**. See "Release checklist" below.
 
@@ -43,7 +43,16 @@ Environment variables:
 
 To pass these from WSL to the exe, set `WSLENV=MY_LEDGER_DATA_DIR:MY_LEDGER_SMOKE_DIR` and use Windows paths.
 
-## Architecture
+## v3 UI (shipped since v3.0.0)
+
+- `v3/run.py` is the entry point: WebView2 check (`v3/webview2.py`, offers Microsoft's installer if missing), `app.updater.cleanup_old_exe`, daily auto backup and second backup on open, second backup on close if data changed, then a pywebview window (`gui="edgechromium"`, maximized) on `v3/ui/index.html`.
+- Python side: `v3/api.py` composes `Api` from `api_*.py` mixins (one per page/area). Every method is wrapped by `v3/rpc.exposed`: it runs on the single `DbThread` (SQLite is thread-bound), converts `ValueError` to `{"__error__": msg}` (shown to her), logs other exceptions to `錯誤紀錄.log` and returns a friendly message, and makes results JSON-safe. `db=False` methods (file dialogs, network) run off the DB thread. All accounting stays in the Qt-free `app/` modules (`database`, `investments`, `statements`, `printing` HTML, `exporter`, `importer`, `search`, `backup`, `undo`, `updater`, `journal_templates`, `fmt`, `version`); never import Qt from v3.
+- UI: Preact + htm + ECharts, vendored in `v3/ui/vendor`, no build step. `lib/core.js` (api(), `changed()`/`useLoad` refresh, formatting, 民國 dates, amount formulas), `lib/ui.js` (dialogs via `openModal`, fields, `DataTable`, `Combo`, menus), `lib/charts.js`, `pages/*.js` (6 pages), `dialogs/*.js`. Colours are CSS variables in `style.css` (light/dark), sizes in rem (標準/大/特大 change the root font size); theme and size switch instantly. Printing previews `app/printing.Report` HTML in an iframe and prints through Edge (「另存為 PDF」).
+- `window.__t` hooks + `v3/devshots.py`: `MY_LEDGER_V3_SHOT=<dir>` runs scripted scenes and screenshots (window placed off-screen, unfocused; `v3/screenshot.py` captures only our window with PrintWindow, never the screen). `MY_LEDGER_SMOKE_DIR` = smoke test (6 `exe_*.png`); JS errors are written to `錯誤紀錄.log`. Without `MY_LEDGER_DATA_DIR`, `MY_LEDGER_V3_DEMO=1` uses a throwaway sample ledger.
+- Tests: `tests/test_v3.py` (venv3) runs every read API on every fixture and cross-checks numbers against v2 functions, plus every write path with `check_books`. Keep `tests/test_db.py` and `tests/test_gui.py` passing too (they still cover `app/`); run test_gui with `QT_QPA_PLATFORM=offscreen` so no windows appear.
+- Build: venv3 at `C:\Users\User\accountApp_build\venv3` (pywebview, pythonnet, openpyxl, pyinstaller; no PySide6). `cd src/v3 && ..\..\venv3\Scripts\pyinstaller.exe --noconfirm --clean v3.spec` → `src/v3/dist/我的理財帳本.exe`, published as `MyLedger.exe`. New `app`/`v3` modules must be added to `hidden` in `v3/v3.spec`.
+
+## Architecture (accounting core in `app/`; the Qt UI parts are v2)
 
 **Data layer (`app/database.py`).** All accounting is derived from three SQL views. `v_acc_post` holds account postings in the original currency, `v_cat_post` holds income/expense postings in base currency, and `v_special_post` holds the 7101 評價, 7201 兌換, 7301 處分 and 3102 淨值調整 postings. Void vouchers are excluded everywhere. Reports never hand-sum the transactions tables.
 
@@ -134,7 +143,7 @@ To pass these from WSL to the exe, set `WSLENV=MY_LEDGER_DATA_DIR:MY_LEDGER_SMOK
 
 1. **Migrations:** if you change the schema, bump `SCHEMA_VERSION`, add a guarded `_migrate_vN_to_vN+1`, and add a migration test like `test_migration_v2_codes`. Never put an index or view on a new column into `_TABLES`/`_VIEWS` unless the migration adds that column first.
 2. **Tests:** run both test scripts on Windows. `test_gui.py` stubs modal boxes (`ask`/`info`/`error`/`warn`) only in the modules it lists. If new code shows a message box from another module, add that module, or the test will hang.
-3. **Packaging:** `accountApp.spec` excludes many modules, including `PIL`, `QtNetwork`, `QtPdf`, `QtSql` and `unittest`. Importing one of them from `app/` works in dev but crashes the exe, so update `excluded` if you need one.
+3. **Packaging:** releases since v3.0.0 are built from `v3/v3.spec` (see "v3 UI"); smoke-test that exe the same way. (v2) `accountApp.spec` excludes many modules, including `PIL`, `QtNetwork`, `QtPdf`, `QtSql` and `unittest`. Importing one of them from `app/` works in dev but crashes the exe, so update `excluded` if you need one.
 4. **Old data still loads (required for every change):**
    - **Automated part:** `tests/fixtures/ledger_<tag>.db` is a realistic ledger built by that release's own code, saved with its books snapshot (`.json`), for every release so far.
      - `test_db.py::test_old_version_ledgers_load` opens each fixture with the current code and requires everything to match, except investment balances under `APPROVED_INVESTMENT_CHANGES`, which must still equal the holdings' book value. It also checks the books balance and that the upgrade backup exists.

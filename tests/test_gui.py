@@ -796,7 +796,10 @@ app.processEvents()
 win.save_geometry()
 assert db.get_setting("window_geometry")
 w3 = MainWindow(ctx)
-assert (w3.width(), w3.height()) == (1234, 777), (w3.width(), w3.height())
+if app.platformName() == "offscreen":    # 無畫面測試（QT_QPA_PLATFORM=offscreen）的虛擬螢幕較小，恢復時會縮到螢幕內
+    assert w3.width() >= 1100 and w3.height() >= 700, (w3.width(), w3.height())
+else:
+    assert (w3.width(), w3.height()) == (1234, 777), (w3.width(), w3.height())
 w3.deleteLater()
 db.set_setting("window_geometry", "壞掉的資料")
 w4 = MainWindow(ctx)          # 資料損壞時改用預設大小，不會出錯
