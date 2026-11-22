@@ -1,7 +1,7 @@
 // 收支明細（日記帳）：篩選、表格、合計；按兩下開啟，右鍵選單可複製、迴轉、作廢、加標籤。
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { META, PERIOD_PRESETS, api, changed, html, money, presetRange, toast, useLoad, ymd } from "../lib/core.js";
-import { Btn, Check, DataTable, DateInput, Icon, MenuButton, PageHead, Select, TextInput, TypeBadge, ask, errorBox, info,
+import { Btn, Check, DataTable, DateInput, PeriodChips, Tip, Icon, MenuButton, PageHead, Select, TextInput, TypeBadge, ask, errorBox, info,
          openMenu } from "../lib/ui.js";
 import { askVoidReason, openAudit, openTxn, openVoucher, pickTag } from "../dialogs/txn.js";
 import { catEmoji } from "../lib/caticon.js";
@@ -135,7 +135,7 @@ export function Transactions({ go }) {
   const setDate = (i, d) => set({ period: "自訂期間", start: i === 0 ? d : range[0], end: i === 1 ? d : range[1] });
 
   return html`<div class="page-fill">
-    <${PageHead} title="收支明細" sub="日記帳：逐筆記錄收入、支出、轉帳與分錄傳票">
+    <${PageHead} icon="list" color="var(--primary)" title="收支明細" sub="日記帳：逐筆記錄收入、支出、轉帳與分錄傳票">
       <${Btn} kind="expense" icon="minus" big onClick=${() => openTxn({ type: "expense", accountId: f.account })}>記支出</${Btn}>
       <${Btn} kind="income" icon="plus" big onClick=${() => openTxn({ type: "income", accountId: f.account })}>記收入</${Btn}>
       <${Btn} kind="transfer" icon="transfer" big onClick=${() => openTxn({ type: "transfer", accountId: f.account })}>轉帳</${Btn}>
@@ -154,7 +154,7 @@ export function Transactions({ go }) {
     <div class="card filters">
       <div class="frow">
         <span class="lbl">期間</span>
-        <${Select} value=${f.period} onChange=${pickPeriod} options=${PERIOD_PRESETS.map((p) => [p, p])} />
+        <${PeriodChips} value=${f.period} onChange=${pickPeriod} />
         <span class="drange"><${DateInput} value=${range[0]} onChange=${(d) => setDate(0, d)} /><span>～</span>
         <${DateInput} value=${range[1]} onChange=${(d) => setDate(1, d)} /></span>
         <div class="grow"></div>
@@ -193,7 +193,7 @@ export function Transactions({ go }) {
           <span class="sum c-expense">支出 <b class="num">${money(data.expense)}</b></span>
           <span class="sum">結餘 <b class="num">${money(data.income - data.expense)}</b></span>`}
       </div>
-      <div class="hint">小技巧：按兩下即可修改；按右鍵可複製、迴轉、作廢或加標籤；Ctrl／Shift 可多選。作廢的傳票保留在帳上並留有修改紀錄，不會真的刪除。「投資」類型的傳票由投資管理自動產生，作廢即刪除該筆投資交易。</div>
+      <${Tip}>按兩下即可修改；按右鍵可複製、迴轉、作廢或加標籤；Ctrl／Shift 可多選。作廢的傳票保留在帳上並留有修改紀錄，不會真的刪除。「投資」類型的傳票由投資管理自動產生，作廢即刪除該筆投資交易。</${Tip}>
     </div>
   </div>`;
 }

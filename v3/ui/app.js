@@ -25,7 +25,7 @@ import { openExport } from "./dialogs/data.js";
 
 const NAV = [["dashboard", "總覽", "home"], ["transactions", "收支明細", "list"], ["accounts", "帳戶管理", "wallet"],
              ["investments", "投資管理", "chart"], ["reports", "財務報表", "excel"], ["settings", "設定", "settings"]];
-const FILL = ["transactions", "investments", "reports"];
+const FILL = ["transactions", "reports"];
 const PAGES = { dashboard: Dashboard, transactions: Transactions, accounts: Accounts, investments: Investments, reports: Reports, settings: Settings };
 
 async function undo() {

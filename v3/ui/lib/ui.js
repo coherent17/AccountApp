@@ -333,13 +333,44 @@ export const TypeBadge = ({ type, label }) => html`<span class=${"type b-" + typ
 export const Card = ({ title, icon, extra, children, cls = "", style }) =>
   html`<div class=${"card " + cls} style=${style}>${title && html`<h3>${icon && html`<${Icon} name=${icon} />`}${title}${extra && html`<div class="extra">${extra}</div>`}</h3>`}${children}</div>`;
 
-export const PageHead = ({ title, sub, children }) =>
-  html`<div class="head"><div><h1>${title}</h1>${sub && html`<div class="sub">${sub}</div>`}</div><div class="actions">${children}</div></div>`;
+/** 頁首：彩色圖示方塊＋標題＋說明，右側是這一頁的動作按鈕。 */
+export const PageHead = ({ title, sub, icon, color = "var(--primary)", children }) =>
+  html`<div class="head"><div class="ph">${icon && html`<div class="ph-ic" style=${`--c:${color}`}><${Icon} name=${icon} /></div>`}
+    <div><h1>${title}</h1>${sub && html`<div class="sub">${sub}</div>`}</div></div><div class="actions">${children}</div></div>`;
+
+/** 頁尾的小提示：柔和的說明框（取代一大段灰色小字）。 */
+export const Tip = ({ children }) => html`<div class="tip"><span class="tip-ic"><${Icon} name="info" /></span><div>${children}</div></div>`;
+
+/** 常用期間的快捷按鈕（本月、上月…），日期改過時顯示「自訂」。 */
+const CHIP_PERIODS = ["本月", "上月", "近 3 個月", "今年", "去年", "全部"];
+export function PeriodChips({ value, onChange }) {
+  return html`<div class="pchips">${CHIP_PERIODS.map((p) => html`<button type="button" class=${value === p ? "on" : ""} onClick=${() => onChange(p)}>${p}</button>`)}
+    ${value === "自訂期間" && html`<button type="button" class="on">自訂</button>`}</div>`;
+}
 
 // ------------------------------------------------------------------ 分頁、期間
+/** 分頁：一列的膠囊軌道；放不下時左右出現箭頭，選到的分頁會自動捲到看得見的地方。 */
 export function Tabs({ tabs, value, onChange }) {
-  return html`<div class="tabs" role="tablist">${tabs.map(([k, label, icon]) => html`<button role="tab" class=${value === k ? "on" : ""}
-      onClick=${() => onChange(k)}>${icon && html`<${Icon} name=${icon} />`}${label}</button>`)}</div>`;
+  const ref = useRef(null);
+  const [edge, setEdge] = useState({ l: false, r: false });
+  const measure = () => {
+    const el = ref.current;
+    if (el) setEdge({ l: el.scrollLeft > 4, r: el.scrollLeft + el.clientWidth < el.scrollWidth - 4 });
+  };
+  useLayoutEffect(() => {
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(ref.current);
+    return () => ro.disconnect();
+  }, []);
+  useEffect(() => { const b = ref.current && ref.current.querySelector("button.on"); b && b.scrollIntoView({ block: "nearest", inline: "nearest" }); }, [value]);
+  const scroll = (d) => ref.current.scrollBy({ left: d * ref.current.clientWidth * 0.6, behavior: "smooth" });
+  return html`<div class="tabs-wrap">
+    ${edge.l && html`<button class="tab-arrow l" onClick=${() => scroll(-1)} title="往左"><${Icon} name="chevron_down" /></button>`}
+    <div class="tabs" role="tablist" ref=${ref} onScroll=${measure}>${tabs.map(([k, label, icon]) => html`<button role="tab" class=${value === k ? "on" : ""}
+      onClick=${() => onChange(k)}>${icon && html`<${Icon} name=${icon} />`}${label}</button>`)}</div>
+    ${edge.r && html`<button class="tab-arrow r" onClick=${() => scroll(1)} title="往右，還有更多分頁"><${Icon} name="chevron_down" /></button>`}
+  </div>`;
 }
 
 /** 期間選擇：常用期間＋起訖日期（改日期即變成「自訂期間」）。value = {period, start, end}；傳回 [起, 訖]。 */
@@ -352,7 +383,7 @@ export function usePeriod(initial, dataRange) {
 export function PeriodPicker({ state, label = "期間" }) {
   const [, p, setP, range] = state;
   return html`<span class="frow nogap">${label && html`<span class="lbl">${label}</span>`}
-    <${Select} value=${p.period} onChange=${(v) => setP({ period: v, start: range[0], end: range[1] })} options=${PERIOD_PRESETS.map((x) => [x, x])} />
+    <${PeriodChips} value=${p.period} onChange=${(v) => setP({ period: v, start: range[0], end: range[1] })} />
     <span class="drange"><${DateInput} value=${range[0]} onChange=${(d) => setP({ period: "自訂期間", start: d, end: range[1] })} /><span>～</span>
     <${DateInput} value=${range[1]} onChange=${(d) => setP({ period: "自訂期間", start: range[0], end: d })} /></span></span>`;
 }

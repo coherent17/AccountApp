@@ -341,14 +341,15 @@ def test_whats_new_after_update():
     lg = Ledger(sample=True)
     a, db = lg.api, lg.db
     try:
-        assert "本月洞察" in ok(a.whats_new())["notes"]     # 從沒記錄版本的舊版（v2、3.1）更新上來：顯示內附說明
+        bundled = open(os.path.join(ROOT, "v3", "whatsnew.md"), encoding="utf-8").read()
+        assert ok(a.whats_new())["notes"] == bundled        # 從沒記錄版本的舊版（v2、3.1）更新上來：顯示內附說明
         assert ok(a.whats_new()) is None                    # 同一版本不重複顯示
         assert ok(a.tour_status())
         ok(a.tour_done())
         assert not ok(a.tour_status())
         lg.run(db.set_setting, "last_seen_version", "3.1.0")    # 從舊版更新上來（舊版沒有存說明）
         w = ok(a.whats_new())
-        assert w["version"] == APP_VERSION and "本月洞察" in w["notes"], w
+        assert w["version"] == APP_VERSION and w["notes"] == bundled, w
         assert ok(a.whats_new()) is None
         lg.run(db.set_setting, "last_seen_version", "3.1.0")    # 更新時存下的 GitHub 說明優先
         lg.run(db.set_setting, "update_notes", json.dumps({"version": APP_VERSION, "notes": "* 網路上的說明"}))

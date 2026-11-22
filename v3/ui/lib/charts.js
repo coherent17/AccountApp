@@ -75,7 +75,7 @@ export function Spark({ values, prefsKey }) {
 /** 數字卡片：圖示、標題、金額（滾動動畫）、說明；hero 為漸層的淨資產卡。 */
 export function Kpi({ title, icon, color, value, sub, delta, hero, spark, prefsKey, delay = 0 }) {
   const style = hero ? "" : `color:${color}`;
-  return html`<div class=${"card kpi rise" + (hero ? " hero" : "")} style=${`animation-delay:${delay}ms`}>
+  return html`<div class=${"card kpi rise" + (hero ? " hero" : "")} style=${`animation-delay:${delay}ms;--accent:${color || "var(--primary)"}`}>
     ${hero && spark && html`<${Spark} values=${spark} prefsKey=${prefsKey} />`}
     <div class="t"><span class="badge-ic" style=${hero ? "" : `background:color-mix(in srgb, ${color} 13%, transparent);color:${color}`}>
       <${Icon} name=${icon} /></span>${title}</div>
@@ -84,3 +84,16 @@ export function Kpi({ title, icon, color, value, sub, delta, hero, spark, prefsK
   </div>`;
 }
 
+
+/** 長條圖的漸層填色（上亮下深），看起來更有立體感。 */
+export function barFill(cssVar) {
+  const c = css(cssVar);
+  return new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: c }, { offset: 1, color: c + "99" }]);
+}
+/** 環圈圖中間的總額文字。 */
+export function donutCenter(label, value) {
+  const fs = rootFontPx();
+  return [{ type: "text", left: "center", top: "41%", style: { text: label, fill: css("--text-3"), fontSize: fs * 0.78, align: "center" } },
+          { type: "text", left: "center", top: "51%", style: { text: value, fill: css("--text"), fontWeight: 800, fontSize: fs * 1.15, align: "center" } }];
+}
+export const shortMoney = (v) => (Math.abs(v) >= 100000 ? (v / 10000).toFixed(1) + " 萬" : Math.round(v).toLocaleString());
