@@ -3,7 +3,7 @@ import { useEffect, useState } from "preact/hooks";
 import { META, api, changed, css, html, money, num, pct, toast, useLoad, ymd } from "../lib/core.js";
 import { Kpi, PALETTE, chartBase, useChart } from "../lib/charts.js";
 import { Btn, Card, DataTable, DateInput, Icon, MenuButton, PageHead, PeriodPicker, Select, Tabs, TypeBadge, ask, errorBox, info,
-         openMenu, usePeriod } from "../lib/ui.js";
+         openMenu, usePeriod, Skeleton } from "../lib/ui.js";
 import { openPrices, openSecurity, openSecurityList, openTrade } from "../dialogs/invest.js";
 import { openVoucher } from "../dialogs/txn.js";
 
@@ -22,7 +22,7 @@ export function Investments({ go }) {
   const [evSec, setEvSec] = useState(pending);
   pending = null;
   const [d] = useLoad(() => api("invest_page", asOf), [asOf]);
-  if (!d) return html`<div class="boot">讀取中…</div>`;
+  if (!d) return html`<${Skeleton} />`;
 
   async function trade(kind, sid) {
     if (!d.securities.some((s) => !s.archived)) {
@@ -157,7 +157,7 @@ function Realized({ d }) {
 function Performance({ showEvents }) {
   const [asOf, setAsOf] = useState(null);
   const [p] = useLoad(() => api("invest_performance", asOf), [asOf]);
-  if (!p) return html`<div class="muted">計算中…</div>`;
+  if (!p) return html`<${Skeleton} kind="block" />`;
   const t = p.total;
   const xirr = (r) => (r.xirr != null ? pctS(r.xirr) : r.years > 0 && r.years < 1 ? "未滿一年" : "—");
   const m = (k) => (r) => html`<span class=${"num " + (["realized", "unrealized", "gain"].includes(k) ? sgn(r[k]) : k === "dividends" ? "c-gold" : "")}>${num(r[k])}</span>`;

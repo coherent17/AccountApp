@@ -56,8 +56,8 @@ export const valueAxis = () => ({
   axisLabel: { color: css("--text-3"), formatter: (v) => (Math.abs(v) >= 10000 ? v / 10000 + "萬" : v) },
 });
 export const PALETTE = () => (document.documentElement.dataset.theme === "dark"
-  ? ["#6E8EF7", "#3FCB94", "#F5B342", "#F4757A", "#AC94F8", "#2CC3D5", "#F07DB8", "#9BD13A", "#8A97AD", "#F7914F"]
-  : ["#3056D3", "#0C9A6A", "#F0A020", "#DC444A", "#7350DD", "#0EA5B7", "#E45FA2", "#7CB518", "#64748B", "#F07A2E"]);
+  ? ["#808DFA", "#36D1A4", "#F3BE4E", "#FA7088", "#B59CFF", "#38C5E0", "#F28BC6", "#A5D65A", "#94A0B8", "#F99A5B"]
+  : ["#4655DA", "#0E9F7E", "#E8A317", "#E0435B", "#7A4DDA", "#1AA6C2", "#D94F9B", "#6FA81E", "#6B7591", "#EE7A35"]);
 
 export function Spark({ values, prefsKey }) {
   const ref = useChart(() => ({

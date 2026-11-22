@@ -2,7 +2,7 @@
 import { useState } from "preact/hooks";
 import { META, api, changed, html, money, toast, useLoad, ymd } from "../lib/core.js";
 import { AmountInput, Btn, Card, Check, DataTable, DateInput, Dialog, Field, Icon, PageHead, Segmented, Select, TextInput, ask,
-         errorBox, info, openMenu, openModal } from "../lib/ui.js";
+         errorBox, info, openMenu, openModal, Skeleton } from "../lib/ui.js";
 import { openChart, openSubject, openYearClose } from "../dialogs/chart.js";
 import { checkUpdates } from "../dialogs/update.js";
 
@@ -10,7 +10,7 @@ export const resolveTheme = (mode) => (mode === "dark" || (mode === "system" && 
 
 export function Settings() {
   const [d, reload] = useLoad(() => api("settings_page"));
-  if (!d) return html`<div class="boot">讀取中…</div>`;
+  if (!d) return html`<${Skeleton} />`;
   return html`
     <${PageHead} title="設定" sub="個人資料、收支分類與預算、結帳、備份與還原" />
     <${Personal} d=${d} reload=${reload} />

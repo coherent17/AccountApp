@@ -19,7 +19,7 @@ a = Analysis(
     ["run.py"],
     pathex=[".."],
     binaries=[],
-    datas=[("ui", "v3/ui")],
+    datas=[("ui", "v3/ui")],          # 含 logo.svg（啟動畫面、側邊欄）
     hiddenimports=hidden,
     hookspath=[],
     runtime_hooks=[],

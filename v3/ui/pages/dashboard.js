@@ -1,6 +1,6 @@
 // 總覽頁：淨資產、本月收支、財務健康、提醒、圖表、預算、最近的紀錄。
 import { META, css, html, longDate, money, pct, rootFontPx, useLoad, api, toast, ymd } from "../lib/core.js";
-import { Icon } from "../lib/ui.js";
+import { Icon, Skeleton } from "../lib/ui.js";
 import { CountUp, PALETTE, axis, chartBase, useChart, valueAxis } from "../lib/charts.js";
 import { openTxn, openVoucher } from "../dialogs/txn.js";
 import { openDue } from "../dialogs/more.js";
@@ -114,7 +114,7 @@ function Metric({ name, value, hint, level, fill, color, bad = "偏高" }) {
 // ------------------------------------------------------------------ 總覽
 export function Dashboard({ prefsKey, go }) {
   const [d] = useLoad(() => api("dashboard"));
-  if (!d) return html`<div class="boot">讀取中…</div>`;
+  if (!d) return html`<${Skeleton} />`;
   return html`<${DashboardView} d=${d} prefsKey=${prefsKey} go=${go} />`;
 }
 

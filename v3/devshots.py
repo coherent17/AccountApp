@@ -131,3 +131,19 @@ def run(win, out: str) -> None:
         f.write("\n".join(errors))
     print("JS errors:" if errors else "no JS errors", *errors, sep="\n", flush=True)
     win.destroy()
+
+
+def closing(win, out: str) -> None:
+    """測試結束畫面：開啟後像按 ✕ 一樣關閉，擷取「正在儲存」與「已安全儲存」兩個畫面。"""
+    import threading
+    os.makedirs(out, exist_ok=True)
+    time.sleep(4)
+    _grab(win, os.path.join(out, "before_close.png"))
+    threading.Thread(target=win.destroy, daemon=True).start()     # 與按視窗的 ✕ 相同：觸發結束畫面
+    time.sleep(0.35)
+    try:
+        _grab(win, os.path.join(out, "farewell_saving.png"))
+        time.sleep(0.9)
+        _grab(win, os.path.join(out, "farewell_done.png"))
+    except Exception as e:  # noqa: BLE001
+        print("grab failed:", e, flush=True)

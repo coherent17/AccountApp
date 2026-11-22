@@ -13,9 +13,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import os
 import sys
 import tempfile
+import threading
+import time
 import traceback
 
 HERE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -69,7 +72,8 @@ def main() -> int:
     cleanup_old_exe()
     shot = os.environ.get("MY_LEDGER_V3_SHOT")
     smoke = os.environ.get("MY_LEDGER_SMOKE_DIR")
-    if shot or smoke:
+    close_test = os.environ.get("MY_LEDGER_V3_CLOSE_TEST")      # 開發用：測試結束畫面
+    if shot or smoke or close_test:
         # 自動截圖時視窗放在螢幕外、不搶焦點，不打擾正在使用電腦的人；關閉 Edge 的遮蔽偵測，螢幕外也照常繪製
         os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = "--disable-features=CalculateNativeWinOcclusion"
     import webview
@@ -85,12 +89,42 @@ def main() -> int:
     start_changes = dbt.run(lambda: db.conn.total_changes)
     api = Api(dbt, db, folder, demo)
     title = "我的理財帳本" + ("（範例帳本）" if demo else "")
-    place = {"x": -4000, "y": 40, "focus": False} if (shot or smoke) else {"maximized": True}
+    place = {"x": -4000, "y": 40, "focus": False} if (shot or smoke or close_test) else {"maximized": True}
     win = webview.create_window(title, UI, js_api=api, width=1440, height=900, min_size=(1100, 700),
-                                background_color="#F3F5F9", **place)
+                                background_color="#F4F5FA", **place)
     api._window = win
     from v3 import devshots
-    if shot:
+
+    # 結束畫面：按關閉時先顯示「正在儲存帳本…」，完成第二份備份後顯示「帳本已安全儲存」，再關閉視窗
+    state = {"closing": False, "backed_up": False}
+
+    def on_closing():
+        if state["closing"] or shot or smoke or getattr(api, "_skip_farewell", False):
+            return True
+        state["closing"] = True
+        threading.Thread(target=farewell, daemon=True).start()
+        return False
+
+    def farewell():
+        steps = ["今天的紀錄都已寫入帳本"]
+        try:
+            win.evaluate_js(f"window.__farewell({json.dumps(steps, ensure_ascii=False)}, false)")
+            if not demo and dbt.run(lambda: db.conn is not None and db.conn.total_changes != start_changes):
+                from app import backup
+                if dbt.run(backup.try_run, db, folder):
+                    steps.append("第二份備份（隨身碟／OneDrive）已完成")
+                state["backed_up"] = True
+            time.sleep(0.5)
+            win.evaluate_js(f"window.__farewell({json.dumps(steps, ensure_ascii=False)}, true)")
+            time.sleep(1.3)
+        except Exception:  # noqa: BLE001 — 結束畫面失敗也要能關閉
+            pass
+        win.destroy()
+
+    win.events.closing += on_closing
+    if close_test:
+        webview.start(devshots.closing, (win, close_test), http_server=True, gui="edgechromium", debug=False)
+    elif shot:
         webview.start(devshots.run, (win, shot), http_server=True, gui="edgechromium", debug=False)
     elif smoke:
         webview.start(devshots.smoke, (win, smoke), http_server=True, gui="edgechromium", debug=False)
@@ -100,7 +134,7 @@ def main() -> int:
     def shutdown():
         if db.conn is None:
             return
-        if not demo and not smoke and db.conn.total_changes != start_changes:
+        if not demo and not smoke and not state["backed_up"] and db.conn.total_changes != start_changes:
             from app import backup
             backup.try_run(db, folder)  # 本次有記帳：關閉前把最新的帳本再複製到第二個備份位置
         db.close()
