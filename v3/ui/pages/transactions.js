@@ -4,6 +4,7 @@ import { META, PERIOD_PRESETS, api, changed, html, money, presetRange, toast, us
 import { Btn, Check, DataTable, DateInput, Icon, MenuButton, PageHead, Select, TextInput, TypeBadge, ask, errorBox, info,
          openMenu } from "../lib/ui.js";
 import { askVoidReason, openAudit, openTxn, openVoucher, pickTag } from "../dialogs/txn.js";
+import { openJournal } from "../dialogs/journal.js";
 
 const EMPTY = { period: "本月", start: null, end: null, type: null, account: null, category: null, tag: null, keyword: "", void: false };
 
@@ -71,7 +72,7 @@ export function Transactions({ go }) {
   async function copy(r) {
     try {
       const p = await api("txn_copy", r.id);
-      if (p.lines) return info("複式分錄的複製將在分錄視窗完成後提供。");
+      if (p.lines) return openJournal({ prefill: p.lines, note: p.note, tags: p.tags });
       openTxn({ prefill: p });
     } catch (e) { errorBox(e.message); }
   }
@@ -131,6 +132,7 @@ export function Transactions({ go }) {
       <${Btn} kind="expense" icon="minus" big onClick=${() => openTxn({ type: "expense", accountId: f.account })}>記支出</${Btn}>
       <${Btn} kind="income" icon="plus" big onClick=${() => openTxn({ type: "income", accountId: f.account })}>記收入</${Btn}>
       <${Btn} kind="transfer" icon="transfer" big onClick=${() => openTxn({ type: "transfer", accountId: f.account })}>轉帳</${Btn}>
+      <${Btn} kind="primary" icon="book" big onClick=${() => openJournal()} title="多行借貸傳票，可分割到多個科目">複式分錄</${Btn}>
       <${MenuButton} label="更多功能" items=${[
         { label: "復原上一步（Ctrl+Z）", icon: "undo", run: () => window.__undo() },
         { label: "修改紀錄（稽核軌跡）", icon: "eye", run: () => openAudit() },

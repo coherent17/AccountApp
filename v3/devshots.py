@@ -66,6 +66,12 @@ SCENES = [
     ("subject", ESC + "; __t.openSubject('asset')", 1.5),
     ("year_close", ESC + "; __t.openYearClose(2025)", 2),
     ("settings_dark", ESC + "; __t.prefs('dark', 'large')", 2),
+    ("journal_new", ESC + "; __t.prefs('light', 'large'); __t.openJournal()", 2),
+    ("journal_template", "__t.journalTemplate('買進股票（借 短期投資／貸 銀行存款）')", 1.5),
+    ("journal_user", ESC + "; __t.openUserJournal()", 2.5),
+    ("journal_system", ESC + "; __t.openFirstOf('journal')", 2.5),
+    ("journal_xlarge", ESC + "; __t.prefs('light', 'xlarge'); __t.openUserJournal()", 2.5),
+    ("txn_split", ESC + "; __t.prefs('light', 'large'); __t.openTxn({type: 'expense'})", 1.5),
     ("dashboard_dark", ESC + "; __t.prefs('dark', 'large'); __t.go('dashboard')", 3),
     ("min_window", ESC + "; __t.prefs('light', 'xlarge'); __t.go('transactions')", 1),
 ]

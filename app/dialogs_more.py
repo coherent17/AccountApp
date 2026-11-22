@@ -16,6 +16,7 @@ from .database import (CLOSING, CLOSING_SOURCE, INVESTMENT_CATEGORIES, TYPE_LABE
                        voucher_no)
 from .dialogs import BaseDialog, fill_account_combo, open_path
 from .investments import KIND_LABELS, Investments
+from .journal_templates import TEMPLATES, load_templates, resolve_template_key, save_templates  # noqa: F401
 from .theme import C, TYPE_COLORS, fmt_date, fmt_money, fmt_num, icon
 from .widgets import (AmountEdit, Column, DataTable, TagEdit, ask, button, error, info, iso,
                       make_date_edit, section_title)
@@ -32,42 +33,6 @@ def _parse_key(s: str) -> dict:
     if kind == "category":
         return {"category_id": int(val)}
     return {"special": val}
-
-
-def load_templates(db) -> list[tuple]:
-    """常用分錄範本：[(名稱, [(借貸, 科目, 行備註, 金額), ...])]，未自訂時使用內建範本。"""
-    try:
-        saved = json.loads(db.get_setting("journal_templates") or "null")
-    except ValueError:
-        saved = None
-    rows = saved if isinstance(saved, list) else JournalDialog.TEMPLATES[1:]
-    return [(name, [(*ln, None)[:4] for ln in lines]) for name, lines in rows]
-
-
-def save_templates(db, templates: list[tuple]) -> None:
-    db.set_setting("journal_templates", json.dumps(templates, ensure_ascii=False))
-
-
-def resolve_template_key(db, chart_by_key: dict, spec: str):
-    """範本科目轉為會計科目：自訂範本存科目 id，內建範本依類別或名稱尋找。"""
-    if spec in chart_by_key:
-        return chart_by_key[spec]["key"]
-    kind, _, rest = spec.partition(":")
-    if kind == "special":
-        return ("special", rest)
-    if kind == "category":
-        k, _, name = rest.partition(":")
-        c = db.find_category(k, name)
-        return ("category", c["id"]) if c else None
-    accs = db.list_accounts()
-    for a in accs:
-        if a["kind"] == kind and (not rest or a["category"] == rest):
-            return ("account", a["id"])
-    if rest in INVESTMENT_CATEGORIES:
-        for a in accs:
-            if a["kind"] == "asset" and a["category"] in INVESTMENT_CATEGORIES:
-                return ("account", a["id"])
-    return None
 
 
 def subject_combo(chart: list[dict], key: tuple | None) -> QComboBox:
@@ -91,29 +56,7 @@ def subject_combo(chart: list[dict], key: tuple | None) -> QComboBox:
 class JournalDialog(BaseDialog):
     """複式傳票：可輸入多行借貸，借貸平衡才能儲存。"""
 
-    TEMPLATES = [
-        ("（選擇常用範本）", []),
-        ("房貸繳款（本金＋利息）", [("debit", "liability:房屋貸款", "本金"),
-                                ("debit", "category:expense:房貸利息", "利息"),
-                                ("credit", "asset:銀行存款", "")]),
-        ("年繳保費（保單價值＋保險費）", [("debit", "asset:保險", "保單價值增加"),
-                                    ("debit", "category:expense:保險費", "危險保費"),
-                                    ("credit", "asset:銀行存款", "")]),
-        ("退休金入帳（扣除健保費等）", [("debit", "asset:銀行存款", "實際入帳"),
-                                   ("debit", "category:expense:保險費", "代扣健保費"),
-                                   ("credit", "category:income:退休金", "應領金額")]),
-        ("定存到期（本金＋利息）", [("debit", "asset:銀行存款", ""),
-                                ("credit", "asset:定期存款", "本金"),
-                                ("credit", "category:income:利息", "利息")]),
-        ("一筆付款分攤多個費用", [("debit", "category:expense:餐飲", ""),
-                              ("debit", "category:expense:日常用品", ""),
-                              ("credit", "asset:現金", "")]),
-        ("買進股票（借 短期投資／貸 銀行存款）", [("debit", "asset:短期投資", ""),
-                                          ("credit", "asset:銀行存款", "")]),
-        ("賣出股票（借 銀行存款／貸 短期投資）", [("debit", "asset:銀行存款", "實收價款"),
-                                          ("credit", "asset:短期投資", "")]),
-        ("淨值調整（補登漏記資產）", [("debit", "asset:", ""), ("credit", "special:equity", "")]),
-    ]
+    TEMPLATES = TEMPLATES
 
     def __init__(self, ctx: AppContext, txn: dict | None = None, prefill: list[dict] | None = None,
                  date: str | None = None, note: str = "", parent=None, tags: list[str] | None = None):

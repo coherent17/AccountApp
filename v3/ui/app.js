@@ -12,6 +12,7 @@ import { Reports } from "./pages/reports.js";
 import { Settings } from "./pages/settings.js";
 import { checkUpdates } from "./dialogs/update.js";
 import { openChart, openSubject, openYearClose } from "./dialogs/chart.js";
+import { openJournal } from "./dialogs/journal.js";
 import { askVoidReason, openAudit, openTxn, openVoucher } from "./dialogs/txn.js";
 import { openAccount, openAdjust } from "./dialogs/account.js";
 import { openPrices, openRates, openSecurity, openSecurityList, openTrade } from "./dialogs/invest.js";
@@ -34,7 +35,9 @@ window.__undo = undo;
 // 自動測試與截圖用的掛鉤（v3/devshots.py 透過 evaluate_js 操作畫面）
 const ALL = { start: "1900-01-01", end: "2999-12-31" };
 window.__t = {
-  go: (p) => window.__go(p), openTxn, openAccount, openAdjust, openPrices, openRates, openSecurity, openSecurityList, openTrade, openAnnual, openPrint, openExport, openChart, openSubject, openYearClose,
+  go: (p) => window.__go(p), openTxn, openAccount, openAdjust, openPrices, openRates, openSecurity, openSecurityList, openTrade, openAnnual, openPrint, openExport, openChart, openSubject, openYearClose, openJournal,
+  openUserJournal: async () => openJournal({ tid: (await api("txn_list", { ...ALL, type: "journal" })).rows.find((r) => !r.source).id }),
+  journalTemplate: (name) => { const s = document.querySelector(".journal .jtop select"); const i = [...s.options].findIndex((o) => o.text === name); s.value = i; s.dispatchEvent(new Event("change", { bubbles: true })); },
   tab: (label) => [...document.querySelectorAll(".tabs button")].find((b) => b.textContent.includes(label)).click(), openVoucher, openAudit, askVoid: () => askVoidReason(2),
   prefs: (t, s) => window.__setPrefs(t, s),
   editFirst: async () => openVoucher((await api("txn_list", { ...ALL, type: "expense" })).rows[0].id),

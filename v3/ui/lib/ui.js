@@ -349,3 +349,34 @@ export function PeriodPicker({ state, label = "期間" }) {
     <span class="drange"><${DateInput} value=${range[0]} onChange=${(d) => setP({ period: "自訂期間", start: d, end: range[1] })} /><span>～</span>
     <${DateInput} value=${range[1]} onChange=${(d) => setP({ period: "自訂期間", start: range[0], end: d })} /></span></span>`;
 }
+
+/** 可搜尋的下拉選單：輸入代號或名稱篩選，↑↓ 選擇、Enter 確定。options: [{value, label, group?, hint?}] */
+export function Combo({ value, onChange, options, placeholder = "輸入代號或名稱搜尋…", disabled, cls = "" }) {
+  const cur = options.find((o) => o.value === value);
+  const [text, setText] = useState(null);       // null：顯示目前選項；文字：搜尋中
+  const [hi, setHi] = useState(0);
+  const listRef = useRef(null);
+  const q = (text || "").trim().toLowerCase();
+  const shown = text == null ? [] : options.filter((o) => !q || o.label.toLowerCase().includes(q)).slice(0, 80);
+  const pick = (o) => { setText(null); if (o) onChange(o.value); };
+  useEffect(() => {
+    const el = listRef.current && listRef.current.children[hi];
+    el && el.scrollIntoView({ block: "nearest" });
+  }, [hi]);
+  return html`<div class=${"text combo " + cls}>
+    <input value=${text ?? (cur ? cur.label : "")} placeholder=${placeholder} disabled=${disabled} title=${cur ? cur.label : ""}
+      onFocus=${(e) => { setText(""); setHi(Math.max(0, options.indexOf(cur))); }}
+      onBlur=${() => setTimeout(() => setText(null), 150)}
+      onInput=${(e) => { setText(e.target.value); setHi(0); }}
+      onKeyDown=${(e) => {
+        if (e.key === "ArrowDown") { e.preventDefault(); setHi(Math.min(shown.length - 1, hi + 1)); }
+        else if (e.key === "ArrowUp") { e.preventDefault(); setHi(Math.max(0, hi - 1)); }
+        else if (e.key === "Enter" && shown[hi]) { e.preventDefault(); pick(shown[hi]); e.target.blur(); }
+        else if (e.key === "Escape") { e.stopPropagation(); setText(null); e.target.blur(); }
+      }} />
+    <${Icon} name="chevron_down" cls="arrow" />
+    ${text != null && shown.length > 0 && html`<div class="pop" ref=${listRef}>${shown.map((o, i) => html`<div class=${i === hi ? "hi" : ""}
+        onMouseDown=${(e) => { e.preventDefault(); pick(o); e.currentTarget.closest(".combo").querySelector("input").blur(); }}>
+      <span class="grow">${o.label}</span>${o.hint && html`<span class="muted small">${o.hint}</span>`}</div>`)}</div>`}
+  </div>`;
+}

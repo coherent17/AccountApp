@@ -563,3 +563,31 @@ table.list tbody tr.chart-sub td { background: var(--surface-2); font-weight: 70
 .lvl2 { padding-left: 1.4rem; }
 .lvl1 { padding-left: .6rem; }
 .field .fv > .seg { align-self: flex-start; max-width: 100%; flex-wrap: wrap; }
+.combo { width: 100%; }
+.combo input { padding-right: 2rem; text-overflow: ellipsis; }
+.combo .arrow { position: absolute; right: .6rem; width: 1rem; height: 1rem; color: var(--text-3); pointer-events: none; }
+.pop > div.hi { background: var(--primary-soft); color: var(--primary); }
+
+/* ---------- 複式分錄 ---------- */
+.jtop { display: grid; grid-template-columns: 1fr 1.6fr; gap: .8rem 1.4rem; margin-bottom: .9rem; }
+.jtop .field.wide { grid-column: 1 / -1; }
+.jtop .field { grid-template-columns: 4rem 1fr; }
+.jtable-wrap { position: relative; border: 1px solid var(--line); border-radius: .8rem; overflow: auto; max-height: 46vh; }
+table.jtable td { padding: .35rem .4rem; vertical-align: middle; }
+table.jtable th { background: var(--surface-2); position: sticky; top: 0; z-index: 2; }
+table.jtable tbody tr { cursor: default; }
+table.jtable tbody tr:hover td { background: none; }
+table.jtable tbody tr.sel td { background: var(--primary-soft) !important; }
+table.jtable .select, table.jtable .text, table.jtable .amount { min-height: 2.35rem; }
+table.jtable .amount input { font-weight: 500; }
+.row.nowrap { flex-wrap: nowrap; }
+.cur { font-weight: 700; color: var(--text-2); font-size: .85rem; }
+.ro-cover { position: absolute; inset: 0; background: color-mix(in srgb, var(--surface) 15%, transparent); cursor: not-allowed; }
+.jtools { margin: .8rem 0 .4rem; }
+.note.adjust { background: var(--adjust-soft); color: var(--adjust); align-items: flex-start; line-height: 1.6; }
+.tlist { display: flex; flex-direction: column; gap: .35rem; max-height: 50vh; overflow-y: auto; }
+.titem { display: flex; align-items: center; gap: .6rem; padding: .3rem .5rem; border-radius: .6rem; border: 1px solid transparent; }
+.titem.on { border-color: var(--primary); background: var(--primary-soft); }
+.titem .text { flex: 1; }
+table.jtable { table-layout: fixed; min-width: 64rem; }
+table.jtable .select select { min-width: 0; }

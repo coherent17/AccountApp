@@ -5,6 +5,7 @@ import { PALETTE, axis, chartBase, useChart, valueAxis } from "../lib/charts.js"
 import { Btn, Card, DataTable, Dialog, Field, Icon, PageHead, PeriodPicker, Segmented, Select, Tabs, TextInput, ask, errorBox,
          openModal, usePeriod } from "../lib/ui.js";
 import { openVoucher } from "../dialogs/txn.js";
+import { openJournal } from "../dialogs/journal.js";
 import { openAnnual, openPrint } from "../dialogs/print.js";
 import { openExport } from "../dialogs/data.js";
 import { showTransactions } from "./transactions.js";
@@ -258,6 +259,7 @@ function Journal({ start, end }) {
     { key: "cr", title: "貸方金額", align: "r", render: (r) => (r.credit ? html`<span class="num c-expense">${num(r.credit)}</span>` : "") },
   ];
   return html`<div class="row wrap"><${TextInput} icon="search" value=${kw} onInput=${setKw} placeholder="搜尋摘要或會計科目…" />
+      <${Btn} kind="primary" icon="plus" onClick=${() => openJournal()}>新增分錄</${Btn}>
       <div class="grow"></div>${entries && html`<b class=${ok ? "c-income" : "c-expense"}>傳票 ${entries.length} 張　｜　借方合計 ${money(d)}　｜　貸方合計 ${money(c)}　${ok ? "✓ 借貸平衡" : `✗ 差額 ${money(d - c)}`}</b>`}</div>
     <div class="card table-card"><${DataTable} columns=${cols} rows=${rows} rowKey=${(r) => r.key} rowCls=${(r) => (r.odd ? "band" : "") + (r.first ? " first" : "")}
       onActivate=${(r) => openVoucher(r.id)} empty=${entries ? "這個期間沒有傳票" : "讀取中…"} /></div>

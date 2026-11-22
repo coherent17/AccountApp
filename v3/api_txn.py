@@ -201,8 +201,10 @@ class TxnApi:
         out["date"] = dt.date.today().isoformat()
         out["tags"] = self._db.get_tags(tid)
         if t["type"] == "journal":
-            out["lines"] = [{k: ln[k] for k in ("account_id", "category_id", "special", "debit", "credit", "orig",
-                                                "memo")} for ln in self._db.get_lines(tid)]
+            out["lines"] = [{"key": f"account:{ln['account_id']}" if ln["account_id"] else
+                             f"category:{ln['category_id']}" if ln["category_id"] else f"special:{ln['special']}",
+                             "debit": ln["debit"] or None, "credit": ln["credit"] or None, "memo": ln["memo"],
+                             "orig": ln["orig"]} for ln in self._db.get_lines(tid)]
         return out
 
     # ------------------------------------------------------------------ 標籤

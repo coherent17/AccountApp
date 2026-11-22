@@ -20,6 +20,7 @@ from v3.api_accounts import AccountsApi
 from v3.api_dashboard import DashboardApi
 from v3.api_data import DataApi
 from v3.api_invest import InvestApi
+from v3.api_journal import JournalApi
 from v3.api_reports import ReportsApi
 from v3.api_settings import SettingsApi
 from v3.api_update import UpdateApi
@@ -103,5 +104,5 @@ class ApiBase:
         return True
 
 
-class Api(UpdateApi, SettingsApi, DataApi, ReportsApi, InvestApi, AccountsApi, TxnApi, DashboardApi, ApiBase):
+class Api(JournalApi, UpdateApi, SettingsApi, DataApi, ReportsApi, InvestApi, AccountsApi, TxnApi, DashboardApi, ApiBase):
     """pywebview 的 js_api：所有畫面可呼叫的方法（各頁的方法分在 api_*.py）。"""

@@ -1,6 +1,8 @@
 // 記一筆（支出／收入／轉帳／餘額調整）、傳票檢視、作廢原因、修改紀錄、加標籤。
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { META, TYPE_LABELS, api, changed, cur, html, isoToday, money, num, toast, ymd } from "../lib/core.js";
+import { openJournal } from "./journal.js";
+import { printVoucher } from "./print.js";
 import { AmountInput, Btn, Chips, DataTable, DateInput, Dialog, Field, Icon, Segmented, Select, TagInput, TextInput,
          ask, errorBox, info, openModal } from "../lib/ui.js";
 
@@ -22,7 +24,8 @@ export async function openVoucher(tid) {
     info(`${v.voucher} 已作廢（原因：${v.void_reason || "未填寫"}）。\n如需恢復，請在收支明細勾選「顯示已作廢」，在這筆按右鍵選「取消作廢」。`);
     return;
   }
-  if (v.type === "journal" || v.source) return openModal((close) => html`<${VoucherView} v=${v} close=${close} />`);
+  if (v.type === "journal") return openJournal({ tid });
+  if (v.source) return openModal((close) => html`<${VoucherView} v=${v} close=${close} />`);
   return openTxn({ tid });
 }
 
@@ -102,6 +105,18 @@ function TxnDialog({ form, opts, close }) {
     close(true);
   }
 
+  // 把目前輸入的內容帶到複式分錄視窗
+  function toJournal() {
+    const acc = account ? `account:${account}` : "";
+    const cat = category ? `category:${category}` : "";
+    const a = amount || null;
+    const prefill = type === "expense" ? [{ key: cat, debit: a }, {}, { key: acc, credit: a }]
+      : type === "income" ? [{ key: acc, debit: a }, {}, { key: cat, credit: a }]
+      : [{ key: toAccount ? `account:${toAccount}` : "", debit: a }, { key: acc, credit: a }];
+    close(savedAny);
+    openJournal({ prefill: prefill.map((p) => ({ key: "", ...p })), date, note, tags });
+  }
+
   async function addFiles() {
     const paths = await api("pick_files", "選擇附件", "attach");
     if (!paths.length) return;
@@ -118,7 +133,9 @@ function TxnDialog({ form, opts, close }) {
   const title = t ? `編輯紀錄　${t.voucher}` : opts.prefill ? "複製一筆" : "記一筆";
   const footer = html`
     ${t && html`<${Btn} kind="danger" icon="trash" onClick=${voidIt} disabled=${locked}>作廢這筆</${Btn}>
+      <${Btn} kind="link" icon="print" onClick=${() => printVoucher(t.id)}>列印傳票</${Btn}>
       <${Btn} kind="link" onClick=${() => openAudit(t.id)}>修改紀錄</${Btn}>`}
+    ${!t && type !== "adjust" && html`<${Btn} kind="link" icon="split" onClick=${toJournal} title="一筆付款分攤到多個分類，或需要自行輸入借貸時使用">改用複式分錄（分割多個科目）</${Btn}>`}
     <div class="grow"></div>
     <${Btn} onClick=${() => close(savedAny)}>取消</${Btn}>
     ${!t && html`<${Btn} onClick=${() => save(true)} disabled=${busy}>儲存並再記一筆</${Btn}>`}
