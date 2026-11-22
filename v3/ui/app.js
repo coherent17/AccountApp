@@ -108,7 +108,7 @@ function App() {
           ${[["normal", "標準"], ["large", "大"], ["xlarge", "特大"]].map(([k, l]) =>
             html`<button class=${r.dataset.scale === k ? "on" : ""} onClick=${() => setPref(r.dataset.theme, k)}>${l}</button>`)}</div>
       </div>
-      <div class="foot"><span class="dot"></span>v${META.version}（v3 新介面測試版）<br />資料僅存於本機</div>
+      <div class="foot"><span class="dot"></span>版本 ${META.version}<br />資料僅存於本機</div>
     </aside>
     <main class="main"><div class=${"page" + (FILL.includes(page) ? " fill" : "")}>
       ${Page ? html`<${Page} go=${go} key=${page} />`

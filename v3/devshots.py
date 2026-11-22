@@ -96,16 +96,11 @@ def smoke(win, out: str) -> None:
     """煙霧測試（與 v2 相同的 MY_LEDGER_SMOKE_DIR）：每一頁截圖為 exe_*.png，JS 錯誤寫進 錯誤紀錄.log，然後關閉。"""
     os.makedirs(out, exist_ok=True)
     time.sleep(4)
-    errors = []
     for page in SMOKE_PAGES:
         win.evaluate_js(f"__t.go('{page}')")
         time.sleep(2.5)
-        errors += json.loads(win.evaluate_js("JSON.stringify(window.__errors.splice(0))") or "[]")
         _grab(win, os.path.join(out, f"exe_{page}.png"))
-    if errors:
-        folder = win.evaluate_js("window.__folder") or out
-        with open(os.path.join(folder, "錯誤紀錄.log"), "a", encoding="utf-8") as f:
-            f.write("\n".join(["v3 smoke JS errors:"] + errors) + "\n")
+    # JS 錯誤已由畫面自動寫進「錯誤紀錄.log」
     win.destroy()
 
 

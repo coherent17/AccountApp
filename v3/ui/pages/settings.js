@@ -19,7 +19,7 @@ export function Settings() {
     <${Network} d=${d} />
     <${DataBackup} d=${d} reload=${reload} />
     <${Card} title="關於" icon="info">
-      <p class="muted" style="margin:0;line-height:1.9">我的理財帳本　版本 ${META.version}（新介面測試版）<br />
+      <p class="muted" style="margin:0;line-height:1.9">我的理財帳本　版本 ${META.version}<br />
         個人資產管理與記帳工具：日記帳、分類帳、資產負債表、收支損益表、試算表及 Excel 匯出。<br />所有資料僅儲存於本機電腦，不會上傳至網路。</p>
     </${Card}>`;
 }

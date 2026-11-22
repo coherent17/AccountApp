@@ -74,6 +74,15 @@ class ApiBase:
         self._db.set_setting(key, value)
         return True
 
+    @exposed(db=False)
+    def log_js_error(self, text: str) -> None:
+        """畫面程式的錯誤也寫進「錯誤紀錄.log」（與 v2 相同的檔案），方便日後查問題。"""
+        try:
+            with open(os.path.join(self._folder, "錯誤紀錄.log"), "a", encoding="utf-8") as f:
+                f.write(f"\n[{dt.datetime.now():%Y-%m-%d %H:%M:%S}] v{APP_VERSION} v3 畫面\n{str(text)[:4000]}\n")
+        except OSError:
+            pass
+
     @exposed
     def date_range(self) -> list[str]:
         return list(self._db.date_range())

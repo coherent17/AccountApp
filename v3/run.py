@@ -85,7 +85,7 @@ def main() -> int:
     start_changes = dbt.run(lambda: db.conn.total_changes)
     api = Api(dbt, db, folder, demo)
     title = "我的理財帳本" + ("（範例帳本）" if demo else "")
-    place = {"x": -4000, "y": 40, "focus": False} if (shot or smoke) else {}
+    place = {"x": -4000, "y": 40, "focus": False} if (shot or smoke) else {"maximized": True}
     win = webview.create_window(title, UI, js_api=api, width=1440, height=900, min_size=(1100, 700),
                                 background_color="#F3F5F9", **place)
     api._window = win

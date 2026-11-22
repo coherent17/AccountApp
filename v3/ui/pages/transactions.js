@@ -8,6 +8,7 @@ import { openJournal } from "../dialogs/journal.js";
 import { openImport, openRecurring, openRecurringEdit } from "../dialogs/more.js";
 import { openAdjust } from "../dialogs/account.js";
 import { openChart } from "../dialogs/chart.js";
+import { openExport } from "../dialogs/data.js";
 
 const EMPTY = { period: "本月", start: null, end: null, type: null, account: null, category: null, tag: null, keyword: "", void: false };
 
@@ -141,7 +142,8 @@ export function Transactions({ go }) {
         { label: "復原上一步（Ctrl+Z）", icon: "undo", run: () => window.__undo() },
         { label: "更新餘額／市值", icon: "refresh", run: () => openAdjust() },
         { label: "定期交易（每月固定收支）", icon: "restore", run: openRecurring },
-        { label: "匯入 Excel／CSV", icon: "excel", run: openImport },
+        { label: "匯入 Excel／CSV", icon: "upload", run: openImport },
+        { label: "匯出 Excel 報表", icon: "download", run: () => openExport(range[0], range[1]) },
         { label: "修改紀錄（稽核軌跡）", icon: "eye", run: () => openAudit() },
         { label: "會計科目表（新增科目）", icon: "list", run: openChart },
       ]} />

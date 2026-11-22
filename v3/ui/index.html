@@ -6,9 +6,15 @@
   <title>我的理財帳本</title>
   <link rel="stylesheet" href="style.css">
   <script>
+    // 畫面程式的錯誤：留給自動測試檢查，並寫進資料夾的「錯誤紀錄.log」
     window.__errors = [];
-    window.addEventListener("error", (e) => window.__errors.push(String(e.message) + " @ " + e.filename + ":" + e.lineno));
-    window.addEventListener("unhandledrejection", (e) => window.__errors.push("promise: " + String(e.reason && (e.reason.stack || e.reason))));
+    const report = (t) => { window.__errors.push(t); try { window.pywebview.api.log_js_error(t); } catch (_) {} };
+    window.addEventListener("error", (e) => report(String(e.message) + " @ " + e.filename + ":" + e.lineno));
+    window.addEventListener("unhandledrejection", (e) => {
+      const r = e.reason;
+      if (r && r.user) return;      // 帳務規則的提示（例如「此期間已結帳」）已經顯示給使用者，不是程式錯誤
+      report("promise: " + String(r && (r.stack || r)));
+    });
   </script>
   <script type="importmap">
     {"imports": {"preact": "./vendor/preact.module.js", "preact/hooks": "./vendor/hooks.module.js",

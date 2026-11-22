@@ -1,18 +1,26 @@
 # -*- mode: python ; coding: utf-8 -*-
-# v3 試作版打包：單一執行檔。畫面（v3/ui）打包在 exe 內；不含 Qt（介面由 Windows 內建的 Edge WebView2 顯示）。
-# 在專案根目錄執行：pyinstaller --noconfirm --clean v3/v3.spec（spec 內的路徑相對於 v3/）
+# 我的理財帳本 v3 打包：單一執行檔（發行時上傳為 MyLedger.exe）。畫面（v3/ui）打包在 exe 內；
+# 不含 Qt（介面由 Windows 內建的 Edge WebView2 顯示）。用 venv3 執行：
+#   cd v3 && ..\..\venv3\Scripts\pyinstaller.exe --noconfirm --clean v3.spec   → v3\dist\我的理財帳本.exe
 
 excluded = ["PySide6", "shiboken6", "tkinter", "unittest", "pydoc", "numpy", "PIL",
             "webview.platforms.qt", "webview.platforms.gtk", "webview.platforms.cocoa", "webview.platforms.android",
             "webview.platforms.cef"]
+
+hidden = ["openpyxl.cell._writer", "clr", "webview.platforms.edgechromium", "webview.platforms.winforms",
+          "v3", "v3.api", "v3.rpc", "v3.paths", "v3.webview2", "v3.screenshot", "v3.devshots",
+          "v3.api_accounts", "v3.api_dashboard", "v3.api_data", "v3.api_invest", "v3.api_journal", "v3.api_more",
+          "v3.api_reports", "v3.api_settings", "v3.api_txn", "v3.api_update",
+          "app.analytics", "app.backup", "app.database", "app.exporter", "app.fmt", "app.importer", "app.investments",
+          "app.journal_templates", "app.online", "app.performance", "app.printing", "app.sample_data", "app.search",
+          "app.statements", "app.undo", "app.updater", "app.version"]
 
 a = Analysis(
     ["run.py"],
     pathex=[".."],
     binaries=[],
     datas=[("ui", "v3/ui")],
-    hiddenimports=["openpyxl.cell._writer", "v3", "v3.api", "v3.paths", "webview.platforms.edgechromium",
-                   "webview.platforms.winforms", "clr"],
+    hiddenimports=hidden,
     hookspath=[],
     runtime_hooks=[],
     excludes=excluded,
@@ -26,7 +34,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="MyLedger_v3_trial",
+    name="我的理財帳本",
     debug=False,
     strip=False,
     upx=False,

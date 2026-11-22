@@ -1,4 +1,4 @@
-/* 我的理財帳本 v3 設計系統（試作）
+/* 我的理財帳本 v3 設計系統
    所有顏色、間距、圓角都是變數；深色模式只換變數，字型大小只換根字級（rem），版面自動重排。 */
 
 :root {
@@ -611,3 +611,6 @@ table.recon tbody tr { cursor: pointer; }
 .banner .btn { flex: none; }
 .field .fv > .row .select { width: auto; flex: 1; }
 .field .fv > .row.narrow .amount, .field .fv > .row .amount { flex: 1; }
+.nav, .brand b, .brand span { white-space: nowrap; }
+.brand > div:last-child { min-width: 0; overflow: hidden; }
+@media (max-width: 1250px) { .nav kbd { display: none; } .brand span { display: none; } .side { padding-left: .7rem; padding-right: .7rem; } }
