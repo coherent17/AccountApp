@@ -1398,3 +1398,103 @@ if __name__ == "__main__":
                 print("FAIL", k, e)
                 traceback.print_exc()
     print("FAILED" if failed else "ALL PASSED", failed)
+
+
+def _perf_ledger():
+    d = tempfile.mkdtemp()
+    db = Database(os.path.join(d, "t.db"))
+    bank = db.add_account("台銀活存", "asset", "銀行存款", opening_balance=500000, opening_date="2024-01-01")
+    st = db.add_account("短期投資", "asset", "短期投資", opening_date="2024-01-01")
+    inv = Investments(db)
+    sid = inv.add_security(st, "0050", "元大台灣50")
+    inv.add_event(sid, "buy", "2024-01-02", shares=1000, price=50, fee=71, cash_account_id=bank)
+    inv.add_event(sid, "cash_div", "2024-07-01", amount=2000, cash_account_id=bank)
+    inv.add_event(sid, "stock_div", "2024-08-01", shares=50)
+    inv.add_event(sid, "sell", "2025-01-02", shares=500, price=60, fee=42, tax=90, cash_account_id=bank)
+    inv.add_event(sid, "price", "2025-06-30", price=55)
+    return db, inv, bank, st, sid
+
+
+def test_xirr():
+    from app.performance import xirr
+    assert abs(xirr([("2023-01-01", -1000), ("2024-01-01", 1100)]) - 0.10) < 1e-6
+    assert abs(xirr([("2023-01-01", -1000), ("2025-01-01", 1210)]) - 0.10) < 1e-3
+    r = xirr([("2023-01-01", -1000), ("2023-07-01", -500), ("2024-03-01", 300), ("2025-01-01", 1400)])
+    t0 = _dt.date(2023, 1, 1)
+    npv = sum(a / (1 + r) ** ((_dt.date.fromisoformat(d) - t0).days / 365)
+              for d, a in [("2023-01-01", -1000), ("2023-07-01", -500), ("2024-03-01", 300), ("2025-01-01", 1400)])
+    assert abs(npv) < 1e-3, npv
+    assert xirr([("2023-01-01", -1000)]) is None and xirr([]) is None
+    assert xirr([("2023-01-01", -1000), ("2024-01-01", 500)]) < 0      # 虧損
+
+
+def test_investment_performance():
+    from app.performance import portfolio_performance, security_performance
+    db, inv, bank, st, sid = _perf_ledger()
+    sec = inv.get_security(sid)
+    p = security_performance(inv, sec, "2025-12-31")
+    stt = inv.replay(sid, "2025-12-31")
+    assert p["invested"] == 50071 and p["value"] == stt["market_value"]
+    assert p["returned"] == 2000 + 500 * 60 - 42 - 90
+    # 總損益＝已實現＋股利＋未實現
+    assert abs(p["gain"] - (p["realized"] + p["dividends"] + p["unrealized"])) < 0.01, p
+    assert abs(p["total_return"] - p["gain"] / 50071) < 1e-12
+    assert p["years"] > 1.9 and p["xirr"] is not None
+    from app.performance import xirr
+    assert abs(p["xirr"] - xirr(p["flows"] + [("2025-12-31", p["value"])])) < 1e-9
+    # 未滿一年不年化
+    q = security_performance(inv, sec, "2024-12-01")
+    assert q["xirr"] is None and q["total_return"] is not None and q["years"] < 1
+    # 投資組合（單一標的）與該標的一致
+    pp = portfolio_performance(inv, "2025-12-31")
+    assert abs(pp["total"]["gain"] - p["gain"]) < 0.01 and abs(pp["total"]["xirr"] - p["xirr"]) < 1e-9
+    # 計算績效不改變帳務
+    investment_accounts_match(db)
+    # 分錄買進（含手續費）：投入金額＝借記投資科目的金額
+    db2, inv2, *_ , sid2 = _her_ledger()
+    assert security_performance(inv2, inv2.get_security(sid2), "2025-12-31")["invested"] == 98139
+    # 範例資料：每個標的與合計都符合總損益恆等式
+    db3 = make()
+    pp = portfolio_performance(Investments(db3))
+    assert pp["rows"]
+    for r in pp["rows"] + [pp["total"]]:
+        assert abs(r["gain"] - (r["realized"] + r["dividends"] + r["unrealized"])) < 0.05, r
+
+
+def test_comparative_statements():
+    from app import statements as S
+    assert S.previous_period("2026-01-01", "2026-12-31") == ("2025-01-01", "2025-12-31")
+    assert S.previous_period("2026-03-01", "2026-03-31") == ("2026-02-01", "2026-02-28")
+    assert S.previous_period("2026-01-01", "2026-03-31") == ("2025-10-01", "2025-12-31")
+    assert S.previous_period("2026-03-05", "2026-03-14") == ("2026-02-23", "2026-03-04")
+    assert S.shift_year("2024-02-29") == "2023-02-28"
+    assert S.compare_date("prior_period", "2026-01-01", "2026-06-30") == "2025-12-31"
+    assert S.compare_date("prior_year", "2026-01-01", "2026-06-30") == "2025-06-30"
+    assert S.compare_range("none", "2026-01-01", "2026-06-30") is None
+    db = make()
+    lo, hi = db.date_range()
+    mid = "2026-06-30"
+    b = S.balance_sheet(db, hi, mid)
+    rows = {r["name"]: r for r in b["rows"]}
+    cur, prev = db.balance_sheet(hi), db.balance_sheet(mid)
+    assert rows["資產總計"]["cur"] == cur["assets"] and rows["資產總計"]["prev"] == prev["assets"]
+    assert rows["淨資產（業主權益）"]["prev"] == prev["net"]
+    # 各科目加總等於合計（本期與比較期）
+    for g in ("流動資產", "非流動資產", "流動負債", "非流動負債"):
+        names = [a for a in b["rows"]]
+        i = next(k for k, r in enumerate(names) if r["name"] == g)
+        j = next(k for k, r in enumerate(names) if r["name"] == f"{g}合計")
+        for key in ("cur", "prev"):
+            assert abs(sum(r[key] for r in names[i + 1:j]) - names[j][key]) < 0.05, (g, key)
+    i = S.income_statement(db, "2026-07-01", hi, S.compare_range("prior_period", "2026-07-01", hi))
+    s, p = i["is"], i["prev"]
+    last = i["rows"][-1]
+    assert last["cur"] == s["comprehensive"] and last["prev"] == p["comprehensive"]
+    inc = [r for r in i["rows"] if r["kind"] == "income" and not r["style"]]
+    assert abs(sum(r["cur"] for r in inc) - s["total_income"]) < 0.05
+    assert abs(sum(r["prev"] for r in inc) - p["total_income"]) < 0.05
+    assert S.change(110, 100) == (10, 0.1) and S.change(5, 0) == (5, None)
+    r = {x["name"]: x for x in S.ratios(db, "2026-01-01", hi, ("2025-01-01", "2025-12-31"))}
+    assert abs(r["負債比率"]["cur"] - cur["liabilities"] / cur["assets"]) < 1e-12
+    assert S.fmt_ratio_change(0.25, 0.2, "pct") == "+5.0 個百分點"
+    assert S.fmt_ratio(None, "pct", "未滿一年") == "未滿一年"

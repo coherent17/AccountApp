@@ -15,7 +15,7 @@ import ssl
 import urllib.error
 import urllib.request
 
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 
 FX_API = "https://open.er-api.com/v6/latest/USD"
 FX_SOURCE = "ExchangeRate-API 國際市場參考匯率（中價，與銀行牌告可能略有差異）"
@@ -190,17 +190,40 @@ class _Worker(QObject):
             self.failed.emit(f"更新失敗：{e}")
 
 
+class _Relay(QObject):
+    """在主執行緒（畫面）上執行完成／失敗的處理。
+
+    背景執行緒的訊號直接連到一般 Python 函式時，函式可能在背景執行緒執行，
+    而資料庫與視窗只能在主執行緒使用（v2.8.0 自動檢查新版本會因此出錯）。
+    連到這個住在主執行緒的物件，Qt 會以佇列方式交回主執行緒。"""
+
+    def __init__(self, on_done, on_fail, parent):
+        super().__init__(parent)
+        self._done, self._fail = on_done, on_fail
+
+    @Slot(object)
+    def done(self, result) -> None:
+        self.deleteLater()
+        self._done(result)
+
+    @Slot(str)
+    def failed(self, text: str) -> None:
+        self.deleteLater()
+        self._fail(text)
+
+
 def run_background(owner: QObject, fn, on_done, on_fail) -> None:
-    """在背景執行網路下載，避免畫面停頓。"""
+    """在背景執行網路下載，避免畫面停頓；on_done／on_fail 一律在主執行緒執行。"""
     thread = QThread(owner)
     worker = _Worker(fn)
     worker.moveToThread(thread)
+    relay = _Relay(on_done, on_fail, owner)
     thread.started.connect(worker.run)
-    worker.done.connect(on_done)
-    worker.failed.connect(on_fail)
+    worker.done.connect(relay.done, Qt.ConnectionType.QueuedConnection)
+    worker.failed.connect(relay.failed, Qt.ConnectionType.QueuedConnection)
     for sig in (worker.done, worker.failed):
         sig.connect(thread.quit)
     thread.finished.connect(worker.deleteLater)
     thread.finished.connect(thread.deleteLater)
-    owner._online_jobs = getattr(owner, "_online_jobs", []) + [(thread, worker)]
+    owner._online_jobs = getattr(owner, "_online_jobs", []) + [(thread, worker, relay)]
     thread.start()

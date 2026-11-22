@@ -602,8 +602,8 @@ def open_tab(name: str, text: str, sec: float = 2.4) -> None:
 
 open_tab("資產負債表", "資產負債表：流動／非流動資產與負債，並附財務比率")
 rec.scroll(rp.bs, rp.bs.verticalScrollBar().maximum(), 2.0)
-open_tab("收支損益表", "收支損益表：可勾選「與去年同期比較」", 0.8)
-rp.compare.setChecked(True)
+open_tab("收支損益表", "收支損益表：可選擇「與去年同期比較」", 0.8)
+rp.is_cmp.setCurrentIndex(rp.is_cmp.findData("prior_year"))
 rec.hold(1.6)
 open_tab("現金流量表", "現金流量表：生活、投資、籌資活動，期初加淨增減等於期末")
 rec.scroll(rp.cf, rp.cf.verticalScrollBar().maximum(), 2.0)

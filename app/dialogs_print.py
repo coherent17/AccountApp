@@ -5,11 +5,12 @@ from __future__ import annotations
 import os
 
 from PySide6.QtPrintSupport import QPrintDialog, QPrinter, QPrintPreviewDialog
-from PySide6.QtWidgets import QCheckBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel
+from PySide6.QtWidgets import QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel
 
 from .context import AppContext
 from .dialogs import BaseDialog, open_path
 from .printing import REPORTS, Report, print_html, save_pdf, setup_printer
+from .statements import COMPARE_MODES
 from .theme import fmt_date, icon
 from .widgets import button, section_title
 
@@ -49,6 +50,15 @@ class PrintDialog(BaseDialog):
             grid.addWidget(cb, i // 2, i % 2)
             self.boxes[key] = cb
         self.root.addLayout(grid)
+        cr = QHBoxLayout()
+        cr.addWidget(QLabel("資產負債表、收支損益表與財務比率"))
+        self.compare = QComboBox()
+        for k, label in COMPARE_MODES:
+            self.compare.addItem(label, k)
+        self.compare.setCurrentIndex(max(0, self.compare.findData(ctx.db.get_setting("print_compare", "none"))))
+        cr.addWidget(self.compare)
+        cr.addStretch()
+        self.root.addLayout(cr)
         self.landscape = QCheckBox("橫向列印（試算表、總分類帳欄位較多時建議使用）")
         self.root.addWidget(self.landscape)
         hint = QLabel("每份報表從新的一頁開始，表頭在每頁重複，頁尾有頁碼。傳票含核准、會計、覆核、製單簽章欄。")
@@ -76,7 +86,9 @@ class PrintDialog(BaseDialog):
         if not keys:
             self.show_error("請至少勾選一份報表")
             return None
-        return Report(self.ctx.db).build(keys, self.start, self.end)
+        mode = self.compare.currentData()
+        self.ctx.db.set_setting("print_compare", mode)
+        return Report(self.ctx.db).build(keys, self.start, self.end, mode)
 
     def do_preview(self) -> None:
         html = self.html()

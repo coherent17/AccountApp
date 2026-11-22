@@ -565,7 +565,7 @@ class PriceDialog(BaseDialog):
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(48)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        for i, w in ((0, 90), (2, 120), (3, 130), (4, 170)):
+        for i, w in ((0, 90), (2, 120), (3, 150), (4, 170)):
             self.table.setColumnWidth(i, w)
         self.load()
         self.table.setMinimumHeight(min(10, max(3, len(self.holdings))) * 48 + 50)

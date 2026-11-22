@@ -99,7 +99,7 @@ class SettingsPage(Page):
                 cols.insert(2, Column("每月預算", lambda r: fmt_money(r["budget"], ctx.base)
                                       if r["budget"] else "—", align="right", width=130))
             cols.insert(len(cols) - 1, Column("稅務歸類", lambda r: TAX_TAGS.get(r["tax_tag"], "")
-                                              if r["tax_tag"] else "—", width=170,
+                                              if r["tax_tag"] else "—", stretch=True, elide=True,
                                               color=lambda r: C.adjust if r["tax_tag"] else C.faint))
             t = DataTable(cols, sortable=False)
             t.setMinimumHeight(420)
@@ -246,7 +246,7 @@ class SettingsPage(Page):
         self.online.setChecked(db.get_setting("online_updates", "0") == "1")
         self.online.blockSignals(False)
         self.update_auto.blockSignals(True)
-        self.update_auto.setChecked(db.get_setting("update_auto", "0") == "1")
+        self.update_auto.setChecked(db.get_setting("update_auto", "1") == "1")
         self.update_auto.blockSignals(False)
         self.anim_switch.blockSignals(True)
         self.anim_switch.setChecked(db.get_setting("animations", "1") == "1")

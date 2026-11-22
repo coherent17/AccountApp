@@ -40,8 +40,8 @@ class MainWindow(QMainWindow):
         self.ctx = ctx
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(app_icon())
-        self.resize(1380, 900)
         self.setMinimumSize(1100, 700)
+        self._initial_geometry()
 
         root = QWidget()
         lay = QHBoxLayout(root)
@@ -91,17 +91,12 @@ class MainWindow(QMainWindow):
             self.pages[key] = page
             self.stack.addWidget(page)
         sl.addStretch()
-        find = QPushButton("  搜尋　Ctrl+F")
-        find.setObjectName("NavButton")
-        find.setIcon(icon("search", "#C3CDE2"))
-        find.setIconSize(find.iconSize() * 1.3)
-        find.setCursor(Qt.CursorShape.PointingHandCursor)
+        find = _shortcut_button("搜尋", "Ctrl+F", "search")
         find.setToolTip("一次搜尋傳票、會計科目、投資標的與定期交易（摘要、金額、傳票號碼、代號、日期…）")
         find.clicked.connect(self.open_search)
         sl.addWidget(find)
-        quick = QPushButton("＋ 記一筆　Ctrl+N")
-        quick.setObjectName("NavButton")
-        quick.setCursor(Qt.CursorShape.PointingHandCursor)
+        quick = _shortcut_button("記一筆", "Ctrl+N", "plus")
+        quick.setToolTip("新增一筆收入、支出或轉帳")
         quick.clicked.connect(self.quick_add)
         sl.addWidget(quick)
         sl.addSpacing(6)
@@ -136,6 +131,33 @@ class MainWindow(QMainWindow):
         for i, (key, *_rest) in enumerate(NAV, 1):
             QShortcut(QKeySequence(f"Ctrl+{i}"), self, activated=lambda k=key: self.go(k))
         self.go("dashboard", animate=False)
+
+    def _initial_geometry(self) -> None:
+        """開啟時恢復上次的視窗大小與位置；第一次開啟時依螢幕大小放大（約螢幕的九成）。"""
+        from PySide6.QtCore import QByteArray
+        saved = self.ctx.db.get_setting("window_geometry", "")
+        if saved:
+            try:
+                if self.restoreGeometry(QByteArray.fromBase64(saved.encode("ascii"))):
+                    return
+            except Exception:  # noqa: BLE001
+                pass
+        self.resize(1380, 900)
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        area = screen.availableGeometry()
+        w = max(self.minimumWidth(), min(int(area.width() * 0.92), 1800))
+        h = max(self.minimumHeight(), min(int(area.height() * 0.92), 1100))
+        w, h = min(w, area.width()), min(h, area.height())
+        self.resize(w, h)
+        self.move(area.left() + (area.width() - w) // 2, area.top() + max(0, (area.height() - h) // 3))
+
+    def save_geometry(self) -> None:
+        try:
+            self.ctx.db.set_setting("window_geometry", bytes(self.saveGeometry().toBase64()).decode("ascii"))
+        except Exception:  # noqa: BLE001
+            pass
 
     def go(self, key: str, animate: bool = True) -> None:
         btn = self.nav_buttons[key]
@@ -172,8 +194,8 @@ class MainWindow(QMainWindow):
 
     def _net_changed(self, online: bool) -> None:
         """連上網路時，若今天還沒自動檢查新版本（且已開啟），就在背景檢查一次。"""
-        if not online:
-            return
+        if not online or os.environ.get("MY_LEDGER_SMOKE_DIR"):
+            return      # 自動測試模式不檢查新版本（避免跳出視窗中斷截圖）
         from .dialogs_update import auto_check_due, check_for_updates
         if auto_check_due(self.ctx):
             check_for_updates(self.ctx, self, silent=True)
@@ -192,8 +214,49 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e):
         self.net.stop()
+        if not os.environ.get("MY_LEDGER_SMOKE_DIR"):
+            self.save_geometry()
         self.ctx.db.close()
         super().closeEvent(e)
+
+
+def _shortcut_button(text: str, keys: str, ic: str) -> QPushButton:
+    """側邊欄按鈕：左邊圖示與名稱，右邊以較小的字顯示快速鍵（字型放大時也不會被截斷）。"""
+    btn = QPushButton()
+    btn.setObjectName("NavButton")
+    btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    btn.setAccessibleName(f"{text} {keys}")
+    row = QHBoxLayout(btn)
+    row.setContentsMargins(18, 12, 14, 12)
+    row.setSpacing(10)
+    pic = QLabel()
+    pic.setPixmap(icon(ic, "#C3CDE2").pixmap(22, 22))
+    pic.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+    name = QLabel(text)
+    name.setObjectName("NavText")
+    name.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+    key = QLabel(keys)
+    key.setObjectName("NavKey")
+    key.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+    row.addWidget(pic)
+    row.addWidget(name)
+    row.addStretch()
+    row.addWidget(key)
+    return btn
+
+
+def refit_layouts() -> None:
+    """字型大小改變後，重新計算表格欄寬與分頁標籤（避免沿用舊字型的寬度而截斷文字）。"""
+    from .pages.reports import StatementTree
+    from .widgets import DataTable, FitTabWidget
+    for w in QApplication.allWidgets():
+        if isinstance(w, DataTable):
+            w.fit_columns()
+            w.viewport().update()
+        elif isinstance(w, StatementTree):
+            w.fit()
+        elif isinstance(w, FitTabWidget):
+            w._fit()
 
 
 def apply_theme(app: QApplication, ctx: AppContext) -> None:
@@ -203,6 +266,7 @@ def apply_theme(app: QApplication, ctx: AppContext) -> None:
     f.setPointSizeF(pt)
     app.setFont(f)
     app.setStyleSheet(stylesheet(pt, arrow_file()))
+    QTimer.singleShot(0, refit_layouts)
     from . import animations
     animations.set_enabled(ctx.db.get_setting("animations", "1") == "1")
 

@@ -1,6 +1,6 @@
 """檢查新版本與一鍵更新。
 
-* 「設定 → 版本更新」可手動檢查；也可勾選「開啟程式時自動檢查」（預設關閉，一天最多檢查一次）。
+* 「設定 → 版本更新」可手動檢查；也可勾選「開啟程式時自動檢查」（v2.9.0 起預設開啟，一天最多檢查一次；可在設定關閉）。
 * 只向 GitHub 查詢公開的版本資訊並下載新版程式，不會上傳任何資料。
 * 立即更新（僅限打包好的 exe）：下載到程式所在資料夾並核對 SHA-256 → 備份帳本 →
   將目前的 exe 改名為 .old → 新檔換上原本的檔名 → 重新開啟。舊檔在下次啟動時刪除。
@@ -257,5 +257,5 @@ def check_for_updates(ctx: AppContext, parent, silent: bool = False) -> None:
 
 def auto_check_due(ctx: AppContext) -> bool:
     db = ctx.db
-    return db.get_setting("update_auto", "0") == "1" and \
+    return db.get_setting("update_auto", "1") == "1" and \
         db.get_setting("update_last_check", "") != dt.date.today().isoformat()

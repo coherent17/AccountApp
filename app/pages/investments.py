@@ -2,22 +2,34 @@ from __future__ import annotations
 
 import datetime as dt
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QMenu, QTabWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QMenu, QVBoxLayout, QWidget
 
 from ..charts import DonutChart
 from ..database import INVESTMENT_CATEGORIES, fmt_shares
 from ..dialogs_invest import PriceDialog, SecurityDialog, SecurityListDialog, TradeDialog
 from ..investments import KIND_LABELS, Investments
 from ..theme import C, fmt_date, fmt_money, fmt_num, icon
-from ..widgets import (PERIOD_PRESETS, Card, Column, DataTable, StatCard, ask, button, error, info, iso,
+from ..widgets import (PERIOD_PRESETS, Card, Column, DataTable, FitTabWidget, ResponsiveRow, StatCard, ask,
+                       button, error, info, iso,
                        make_date_edit, page_header, preset_range, qdate, section_title)
 from .base import Page
 
 
 def _pct(v):
     return "—" if v is None else f"{v:+.2%}"
+
+
+def _held(years: float) -> str:
+    months = int(years * 12)
+    return f"{months} 個月" if months < 12 else f"{years:.1f} 年"
+
+
+def _xirr_text(r: dict) -> str:
+    if r["xirr"] is not None:
+        return f"{r['xirr']:+.2%}"
+    return "未滿一年" if 0 < r.get("years", 0) < 1 else "—"
 
 
 class PeriodBar(QWidget):
@@ -125,8 +137,7 @@ class InvestmentsPage(Page):
             cards.addWidget(c)
         b.addLayout(cards)
 
-        self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(True)
+        self.tabs = FitTabWidget()
         b.addWidget(self.tabs, 1)
 
         w = QWidget()
@@ -183,26 +194,23 @@ class InvestmentsPage(Page):
         cc.lay.addWidget(self.donut)
         cc.setMaximumHeight(230)
         lay.addWidget(cc, 1)
+        self.donut_card = cc
+        self.hold_tab = w
         self.tabs.addTab(w, "持股明細")
 
         w = QWidget()
         lay = QVBoxLayout(w)
         lay.setContentsMargins(0, 12, 0, 0)
-        top = QHBoxLayout()
-        top.addWidget(QLabel("標的"))
         self.ev_filter = QComboBox()
         self.ev_filter.setMinimumWidth(240)
         self.ev_filter.currentIndexChanged.connect(self.load_events)
-        top.addWidget(self.ev_filter)
-        top.addSpacing(16)
         self.ev_period = PeriodBar("全部", self._data_range)
         self.ev_period.changed.connect(self.load_events)
-        top.addWidget(self.ev_period)
-        top.addStretch()
         delete = button("刪除選取交易", "Danger", icon("trash", C.expense))
         delete.clicked.connect(self.delete_event)
-        top.addWidget(delete)
-        lay.addLayout(top)
+        # 視窗較窄時期間與刪除按鈕換到第二列
+        lay.addWidget(ResponsiveRow([QLabel("標的"), self.ev_filter, 6], [self.ev_period], spacing=10,
+                                    wrap_left=True, tail=[delete]))
         self.ev = DataTable([
             Column("日期", lambda r: fmt_date(r["date"]), width=118),
             Column("標的", lambda r: f"{r['code']} {r['sec_name']}".strip(), width=170),
@@ -235,15 +243,13 @@ class InvestmentsPage(Page):
         w = QWidget()
         lay = QVBoxLayout(w)
         lay.setContentsMargins(0, 12, 0, 0)
-        top = QHBoxLayout()
         self.real_period = PeriodBar("今年", self._data_range, "賣出期間")
         self.real_period.changed.connect(self.load_realized)
-        top.addWidget(self.real_period)
-        top.addStretch()
         self.real_sum = QLabel()
         self.real_sum.setStyleSheet("font-weight:700;")
-        top.addWidget(self.real_sum)
-        lay.addLayout(top)
+        self.real_sum.setWordWrap(True)
+        lay.addWidget(self.real_period, 0, Qt.AlignmentFlag.AlignLeft)
+        lay.addWidget(self.real_sum)
         self.real = DataTable([
             Column("賣出日期", lambda r: fmt_date(r["date"]), width=118),
             Column("標的", lambda r: f"{r['code']} {r['name']}".strip(), stretch=True),
@@ -255,6 +261,59 @@ class InvestmentsPage(Page):
         ], sortable=False)
         lay.addWidget(self.real, 1)
         self.tabs.addTab(w, "已實現損益")
+
+        # 報酬分析：每個標的（含已賣出）的總報酬率與年化報酬率（XIRR）
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 12, 0, 0)
+        top = QHBoxLayout()
+        top.addWidget(QLabel("計算至"))
+        self.perf_date = make_date_edit()
+        self.perf_date.dateChanged.connect(lambda *_: self.load_performance())
+        top.addWidget(self.perf_date)
+        today = button("今天")
+        today.clicked.connect(lambda: self.perf_date.setDate(qdate(dt.date.today().isoformat())))
+        top.addWidget(today)
+        top.addStretch()
+        lay.addLayout(top)
+        self.perf_sum = QLabel()
+        self.perf_sum.setWordWrap(True)
+        self.perf_sum.setStyleSheet("font-weight:700;")
+        lay.addWidget(self.perf_sum)
+
+        def money(key):
+            return lambda r: fmt_num(r[key] * r.get("rate", 1), base)
+
+        def signed_color(key):
+            return lambda r: C.income if r[key] >= 0 else C.expense
+
+        self.perf = DataTable([
+            Column("代號", lambda r: r["code"], align="center", width=80, bold=True),
+            Column("名稱", lambda r: r["name"], stretch=True, bold=True),
+            Column("投入金額", money("invested"), align="right", sort=lambda r: r["invested"]),
+            Column("帳面價值", money("value"), align="right", sort=lambda r: r["value"]),
+            Column("已實現損益", money("realized"), align="right", color=signed_color("realized")),
+            Column("股利", money("dividends"), align="right", color=lambda r: C.gold),
+            Column("未實現損益", money("unrealized"), align="right", color=signed_color("unrealized")),
+            Column("總損益", money("gain"), align="right", bold=True, color=signed_color("gain")),
+            Column("總報酬率", lambda r: _pct(r["total_return"]), align="right",
+                   sort=lambda r: r["total_return"] or 0,
+                   color=lambda r: C.income if (r["total_return"] or 0) >= 0 else C.expense),
+            Column("年化報酬率", _xirr_text, align="right",
+                   sort=lambda r: r["xirr"] if r["xirr"] is not None else -9,
+                   color=lambda r: None if r["xirr"] is None else (C.income if r["xirr"] >= 0 else C.expense)),
+        ])
+        self.perf.rowActivated.connect(lambda r: r.get("id") and self.show_events(r["id"]))
+        lay.addWidget(self.perf, 1)
+        hint = QLabel("總損益＝已實現損益＋股利（扣除補充保費）＋未實現損益；總報酬率＝總損益 ÷ 投入金額（買進成本含手續費）。"
+                      "年化報酬率以 XIRR（內部報酬率）計算，考慮每筆買進、賣出與股利的日期，"
+                      "相當於「這筆錢每年平均賺幾 %」，可以和定存利率比較；持有未滿一年不換算年化，避免短期漲跌被放大。"
+                      "帳面價值以最近一次市價評價計算，評價越新越準確。按兩下可查看該標的的交易紀錄。")
+        hint.setObjectName("Hint")
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+        self.tabs.addTab(w, "報酬分析")
+        self._perf_date_set = False
         self.tabs.currentChanged.connect(lambda _: self.refresh())
 
     # ------------------------------------------------------------------
@@ -306,6 +365,46 @@ class InvestmentsPage(Page):
         self.ev_filter.blockSignals(False)
         self.load_events()
         self.load_realized()
+        if self.tabs.currentIndex() == 3:
+            self.load_performance()
+
+    def load_performance(self) -> None:
+        from ..performance import portfolio_performance
+        if not self._perf_date_set:
+            self._perf_date_set = True
+            self.perf_date.blockSignals(True)
+            self.perf_date.setDate(qdate(max(dt.date.today().isoformat(), self._data_range()[1])))
+            self.perf_date.blockSignals(False)
+        base = self.ctx.base
+        p = portfolio_performance(self.inv, iso(self.perf_date.date()))
+        t = p["total"]
+        rows = sorted(p["rows"], key=lambda r: (r["shares"] <= 1e-9, r["code"]))
+        if rows:
+            rows.append({"id": None, "code": "", "name": "投資組合合計", "rate": 1, "_bold": True, "_bg": "#E4ECF9",
+                         **{k: t[k] for k in ("invested", "value", "realized", "dividends", "unrealized", "gain",
+                                              "total_return", "xirr", "years")}})
+        self.perf.set_rows(rows)
+        if not rows:
+            self.perf_sum.setText("尚無投資交易。")
+            return
+        since = fmt_date(t["first_date"]) if t["first_date"] else ""
+        ann = (f"年化報酬率（XIRR）{_pct(t['xirr'])}" if t["xirr"] is not None else
+               f"持有 {_held(t['years'])}，未滿一年不計算年化報酬率")
+        self.perf_sum.setText(f"自 {since} 開始投資：投入 {fmt_money(t['invested'], base)}，"
+                              f"總損益 {fmt_money(t['gain'], base, signed=True)}，"
+                              f"總報酬率 {_pct(t['total_return'])}　｜　{ann}")
+        self.perf_sum.setStyleSheet(f"font-weight:700; color:{C.income if t['gain'] >= 0 else C.expense};")
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        QTimer.singleShot(0, self._fit_donut)
+
+    def _fit_donut(self) -> None:
+        """視窗較矮時收起持股比重圖，讓持股明細完整顯示（避免表格與圖表重疊）。"""
+        if not hasattr(self, "donut_card"):
+            return
+        need = self.hold.minimumHeight() + 230 + 110
+        self.donut_card.setVisible(self.tabs.height() - self.tabs.tabBar().height() >= need)
 
     def load_events(self) -> None:
         a, b = self.ev_period.range()

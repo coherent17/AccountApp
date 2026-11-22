@@ -11,6 +11,7 @@ from html import escape
 from PySide6.QtGui import QFont, QPageLayout, QPageSize, QTextDocument
 from PySide6.QtPrintSupport import QPrinter
 
+from . import statements as st
 from .database import CURRENCIES, TYPE_LABELS, Database, voucher_no
 from .theme import FONT_FAMILY, fmt_date, fmt_num
 
@@ -23,6 +24,7 @@ REPORTS = [
     ("bs", "資產負債表"),
     ("is", "收支損益表"),
     ("equity", "權益變動表"),
+    ("ratios", "財務比率分析"),
 ]
 
 _CSS = """
@@ -41,6 +43,10 @@ table.t td { padding: 3px 4px; border: 1px solid #CBD5E1; font-size: 9pt; }
 .sec td { font-weight: bold; background: #F1F5F9; }
 .void { color: #C62828; font-size: 14pt; font-weight: bold; }
 """
+
+
+def _pct(v: float | None, blank: str = "") -> str:
+    return blank if v is None else f"{v:.1%}"
 
 
 def _n(v: float, base: str, blank_zero: bool = True) -> str:
@@ -192,49 +198,91 @@ class Report:
                 + self._table(heads, rows, [6, 18, 6, 11, 11, 12, 12, 12, 12])
                 + '<p class="sub">期初餘額＋本期借貸發生額＝期末餘額；損益科目只有本期發生額。</p>')
 
-    def bs(self, start: str, end: str, first: bool = True) -> str:
-        b = self.db.balance_sheet(end)
-        total = b["assets"] or 1
+    def bs(self, start: str, end: str, first: bool = True, compare: str = "none") -> str:
+        cdate = st.compare_date(compare, start, end)
+        data = st.balance_sheet(self.db, end, cdate)
+        cmp = cdate is not None
         rows = []
+        for r in data["rows"]:
+            if r["style"] == "blank":
+                continue
+            if r["cur"] is None:
+                rows.append(self._tr([(escape(r["name"]), "b")] + [("", "")] * (5 if cmp else 2), "sec"))
+                continue
+            indent = "　" if r["level"] >= 2 else ""
+            cells = [(indent + escape(r["name"]), "b" if r["style"] else ""), (fmt_num(r["cur"], self.base), "r"),
+                     (_pct(r["share"]), "r")]
+            if cmp:
+                d, dp = st.change(r["cur"], r["prev"])
+                cells += [(fmt_num(r["prev"], self.base), "r"), (fmt_num(d, self.base, signed=True), "r"),
+                          (_pct(dp, "—"), "r")]
+            rows.append(self._tr(cells, "tot" if r["style"] in ("total", "grand") else ""))
+        if cmp:
+            heads = [("會計科目", ""), (fmt_date(end), ""), ("占總資產", ""), (fmt_date(cdate), ""),
+                     ("增減金額", ""), ("增減 %", "")]
+            widths = [36, 15, 9, 15, 15, 10]
+            period = f"基準日：{fmt_date(end)}　比較日：{fmt_date(cdate)}"
+        else:
+            heads, widths, period = [("會計科目", ""), ("金額", ""), ("占總資產", "")], [60, 25, 15], \
+                f"基準日：{fmt_date(end)}"
+        title = "比較資產負債表" if cmp else "資產負債表"
+        return self._head(title, period, first) + self._table(heads, rows, widths)
 
-        def group(name: str, sign: int):
-            rows.append(self._tr([(name, "b"), ("", ""), ("", "")], "sec"))
-            for a in sorted(b["groups"][name], key=lambda a: a["code"]):
-                v = a["base_value"] * sign
-                rows.append(self._tr([(f'　{a["code"]}　{escape(a["name"])}', ""), (fmt_num(v, self.base), "r"),
-                                      (f"{v / total:.1%}", "r")]))
-            v = b["totals"][name]
-            rows.append(self._tr([(f"{name}合計", "b"), (fmt_num(v, self.base), "r"), (f"{v / total:.1%}", "r")]))
-
-        group("流動資產", 1)
-        group("非流動資產", 1)
-        rows.append(self._tr([("資產總計", "b"), (fmt_num(b["assets"], self.base), "r"), ("100.0%", "r")], "tot"))
-        group("流動負債", -1)
-        group("非流動負債", -1)
-        rows.append(self._tr([("負債總計", "b"), (fmt_num(b["liabilities"], self.base), "r"),
-                              (f'{b["liabilities"] / total:.1%}', "r")], "tot"))
-        rows.append(self._tr([("淨資產（業主權益）", "b"), (fmt_num(b["net"], self.base), "r"),
-                              (f'{b["net"] / total:.1%}', "r")], "tot"))
-        return (self._head("資產負債表", f"基準日：{fmt_date(end)}", first)
-                + self._table([("會計科目", ""), ("金額", ""), ("占總資產", "")], rows, [60, 25, 15]))
-
-    def income(self, start: str, end: str, first: bool = True) -> str:
-        s = self.db.income_statement(start, end)
-        ccodes = self.db.category_codes()
+    def income(self, start: str, end: str, first: bool = True, compare: str = "none") -> str:
+        crange = st.compare_range(compare, start, end)
+        data = st.income_statement(self.db, start, end, crange)
+        cmp = crange is not None
         rows = []
-        for title, items, key in (("收入", s["income"], "total_income"), ("支出（費用）", s["expense"], "total_expense")):
-            rows.append(self._tr([(title, "b"), ("", "")], "sec"))
-            for c in sorted(items, key=lambda c: ccodes[c["id"]]):
-                rows.append(self._tr([(f'　{ccodes[c["id"]]}　{escape(c["name"])}', ""),
-                                      (fmt_num(c["total"], self.base), "r")]))
-            rows.append(self._tr([(f"{title}合計", "b"), (fmt_num(s[key], self.base), "r")]))
-        rows.append(self._tr([("本期收支結餘", "b"), (fmt_num(s["operating"], self.base), "r")], "tot"))
-        rows.append(self._tr([("業外損益", "b"), ("", "")], "sec"))
-        for name, key in (("未實現評價損益", "adjust"), ("處分投資損益", "realized"), ("兌換損益", "fx")):
-            rows.append(self._tr([(f"　{name}", ""), (fmt_num(s[key], self.base), "r")]))
-        rows.append(self._tr([("本期綜合損益", "b"), (fmt_num(s["comprehensive"], self.base), "r")], "tot"))
-        return (self._head("收支損益表", f"期間：{fmt_date(start)} 至 {fmt_date(end)}", first)
-                + self._table([("會計科目", ""), ("金額", "")], rows, [70, 30]))
+        items: list[dict] = []
+        block: list[dict] = []
+        for r in data["rows"]:      # 列印時各類科目依代號排序（畫面上依金額排序）
+            if r["code"] and not r["style"]:
+                block.append(r)
+                continue
+            items += sorted(block, key=lambda x: x["code"])
+            block = []
+            items.append(r)
+        items += sorted(block, key=lambda x: x["code"])
+        for r in items:
+            if r["style"] == "section":
+                rows.append(self._tr([(escape(r["name"]), "b")] + [("", "")] * (4 if cmp else 1), "sec"))
+                continue
+            name = (f'　{r["code"]}　' if r["code"] else "") + escape(r["name"])
+            cells = [(name, "b" if r["style"] else ""), (fmt_num(r["cur"], self.base), "r")]
+            if cmp:
+                d, dp = st.change(r["cur"], r["prev"])
+                cells += [(fmt_num(r["prev"], self.base), "r"), (fmt_num(d, self.base, signed=True), "r"),
+                          (_pct(dp, "—"), "r")]
+            rows.append(self._tr(cells, "tot" if r["style"] in ("total", "grand") else ""))
+        period = f"期間：{fmt_date(start)} 至 {fmt_date(end)}"
+        if cmp:
+            period += f"　比較：{fmt_date(crange[0])} 至 {fmt_date(crange[1])}"
+            heads = [("會計科目", ""), ("本期", ""), ("比較期間", ""), ("增減金額", ""), ("增減 %", "")]
+            widths = [40, 16, 16, 16, 12]
+        else:
+            heads, widths = [("會計科目", ""), ("金額", "")], [70, 30]
+        return self._head("比較收支損益表" if cmp else "收支損益表", period, first) + self._table(heads, rows, widths)
+
+    def ratios(self, start: str, end: str, first: bool = True, compare: str = "none") -> str:
+        crange = st.compare_range(compare, start, end)
+        cmp = crange is not None
+        rows = []
+        for r in st.ratios(self.db, start, end, crange):
+            cells = [(escape(r["name"]), "b"), (st.fmt_ratio(r["cur"], r["kind"], r["note"]), "r")]
+            if cmp:
+                cells += [(st.fmt_ratio(r["prev"], r["kind"]), "r"),
+                          (st.fmt_ratio_change(r["cur"], r["prev"], r["kind"]), "r")]
+            cells.append((escape(r["help"]), ""))
+            rows.append(self._tr(cells))
+        if cmp:
+            heads = [("比率", ""), ("本期", ""), ("比較期", ""), ("增減", ""), ("說明", "")]
+            widths = [20, 12, 12, 14, 42]
+            period = (f"基準日：{fmt_date(end)}　比較：{fmt_date(crange[1])}"
+                      f"（期間比率以 {fmt_date(start)} 至 {fmt_date(end)} 計算）")
+        else:
+            heads, widths = [("比率", ""), ("數值", ""), ("說明", "")], [24, 16, 60]
+            period = f"基準日：{fmt_date(end)}（期間比率以 {fmt_date(start)} 至 {fmt_date(end)} 計算）"
+        return self._head("財務比率分析", period, first) + self._table(heads, rows, widths)
 
     def equity(self, start: str, end: str, first: bool = True) -> str:
         e = self.db.equity_statement(start, end)
@@ -249,10 +297,12 @@ class Report:
     def build_voucher(self, txn_id: int) -> str:
         return f"<html><head><style>{_CSS}</style></head><body>{self.voucher(txn_id)}</body></html>"
 
-    def build(self, keys: list[str], start: str, end: str) -> str:
+    def build(self, keys: list[str], start: str, end: str, compare: str = "none") -> str:
+        """compare：資產負債表、收支損益表、財務比率的比較方式（statements.COMPARE_MODES）。"""
         fns = {"vouchers": self.vouchers, "journal": self.journal, "ledger": self.ledger, "trial": self.trial,
-               "bs": self.bs, "is": self.income, "equity": self.equity}
-        body = "".join(fns[k](start, end, n == 0) for n, k in enumerate(keys))
+               "bs": self.bs, "is": self.income, "equity": self.equity, "ratios": self.ratios}
+        body = "".join(fns[k](start, end, n == 0, compare) if k in ("bs", "is", "ratios")
+                       else fns[k](start, end, n == 0) for n, k in enumerate(keys))
         return f"<html><head><style>{_CSS}</style></head><body>{body}</body></html>"
 
 

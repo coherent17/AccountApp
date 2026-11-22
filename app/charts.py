@@ -6,6 +6,7 @@ from PySide6.QtCharts import (QBarCategoryAxis, QBarSeries, QBarSet, QChart, QCh
                               QLineSeries, QPieSeries, QScatterSeries, QValueAxis)
 from PySide6.QtCore import QMargins, Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
+from PySide6.QtWidgets import QGraphicsView
 
 from .theme import C, FONT_FAMILY
 
@@ -39,8 +40,15 @@ class ChartView(QChartView):
         chart.setAnimationDuration(500)
         super().__init__(chart, parent)
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # 每次都重畫整個圖表：只重畫變動區域時，改變大小後會殘留舊的座標軸（重影）
+        self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
+        self.setCacheMode(QGraphicsView.CacheModeFlag.CacheNone)
         self.setMinimumHeight(height)
         self.setStyleSheet("background: transparent;")
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.viewport().update()
 
     def reset(self) -> QChart:
         from . import animations
@@ -50,6 +58,7 @@ class ChartView(QChartView):
         ch.removeAllSeries()
         for ax in ch.axes():
             ch.removeAxis(ax)
+            ax.deleteLater()      # 移除的座標軸要刪掉，否則重畫時會留下舊的座標軸（重影）
         return ch
 
 
