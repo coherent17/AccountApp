@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-Hant-TW" data-theme="light" data-scale="large">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>我的理財帳本</title>
+  <link rel="stylesheet" href="style.css">
+  <script>
+    window.__errors = [];
+    window.addEventListener("error", (e) => window.__errors.push(String(e.message) + " @ " + e.filename + ":" + e.lineno));
+    window.addEventListener("unhandledrejection", (e) => window.__errors.push("promise: " + String(e.reason && (e.reason.stack || e.reason))));
+  </script>
+  <script type="importmap">
+    {"imports": {"preact": "./vendor/preact.module.js", "preact/hooks": "./vendor/hooks.module.js",
+                 "htm": "./vendor/htm.module.js"}}
+  </script>
+  <script src="vendor/echarts.min.js"></script>
+</head>
+<body>
+  <div id="app"><div class="boot">正在開啟帳本…</div></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
