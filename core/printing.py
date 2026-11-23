@@ -530,6 +530,96 @@ class Report:
                    '<p class="sub">以上為依帳本整理的參考數字，實際申報請以財政部所得資料與最新規定為準。</p>')
         return "".join(out)
 
+    # ------------------------------------------------------------------ 月報（一頁看完一個月）
+    def monthly(self, ym: str) -> str:
+        from . import reminders
+        from .database import month_end, month_start
+        from .investments import Investments
+        db, b = self.db, self.base
+        start, end = month_start(ym), month_end(ym)
+        y, m = int(ym[:4]), int(ym[5:])
+        prev_end = (dt.date(y, m, 1) - dt.timedelta(days=1)).isoformat()
+        prev_start = prev_end[:8] + "01"
+        cur, prv = db.income_expense_totals(start, end), db.income_expense_totals(prev_start, prev_end)
+        bs, bs0 = db.balance_sheet(end), db.balance_sheet(prev_end)
+        rate = cur["net"] / cur["income"] if cur["income"] else None
+
+        def signed(v):
+            return f'<span class="{"good" if v >= 0 else "bad"}">{fmt_num(v, b, signed=True)}</span>'
+        kpi = ('<table class="kpi" cellspacing="0" width="100%">'
+               '<tr><th width="25%">本月收入</th><th width="25%">本月支出</th><th width="25%">本月結餘</th><th width="25%">儲蓄率</th></tr>'
+               f'<tr><td align="center"><b>{fmt_num(cur["income"], b)}</b></td><td align="center"><b>{fmt_num(cur["expense"], b)}</b></td>'
+               f'<td align="center"><b>{signed(cur["net"])}</b></td><td align="center"><b>{_pct(rate, "—")}</b></td></tr>'
+               '<tr><th>月底淨資產</th><th>比上月底增減</th><th>資產總計</th><th>負債總計</th></tr>'
+               f'<tr><td align="center"><b>{fmt_num(bs["net"], b)}</b></td><td align="center"><b>{signed(bs["net"] - bs0["net"])}</b></td>'
+               f'<td align="center">{fmt_num(bs["assets"], b)}</td><td align="center">{fmt_num(bs["liabilities"], b)}</td></tr></table>')
+        out = [self._head(f"{y} 年 {m} 月 月報", f"期間：{fmt_date(start)} 至 {fmt_date(end)}", True), kpi]
+
+        cats = db.category_totals(start, end, "expense")
+        before = {c["id"]: c["total"] for c in db.category_totals(prev_start, prev_end, "expense")}
+        if cats:
+            rows = []
+            for c in cats:
+                p = before.get(c["id"], 0.0)
+                bud = c.get("budget") or 0
+                use = f"{c['total'] / bud:.0%}" if bud else "—"
+                use = f'<span class="bad">{use}</span>' if bud and c["total"] > bud else use
+                rows.append(self._tr([(escape(c["name"]), ""), (fmt_num(c["total"], b), "r"), (fmt_num(p, b) if p else "—", "r"),
+                                      (fmt_num(c["total"] - p, b, signed=True), "r"), (fmt_num(bud, b) if bud else "—", "r"),
+                                      (use, "r")]))
+            rows.append(self._tr([("支出合計", "b"), (fmt_num(cur["expense"], b), "r"), (fmt_num(prv["expense"], b), "r"),
+                                  (fmt_num(cur["expense"] - prv["expense"], b, signed=True), "r"), ("", ""), ("", "")], "tot"))
+            out.append("<h2>支出分類（與上月比較、預算執行）</h2>")
+            out.append(self._table([("分類", ""), ("本月", ""), ("上月", ""), ("增減", ""), ("每月預算", ""), ("執行率", "")],
+                                   rows, [28, 15, 15, 15, 15, 12]))
+        inc = db.category_totals(start, end, "income")
+        if inc:
+            rows = [self._tr([(escape(c["name"]), ""), (fmt_num(c["total"], b), "r")]) for c in inc]
+            rows.append(self._tr([("收入合計", "b"), (fmt_num(cur["income"], b), "r")], "tot"))
+            out.append("<h2>收入</h2>" + self._table([("分類", ""), ("金額", "")], rows, [70, 30]))
+        big = sorted(db.query_transactions(start, end, ttype="expense"), key=lambda t: t.get("exp") or t["amount"],
+                     reverse=True)[:5]
+        if big:
+            rows = [self._tr([(fmt_date(t["date"]), "c"), (escape(t["note"] or ""), ""), (escape(t["category_name"] or ""), ""),
+                              (fmt_num(t.get("exp") or t["amount"], b), "r")]) for t in big]
+            out.append("<h2>本月較大的支出</h2>" + self._table([("日期", ""), ("說明", ""), ("分類", ""), ("金額", "")],
+                                                         rows, [16, 44, 20, 20]))
+        inv = Investments(db)
+        hold = [h for h in inv.holdings(end) if h["shares"] > 1e-9]
+        if hold:
+            ps = inv.period_summary(start, end)
+            rate = {a["id"]: a["rate"] or 1 for a in db.list_accounts(include_archived=True)}
+            cost = sum(h["cost"] * rate.get(h["account_id"], 1) for h in hold)
+            value = sum(h["market_value"] * rate.get(h["account_id"], 1) for h in hold)
+            rows = [self._tr([("持股帳面價值（成本＋評價）", ""), (fmt_num(value, b), "r")]),
+                    self._tr([("持股成本", ""), (fmt_num(cost, b), "r")]),
+                    self._tr([("未實現損益", ""), (signed(value - cost), "r")]),
+                    self._tr([("本月現金股利", ""), (fmt_num(ps["dividends"], b), "r")]),
+                    self._tr([("本月已實現損益", ""), (signed(ps["realized"]), "r")])]
+            out.append(f"<h2>投資（{len(hold)} 檔持股）</h2>" + self._table([("項目", ""), ("金額", "")], rows, [70, 30]))
+        base_day = max(dt.date.fromisoformat(end) + dt.timedelta(days=1), dt.date.today())
+        ev = reminders.upcoming(db, 31, base_day)
+        if ev:
+            rows = [self._tr([(fmt_date(e["date"]), "c"), (escape(e["title"]), ""), (escape(e["sub"] or ""), ""),
+                              (fmt_num(e["amount"], e["currency"]) if e.get("amount") else "", "r")]) for e in ev[:8]]
+            out.append(f"<h2>接下來 31 天的提醒（自 {fmt_date(base_day.isoformat())} 起）</h2>"
+                       + self._table([("日期", ""), ("事項", ""), ("說明", ""), ("金額", "")], rows, [16, 32, 36, 16]))
+        out.append(f'<p class="sub">本月報依帳本資料自動產生。{self.made}</p>')
+        return f"<html><head><style>{_CSS}</style></head><body>{''.join(out)}</body></html>"
+
+    # ------------------------------------------------------------------ 健康檢查報告
+    def health(self, result: dict) -> str:
+        mark = {"ok": ('<span class="good">✓ 正常</span>'), "info": "提醒", "warn": '<span class="bad">建議處理</span>',
+                "bad": '<span class="bad"><b>需要處理</b></span>'}
+        rows = [self._tr([(escape(c["title"]), "b"), (mark[c["status"]], "c"), (escape(c["detail"]), "")])
+                for c in result["checks"]]
+        verdict = (f'<p class="cover2" align="center"><span class="{"good" if result["ok"] else "bad"}">'
+                   f'{escape(result["summary"])}</span></p>')
+        body = (self._head("帳務健康檢查報告", f"檢查時間：{result['at'].replace('-', '/')}", True) + verdict
+                + self._table([("檢查項目", ""), ("結果", ""), ("說明", "")], rows, [26, 14, 60])
+                + '<p class="sub">「需要處理」表示帳務或檔案可能有誤；「建議處理」不影響帳務正確，但建議找時間處理。</p>')
+        return f"<html><head><style>{_CSS}</style></head><body>{body}</body></html>"
+
     def annual(self, year: int, sections: list[str] | None = None) -> str:
         """年度財務報告：封面＋所選章節，每章從新的一頁開始。"""
         sections = [s for s in (sections or [k for k, _, d in ANNUAL_SECTIONS if d])

@@ -37,12 +37,18 @@ class DashboardApi:
         if due:
             names = "、".join(dict.fromkeys(rec["name"] for rec, _ in due))
             reminders.append({"kind": "due", "text": f"有 {len(due)} 筆定期交易已到期：{names}", "action": "確認入帳"})
-        for a in db.upcoming_maturities(60)[:5]:
-            d = a["days_left"]
-            when = "今天到期" if d == 0 else (f"已到期 {-d} 天" if d < 0 else f"剩 {d} 天")
-            reminders.append({"kind": "maturity", "urgent": d <= 7, "name": a["name"], "date": a["maturity_date"],
-                              "when": when, "amount": a["balance"], "currency": a["currency"],
-                              "interest": a["est_interest"]})
+        from core import monthclose, reminders as rem
+        calendar = rem.upcoming(db, 60)
+        for e in calendar:      # 快到的事（定存到期、保費、繳款、報稅）也放進提醒事項；定期交易由「確認入帳」處理
+            if e["urgent"] and e["kind"] != "recurring" and e["days_left"] >= -7:
+                reminders.append({"kind": "event", "event": e})
+        ym = monthclose.previous_month(today)
+        if today.day <= 20 and not db.get_json("month_close", {}).get(ym, {}).get("finished") and db._q1(
+                "SELECT COUNT(*) n FROM transactions WHERE void = 0 AND source = '' AND date BETWEEN ? AND ?",
+                (month_start(ym), month_end(ym)))["n"]:
+            reminders.append({"kind": "monthclose", "ym": ym,
+                              "text": f"{monthclose.label(ym)}的月結還沒完成：對帳、評價、檢視預算，一步一步帶您完成。",
+                              "action": "開始月結"})
         recent = []
         for t in db.query_transactions(limit=8):
             signed = -t["amount"] if t["type"] == "expense" else t["amount"]
@@ -83,6 +89,7 @@ class DashboardApi:
             "net_series": [s["net"] for s in series],
             "budgets": budgets,
             "reminders": reminders,
+            "calendar": calendar[:10],
             "recent": recent,
         }
 

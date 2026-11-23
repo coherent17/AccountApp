@@ -131,7 +131,8 @@ function Reconcile({ aid0, close }) {
   const [bal, setBal] = useState(null);
   const [checked, setChecked] = useState(new Set());
   const [hist, setHist] = useState(false);
-  useEffect(() => { api("recon_load", aid, date).then((x) => { setD(x); if (!aid) setAid(x.account); setBal(x.book); setChecked(new Set()); }); }, [aid, date]);
+  const [smart, setSmart] = useState(null);
+  useEffect(() => { api("recon_load", aid, date).then((x) => { setD(x); if (!aid) setAid(x.account); setBal(x.book); setChecked(new Set()); setSmart(null); }); }, [aid, date]);
   if (!d) return null;
   if (!d.account) return html`<${Dialog} title="銀行對帳" icon="list" onClose=${() => close()}><p>請先新增帳戶。</p></${Dialog}>`;
   const c = d.currency;
@@ -143,8 +144,22 @@ function Reconcile({ aid0, close }) {
     changed(); toast(`「${d.name}」對帳完成，核銷 ${checked.size} 筆`); close(true);
   }
   const toggle = (id) => { const n = new Set(checked); n.has(id) ? n.delete(id) : n.add(id); setChecked(n); };
+  // 智慧對帳：讀取網路銀行下載的明細，金額相同、日期差 3 天內的自動勾選
+  async function smartMatch() {
+    const [p] = await api("pick_files", "選擇銀行下載的交易明細（Excel 或 CSV）", "import");
+    if (!p) return;
+    try {
+      const r = await api("recon_match", aid, date, p);
+      setChecked(new Set([...checked, ...r.matched]));
+      r.balance_used = r.last_balance != null && r.last_date <= date;
+      if (r.balance_used) setBal(r.last_balance);
+      setSmart(r);
+      setTimeout(() => document.querySelector("table.recon tr.auto")?.scrollIntoView({ block: "center" }), 80);   // 捲到自動勾選的紀錄
+    } catch (e) { errorBox(e.message); }
+  }
   return html`<${Dialog} title="銀行對帳" icon="list" width="64rem" cls="listdlg" onClose=${() => close()}
-      footer=${html`<${Btn} icon="list" onClick=${() => setHist(!hist)}>${hist ? "回到對帳" : "對帳紀錄"}</${Btn}><div class="grow"></div>
+      footer=${html`<${Btn} icon="list" onClick=${() => setHist(!hist)}>${hist ? "回到對帳" : "對帳紀錄"}</${Btn}>
+        ${!hist && html`<${Btn} icon="upload" onClick=${smartMatch} title="選擇網路銀行下載的交易明細，自動勾選帳上對應的紀錄">匯入銀行明細自動勾選</${Btn}>`}<div class="grow"></div>
         <${Btn} onClick=${() => close()}>取消</${Btn}><${Btn} kind="primary" icon="check" onClick=${finish}>完成對帳</${Btn}>`}>
     <p class="hint" style="margin-top:0">拿出銀行存摺或對帳單，輸入對帳單日期與期末餘額，再勾選存摺上已出現的每一筆紀錄。差額為 0 即對帳完成；未勾選的就是「未達帳項」。</p>
     <div class="form two-fields">
@@ -155,8 +170,13 @@ function Reconcile({ aid0, close }) {
     ${hist ? html`<${DataTable} rows=${d.history} maxHeight="45vh" empty="還沒有對帳紀錄"
         columns=${[{ key: "d", title: "對帳單日期", render: (r) => ymd(r.statement_date) }, { key: "b", title: "對帳單餘額", align: "r", render: (r) => num(r.statement_balance, c) },
                    { key: "n", title: "核銷筆數", align: "r", render: (r) => r.n }, { key: "t", title: "對帳時間", render: (r) => r.created_at.replace("T", " ") }]} />`
-      : html`<div class="tablewrap" style="max-height:45vh;margin-top:.6rem"><table class="list sticky recon"><thead><tr><th class="c">✓</th><th>日期</th><th class="c">傳票號碼</th><th>摘要</th><th class="r">增加（存入）</th><th class="r">減少（提出）</th></tr></thead>
-        <tbody>${d.items.map((i) => html`<tr class=${checked.has(i.txn_id) ? "sel" : ""} onClick=${() => toggle(i.txn_id)}>
+      : html`${smart && html`<div class="smart"><span class="s-ic"><${Icon} name="check" /></span><div class="grow">
+          <b>已依銀行明細自動勾選 ${smart.matched.length} 筆</b><span class="muted">（明細共 ${smart.rows} 筆${smart.later ? `，其中 ${smart.later} 筆在對帳單日期之後` : ""}${smart.balance_used ? `；期末餘額已帶入 ${money(smart.last_balance, c)}` : ""}）</span>
+          ${smart.bank_only.length > 0 && html`<div class="s-miss">銀行明細有 ${smart.bank_only.length} 筆在帳上找不到（可能漏記，例如手續費、利息）：
+            ${smart.bank_only.slice(0, 6).map((b) => html`<span>${ymd(b.date)} ${b.note || ""} <b class=${b.amount < 0 ? "c-expense" : "c-income"}>${money(b.amount, c, true)}</b></span>`)}${smart.bank_only.length > 6 ? "…" : ""}</div>`}
+        </div><button class="x" title="關閉" onClick=${() => setSmart(null)}><${Icon} name="close" /></button></div>`}
+      <div class="tablewrap" style="max-height:45vh;margin-top:.6rem"><table class="list sticky recon"><thead><tr><th class="c">✓</th><th>日期</th><th class="c">傳票號碼</th><th>摘要</th><th class="r">增加（存入）</th><th class="r">減少（提出）</th></tr></thead>
+        <tbody>${d.items.map((i) => html`<tr class=${(checked.has(i.txn_id) ? "sel" : "") + (smart && smart.matched.includes(i.txn_id) ? " auto" : "")} onClick=${() => toggle(i.txn_id)}>
           <td class="c"><${Check} checked=${checked.has(i.txn_id)} onChange=${() => toggle(i.txn_id)} /></td><td class="num">${ymd(i.date)}</td>
           <td class="c muted num">${i.voucher}</td><td>${i.note}</td><td class="r num c-income">${i.effect > 0 ? num(i.effect, c) : ""}</td>
           <td class="r num c-expense">${i.effect < 0 ? num(-i.effect, c) : ""}</td></tr>`)}</tbody></table>

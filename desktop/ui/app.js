@@ -12,6 +12,7 @@ import { Reports } from "./pages/reports.js";
 import { Settings } from "./pages/settings.js";
 import { checkUpdates, openUpdate, showWhatsNew, startUpdateTimer, useAvailableUpdate } from "./dialogs/update.js";
 import { openTour } from "./dialogs/tour.js";
+import { openHealth, openMonthClose, openMonthly, openReminders, previewMonthly } from "./dialogs/tools.js";
 import { openChart, openSubject, openYearClose } from "./dialogs/chart.js";
 import { openJournal } from "./dialogs/journal.js";
 import { openDue, openImport, openReconcile, openRecurring, openSearch, openWelcome } from "./dialogs/more.js";
@@ -40,7 +41,7 @@ window.__undo = undo;
 const ALL = { start: "1900-01-01", end: "2999-12-31" };
 window.__t = {
   go: (p) => window.__go(p), openTxn, openAccount, openAdjust, openPrices, openRates, openSecurity, openSecurityList, openTrade, openAnnual, openPrint, openExport, openChart, openSubject, openYearClose, openJournal,
-  openRecurring, openDue, openReconcile, openImport, openSearch: () => openSearch(window.__go), openWelcome,
+  openRecurring, openDue, openReconcile, openImport, openHealth, openMonthClose, openMonthly, openReminders, previewMonthly, openSearch: () => openSearch(window.__go), openWelcome,
   // 目前畫面上「完整看得到」的表格列數（每一個表格各算一次），用來驗證她要求的行數
   visibleRows: () => [...document.querySelectorAll(".tablewrap, .table-card")].filter((w) => w.offsetParent && w.querySelector("tbody")).map((w) => {
     const wr = w.getBoundingClientRect(), vh = window.innerHeight;
@@ -218,9 +219,11 @@ async function boot() {
     if (await api("first_run")) await openWelcome();                       // 第一次開啟：稱呼、基本帳戶或範例資料
     else await showWhatsNew();                                             // 剛更新：「已更新到…」與更新內容
     if (await api("tour_status")) await openTour();                        // 第一次使用新介面：三張卡片的導覽
-    openDue().catch(() => {});                                             // 定期交易到期提醒
     setTimeout(() => checkUpdates(true).catch(() => {}), 4000);            // 檢查新版本（開啟時，之後每 4 小時）
     startUpdateTimer();
+    await openDue().catch(() => {});                                       // 定期交易到期提醒
+    const ym = await api("month_close_prompt").catch(() => "");            // 月初：上個月的月結還沒完成就提醒一次
+    if (ym) openMonthClose(ym);
   }
 }
 

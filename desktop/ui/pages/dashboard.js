@@ -5,6 +5,7 @@ import { CountUp, PALETTE, axis, barFill, chartBase, useChart, valueAxis } from 
 import { openTxn, openVoucher } from "../dialogs/txn.js";
 import { openDue } from "../dialogs/more.js";
 import { catEmoji } from "../lib/caticon.js";
+import { EventRow, openHealth, openMonthClose, openReminders } from "../dialogs/tools.js";
 import { Btn, ask, errorBox } from "../lib/ui.js";
 import { changed } from "../lib/core.js";
 
@@ -242,13 +243,22 @@ function DashboardView({ d, prefsKey, go }) {
 
     ${d.reminders.length > 0 && html`<div class="card remind rise" style="animation-delay:300ms">
       <h3><${Icon} name="bell" />提醒事項</h3>
-      ${d.reminders.map((x) => x.kind === "due" || x.kind === "backup"
-        ? html`<div class="ritem"><span class="badge-ic"><${Icon} name=${x.kind === "due" ? "bell" : "save"} /></span><div class="txt"><b>${x.text}</b></div>
-                 <button class="btn primary" onClick=${() => (x.kind === "due" ? openDue() : backupNow())}>${x.action}</button></div>`
-        : html`<div class=${"ritem" + (x.urgent ? " urgent" : "")}><span class="badge-ic"><${Icon} name="book" /></span>
-                 <div class="txt"><b>${x.name} 將於 ${ymd(x.date)} 到期（${x.when}）</b>
-                 <small>金額 ${money(x.amount, x.currency)}${x.interest ? "，預估利息 " + money(x.interest, x.currency) : ""}</small></div></div>`)}
+      ${d.reminders.map((x) => x.kind === "event"
+        ? html`<div class=${"ritem" + (x.event.days_left <= 3 ? " urgent" : "")}><span class="badge-ic"><${Icon} name=${x.event.kind === "maturity" ? "bank" : "calendar"} /></span>
+                 <div class="txt"><b>${x.event.title}：${ymd(x.event.date)}（${x.event.when}）</b>
+                 <small>${x.event.amount ? `金額 ${money(x.event.amount, x.event.currency)}　` : ""}${x.event.sub}</small></div></div>`
+        : html`<div class="ritem"><span class="badge-ic"><${Icon} name=${{ due: "bell", backup: "save", monthclose: "check" }[x.kind]} /></span><div class="txt"><b>${x.text}</b></div>
+                 <button class="btn primary" onClick=${() => (x.kind === "due" ? openDue() : x.kind === "monthclose" ? openMonthClose(x.ym) : backupNow())}>${x.action}</button></div>`)}
     </div>`}
+
+    <div class="card cal rise" style="animation-delay:320ms">
+      <h3><${Icon} name="calendar" />近期行事曆<small>接下來 60 天</small>
+        <div class="cal-acts"><button class="link" onClick=${() => openMonthClose()}><${Icon} name="check" />月結小幫手</button>
+          <button class="link" onClick=${() => openHealth()}><${Icon} name="heart" />健康檢查</button>
+          <button class="link" onClick=${() => openReminders().then(() => changed())}><${Icon} name="bell" />管理提醒</button></div></h3>
+      ${d.calendar.length ? html`<div class="cal-list">${d.calendar.map((e) => html`<${EventRow} e=${e} />`)}</div>`
+        : html`<div class="empty-mini">接下來 60 天沒有排定的事。保費、信用卡繳款、除息日都可以按「管理提醒」新增，時間到了會在這裡提醒您。</div>`}
+    </div>
 
     <div class="grid wide">
       <div class="card rise" style="animation-delay:340ms"><h3><${Icon} name="chart" />近 12 個月收支</h3>

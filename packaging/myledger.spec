@@ -10,8 +10,8 @@ excluded = ["PySide6", "shiboken6", "tkinter", "unittest", "pydoc", "numpy", "PI
 hidden = ["openpyxl.cell._writer", "clr", "webview.platforms.edgechromium", "webview.platforms.winforms",
           "desktop", "desktop.api", "desktop.rpc", "desktop.paths", "desktop.webview2", "desktop.screenshot", "desktop.devshots",
           "desktop.api_accounts", "desktop.api_dashboard", "desktop.api_data", "desktop.api_invest", "desktop.api_journal", "desktop.api_more",
-          "desktop.api_reports", "desktop.api_settings", "desktop.api_txn", "desktop.api_update",
-          "core.analytics", "core.backup", "core.database", "core.exporter", "core.fmt", "core.importer", "core.investments",
+          "desktop.api_reports", "desktop.api_settings", "desktop.api_txn", "desktop.api_update", "desktop.api_tools",
+          "core.analytics", "core.backup", "core.bankmatch", "core.health", "core.monthclose", "core.quick", "core.reminders", "core.database", "core.exporter", "core.fmt", "core.importer", "core.investments",
           "core.journal_templates", "core.online", "core.performance", "core.printing", "core.sample_data", "core.search",
           "core.statements", "core.undo", "core.updater", "core.version"]
 

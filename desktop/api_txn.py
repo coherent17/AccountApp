@@ -84,7 +84,11 @@ class TxnApi:
         last = db.get_setting("last_account_id")
         out = {"accounts": accounts, "categories": cats, "notes": db.recent_notes(),
                "tags": [t["name"] for t in db.all_tags()], "last_account": int(last) if last.isdigit() else None,
-               "closed_until": db.closed_until, "txn": None}
+               "closed_until": db.closed_until, "txn": None, "quick": [], "hints": {}}
+        if not tid:     # 快速記帳：常記的項目與每個說明上次用的分類、帳戶
+            from core import quick
+            out["quick"] = quick.frequent(db)
+            out["hints"] = quick.note_hints(db)
         if tid:
             t = db.get_transaction(tid)
             if not t:

@@ -61,6 +61,43 @@ for scale in ("normal", "large"):
               (s + "dlg_voucher", ESC + "; __t.openFirstOf('journal')", 2),
               (s + "close", ESC + "; " + ESC + "; " + ESC, 0.5)]
 
+def _bank_csv(win, out: str) -> None:
+    """智慧對帳截圖用：把對帳視窗最後 6 筆寫成銀行明細（另加一筆帳上沒有的手續費），並讓「選擇檔案」直接傳回它。"""
+    rows = json.loads(win.evaluate_js(
+        "JSON.stringify([...document.querySelectorAll('table.recon tbody tr')].slice(-6)"
+        ".map(tr => [...tr.cells].map(c => c.textContent.trim())))") or "[]")
+    path = os.path.join(out, "bank_demo.csv")
+    with open(path, "w", encoding="utf-8-sig") as f:
+        f.write("交易日期,摘要,提出,存入,餘額\n")
+        for r in rows:
+            f.write(f'{r[1]},{r[3]},"{r[5]}","{r[4]}",\n')
+        if rows:
+            f.write(f"{rows[-1][1]},跨行手續費,15,,\n")
+    win.evaluate_js("window.pywebview.api.pick_files = async () => [%s]" % json.dumps(path))
+
+
+# 3.5 新功能（MY_LEDGER_SCENES=features）：在她的螢幕（1280×720）以標準與大字體截圖
+_BTN = "[...document.querySelectorAll('.dialog .btn')].find(b => b.textContent.includes('{}')).click()"
+_PREV = "(() => { const d = new Date(); d.setDate(0); return d.toISOString().slice(0, 7); })()"
+FEATURES = []
+for scale in ("normal", "large"):
+    s = f"feat_{scale}_"
+    FEATURES += [(s + "dashboard", f"__t.prefs('light', '{scale}'); __t.go('dashboard')", 3),
+                 (s + "calendar", "document.querySelector('.cal').scrollIntoView({block: 'center'})", 1),
+                 (s + "txn_quick", "document.querySelector('.main').scrollTop = 0; __t.openTxn({type: 'expense'})", 1.5),
+                 (s + "txn_quick_used", "document.querySelector('.qchip').click()", 1),
+                 (s + "reminders", ESC + "; __t.openReminders()", 1.5),
+                 (s + "reminder_new", _BTN.format("新增提醒"), 1),
+                 (s + "health", ESC + "; " + ESC + "; __t.openHealth()", 3),
+                 (s + "monthclose", ESC + "; __t.openMonthClose()", 2),
+                 (s + "monthly", ESC + f"; __t.previewMonthly({_PREV})", 2.5),
+                 (s + "reports_head", ESC + "; __t.go('reports')", 2.5),
+                 (s + "recon_open", "__t.openReconcile()", 2),
+                 (s + "recon_prep", _bank_csv, 0.5),
+                 (s + "recon_smart", _BTN.format("匯入銀行明細"), 2),
+                 (s + "recon_close", ESC, 0.5),
+                 (s + "close", ESC + "; " + ESC, 0.5)]
+
 # README 用的截圖（MY_LEDGER_SCENES=readme）：淺色、大字，範例帳本
 README = [
     ("readme_dashboard", "__t.prefs('light', 'large'); __t.go('dashboard')", 3.5),
@@ -71,6 +108,8 @@ README = [
     ("readme_investments", ESC + "; __t.go('investments')", 3),
     ("readme_reports", "__t.go('reports')", 3),
     ("readme_annual", "__t.openAnnual([2026, 2025])", 1.5),
+    ("readme_monthclose", ESC + "; __t.openMonthClose()", 2),
+    ("readme_health", ESC + "; __t.openHealth()", 3),
     ("readme_dark", ESC + "; __t.prefs('dark', 'large'); __t.go('dashboard')", 3.5),
     ("readme_tour", "__t.prefs('light', 'large'); __t.openTour()", 1.5),
 ]
@@ -201,8 +240,8 @@ def run(win, out: str) -> None:
     only = [s for s in os.environ.get("MY_LEDGER_SCENES", "").split(",") if s]
     time.sleep(5)
     errors = []
-    scenes = {"readme": README, "mom": MOM, "audit": AUDIT}.get(only[0] if len(only) == 1 else "", SCENES)
-    if only in (["mom"], ["audit"]):
+    scenes = {"readme": README, "mom": MOM, "audit": AUDIT, "features": FEATURES}.get(only[0] if len(only) == 1 else "", SCENES)
+    if only in (["mom"], ["audit"], ["features"]):
         win.resize(1280, 720)
         time.sleep(1)
     for name, js, wait in scenes:
@@ -212,13 +251,13 @@ def run(win, out: str) -> None:
             win.resize(1100, 700)
             time.sleep(0.5)
         try:
-            win.evaluate_js(js)
+            js(win, out) if callable(js) else win.evaluate_js(js)
         except Exception as e:  # noqa: BLE001
             errors.append(f"{name}: {e}")
         time.sleep(wait)
         if name.startswith("mom_") and not name.endswith(("_close", "_combo_open")):
             print(f"{name}: {win.evaluate_js('window.__t.visibleRows()')}", flush=True)
-        if name.startswith("audit_") and not name.endswith(("_close", "_dlg_search")):
+        if name.startswith(("audit_", "feat_")) and not name.endswith(("_close", "_dlg_search")):
             print(f"{name}: {win.evaluate_js('window.__t.audit()')}", flush=True)
         if name.endswith("_combo_open"):
             print(f"{name}: 下拉選單顯示 {win.evaluate_js("[...document.querySelectorAll('.pop.floating > div')].filter(d => {const r=d.getBoundingClientRect(); const p=d.closest('.pop').getBoundingClientRect(); return r.top>=p.top-1 && r.bottom<=Math.min(p.bottom, innerHeight)+1}).length")} 個項目", flush=True)

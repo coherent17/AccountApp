@@ -1090,3 +1090,138 @@ table.jtable td .row.nowrap > * { min-width: 0; }
   .dialog.listdlg .dbody > p.hint:first-child { display: none; }
   .kpis .kpi { min-height: 0; padding-top: .6rem; padding-bottom: .6rem; }
 }
+
+/* ---------- 3.5 月結小幫手、提醒中心、健康檢查、快速記帳、智慧對帳 ---------- */
+/* 時間軸上的一件事 */
+.evt { display: flex; align-items: center; gap: .8rem; padding: .55rem .7rem; border-radius: var(--radius-sm);
+  border: 1px solid var(--line); background: var(--surface); }
+.evt + .evt { margin-top: .45rem; }
+.evt-date { width: 3.4rem; flex: none; text-align: center; border-radius: .7rem; padding: .25rem 0; line-height: 1.15;
+  background: color-mix(in srgb, var(--c) 10%, var(--surface)); color: var(--c); }
+.evt-date b { display: block; font-size: 1.35rem; font-weight: 800; font-family: var(--num-font); }
+.evt-date small { display: block; font-size: .72rem; opacity: .85; }
+.evt-ic { width: 2.1rem; height: 2.1rem; flex: none; border-radius: .7rem; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--c) 14%, transparent); color: var(--c); }
+.evt-txt { flex: 1; min-width: 0; }
+.evt-txt b { display: block; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.evt-txt small { display: block; color: var(--text-3); font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.evt-amt { font-weight: 650; white-space: nowrap; }
+.evt-when { flex: none; font-size: .8rem; color: var(--text-2); background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 999px; padding: .12rem .6rem; white-space: nowrap; }
+.evt.urgent { border-color: color-mix(in srgb, var(--c) 45%, var(--line)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 10%, transparent); }
+.evt.urgent .evt-when { background: var(--c); color: #fff; border-color: var(--c); }
+.evt-edit { border: 0; background: none; color: var(--text-3); cursor: pointer; padding: .3rem; border-radius: .5rem; }
+.evt-edit:hover { color: var(--primary); background: var(--primary-soft); }
+.evt-month { font-weight: 750; color: var(--text-2); margin: .9rem 0 .45rem; font-size: .92rem; }
+.evt-month:first-child { margin-top: 0; }
+.remind-scroll { padding-right: .3rem; }
+.mine { display: flex; align-items: center; gap: .7rem; padding: .5rem .7rem; border-radius: var(--radius-sm); cursor: pointer; }
+.mine:hover { background: var(--primary-soft); }
+.mine .evt-ic { width: 1.8rem; height: 1.8rem; }
+.mine > .ic:last-child { color: var(--text-3); }
+
+/* 總覽：近期行事曆 */
+.cal h3 { flex-wrap: wrap; }
+.cal-acts { margin-left: auto; display: flex; gap: .3rem; flex-wrap: wrap; }
+.cal-acts .link { display: inline-flex; align-items: center; gap: .3rem; padding: .3rem .6rem; border-radius: 999px; font-size: .88rem; }
+.cal-acts .link:hover { background: var(--primary-soft); }
+.cal-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr)); gap: .5rem; }
+.cal-list .evt + .evt { margin-top: 0; }
+.empty-mini { color: var(--text-3); padding: .4rem 0; }
+
+/* 健康檢查 */
+.verdict { display: flex; align-items: center; gap: 1rem; padding: 1rem 1.2rem; border-radius: var(--radius); margin-bottom: .9rem;
+  background: var(--surface-2); border: 1px solid var(--line); }
+.verdict .v-ic { width: 3.2rem; height: 3.2rem; border-radius: 50%; display: grid; place-items: center; flex: none;
+  background: var(--primary-soft); color: var(--primary); }
+.verdict b { display: block; font-size: 1.25rem; font-weight: 800; }
+.verdict small { color: var(--text-3); }
+.verdict.ok { background: var(--income-soft); border-color: color-mix(in srgb, var(--income) 30%, transparent); }
+.verdict.ok .v-ic { background: var(--income); color: #fff; }
+.verdict.warn { background: var(--gold-soft); border-color: var(--gold-line); }
+.verdict.warn .v-ic { background: var(--gold); color: #fff; }
+.verdict.bad { background: var(--expense-soft); border-color: color-mix(in srgb, var(--expense) 35%, transparent); }
+.verdict.bad .v-ic { background: var(--expense); color: #fff; }
+.spin { width: 1.6rem; height: 1.6rem; border-radius: 50%; border: 3px solid color-mix(in srgb, var(--primary) 25%, transparent);
+  border-top-color: var(--primary); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.hc { display: flex; align-items: center; gap: .8rem; padding: .6rem .3rem; border-bottom: 1px solid var(--line); }
+html.animate .hc { animation: rise .35s ease both; }
+.hc-ic { width: 2rem; height: 2rem; flex: none; border-radius: 50%; display: grid; place-items: center; }
+.hc.ok .hc-ic { background: var(--income-soft); color: var(--income); }
+.hc.info .hc-ic { background: var(--primary-soft); color: var(--primary); }
+.hc.warn .hc-ic { background: var(--gold-soft); color: var(--gold); }
+.hc.bad .hc-ic { background: var(--expense-soft); color: var(--expense); }
+.hc-txt { flex: 1; min-width: 0; }
+.hc-txt b { display: block; font-weight: 650; }
+.hc-txt small { display: block; color: var(--text-3); font-size: .84rem; }
+.hc-tag { font-size: .78rem; border-radius: 999px; padding: .1rem .55rem; white-space: nowrap; background: var(--surface-2); color: var(--text-2); }
+.hc.warn .hc-tag { background: var(--gold-soft); color: var(--gold); }
+.hc.bad .hc-tag { background: var(--expense-soft); color: var(--expense); font-weight: 700; }
+.hc.ok .hc-tag { color: var(--income); }
+
+/* 月結小幫手 */
+.mc-head { display: flex; align-items: center; gap: 1.1rem; margin-bottom: .9rem; }
+.mc-head h2 { margin: 0 0 .15rem; font-size: 1.3rem; }
+.mc-head p { margin: 0; }
+.mc-ring { --p: 0; width: 4.4rem; height: 4.4rem; border-radius: 50%; flex: none; display: grid; place-items: center;
+  background: conic-gradient(var(--income) calc(var(--p) * 1%), var(--surface-3) 0); }
+.mc-ring b { width: 3.5rem; height: 3.5rem; border-radius: 50%; background: var(--surface); display: grid; place-items: center;
+  font-size: 1.3rem; font-weight: 800; font-family: var(--num-font); }
+.mc-ring small { font-size: .75rem; color: var(--text-3); }
+.mc-steps { display: flex; flex-direction: column; gap: .5rem; padding-right: .3rem; }
+.mstep { display: flex; gap: .9rem; align-items: flex-start; padding: .75rem .9rem; border-radius: var(--radius-sm);
+  border: 1px solid var(--line); background: var(--surface); transition: background .2s, border-color .2s; }
+.mstep.ok { background: color-mix(in srgb, var(--income) 6%, var(--surface)); border-color: color-mix(in srgb, var(--income) 25%, var(--line)); }
+.mnum { width: 2rem; height: 2rem; flex: none; border-radius: 50%; display: grid; place-items: center; font-weight: 800;
+  background: var(--primary-soft); color: var(--primary); }
+.mstep.ok .mnum { background: var(--income); color: #fff; }
+.mtxt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .3rem; align-items: flex-start; }
+.mtxt b { font-weight: 700; display: flex; align-items: center; gap: .5rem; }
+.mtxt small { color: var(--text-3); font-size: .86rem; }
+.mtxt .auto { font-size: .72rem; font-weight: 600; color: var(--income); background: var(--income-soft); border-radius: 999px; padding: .05rem .5rem; }
+.mtoggle { flex: none; white-space: nowrap; align-self: center; }
+.mc-accts { display: flex; flex-wrap: wrap; gap: .35rem; }
+.mc-accts .pillbtn.on { border-color: var(--income); color: var(--income); background: var(--income-soft); }
+.mc-budget { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: .25rem 1rem; width: 100%; }
+.mc-budget > div { display: grid; grid-template-columns: 5.5rem 1fr 2.8rem; gap: .5rem; align-items: center; font-size: .86rem; }
+.mc-budget i { height: .4rem; border-radius: 999px; background: var(--surface-3); overflow: hidden; display: block; }
+.mc-budget i b { display: block; height: 100%; background: var(--primary); border-radius: 999px; }
+.mc-budget .over i b { background: var(--expense); }
+.mc-budget .over span { color: var(--expense); }
+.mc-budget .num { text-align: right; }
+.mc-done { text-align: center; padding: 2rem 1rem 1.4rem; }
+.mc-done .ok { width: 5rem; height: 5rem; margin: 0 auto 1rem; border-radius: 50%; display: grid; place-items: center;
+  background: linear-gradient(135deg, var(--income), color-mix(in srgb, var(--income) 60%, var(--primary))); color: #fff;
+  box-shadow: 0 12px 30px -10px color-mix(in srgb, var(--income) 70%, transparent); }
+html.animate .mc-done .ok { animation: pop .45s cubic-bezier(.2, 1.4, .4, 1) both; }
+.mc-done h2 { margin: 0 0 .4rem; font-size: 1.45rem; }
+
+/* 記一筆：常記的項目 */
+.quick { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; padding: .55rem .65rem; margin-bottom: .2rem;
+  border-radius: var(--radius-sm); background: var(--surface-2); border: 1px dashed var(--line-strong); }
+.quick-lbl { display: inline-flex; align-items: center; gap: .3rem; color: var(--text-3); font-size: .84rem; margin-right: .2rem; }
+.qchip { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid var(--line-strong); background: var(--surface);
+  border-radius: 999px; padding: .22rem .7rem .22rem .5rem; cursor: pointer; font: inherit; color: var(--text); }
+.qchip small { color: var(--text-3); font-size: .78rem; }
+.qchip:hover { border-color: var(--primary); background: var(--primary-soft); color: var(--primary); }
+.qchip.k-income:hover { border-color: var(--income); background: var(--income-soft); color: var(--income); }
+
+/* 銀行對帳：自動勾選的結果 */
+.smart { display: flex; gap: .8rem; align-items: flex-start; padding: .7rem .9rem; margin-top: .6rem; border-radius: var(--radius-sm);
+  background: var(--income-soft); border: 1px solid color-mix(in srgb, var(--income) 30%, transparent); }
+.smart .s-ic { width: 1.9rem; height: 1.9rem; flex: none; border-radius: 50%; display: grid; place-items: center; background: var(--income); color: #fff; }
+.smart .s-miss { margin-top: .35rem; font-size: .88rem; color: var(--text-2); display: flex; flex-wrap: wrap; gap: .25rem .8rem; }
+.smart .x { border: 0; background: none; color: var(--text-3); cursor: pointer; }
+table.recon tr.auto td:first-child { box-shadow: inset 3px 0 0 var(--income); }
+
+@media (max-height: 860px) {
+  .verdict { padding: .65rem .9rem; margin-bottom: .6rem; }
+  .verdict .v-ic { width: 2.6rem; height: 2.6rem; }
+  .mc-head { margin-bottom: .6rem; }
+  .mc-ring { width: 3.6rem; height: 3.6rem; }
+  .mc-ring b { width: 2.9rem; height: 2.9rem; font-size: 1.1rem; }
+  .mstep { padding: .55rem .75rem; }
+  .hc { padding: .45rem .3rem; }
+}
+@media (max-height: 860px) { table.list td.elide.evnote { max-width: 8rem !important; } }   /* 交易紀錄在「大」字體也不必左右捲動 */
