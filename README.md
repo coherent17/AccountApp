@@ -83,16 +83,16 @@
 ### 專案結構
 
 ```
-app/                會計核心（不需要 Qt）：資料庫、投資明細帳、報表、列印 HTML、匯出入、備份、復原、更新
-                    （另含已停用的 v2 PySide6 介面）
-v3/                 目前發行的程式
+core/               會計核心（不含畫面）：資料庫、投資明細帳、報表、列印 HTML、匯出入、備份、復原、更新
+desktop/            程式本體
   run.py              進入點：WebView2 檢查、備份、開啟視窗、結束畫面
   api*.py             畫面呼叫的 Python 介面（每一頁一個檔案），全部交給同一個帳本執行緒
   ui/                 畫面：Preact + htm + ECharts（不需要建置步驟），lib/、pages/、dialogs/、style.css
-tests/              test_v3.py（v3 介面）、test_db.py（會計核心）、test_gui.py（v2 介面）
+  whatsnew.md         這一版的更新說明（也是 GitHub Release 說明）
+tests/              test_core.py（會計核心）、test_api.py（畫面介面）
   fixtures/           每個發行版本建立的測試帳本與帳務快照
-tools/              v3_smoke.py（exe 煙霧測試）、make_icon.py、make_fixtures.py、sync_win.sh…
-packaging/          myledger.spec、build.bat、app.ico、version_info.txt；legacy_v2/ 為舊版打包
+tools/              smoke.py（exe 煙霧測試）、make_fixtures.py、make_icon.py、sync_win.sh
+packaging/          myledger.spec、build.bat、app.ico、version_info.txt
 docs/images/        本頁截圖
 ```
 
@@ -101,22 +101,22 @@ docs/images/        本頁截圖
 ```bat
 python -m venv venv3 && venv3\Scripts\activate
 pip install -r requirements.txt
-set MY_LEDGER_V3_DEMO=1 && python v3\run.py        &REM 用暫存的範例帳本開啟（不會碰到真正的帳本）
+set MY_LEDGER_DEMO=1 && python desktop\run.py       &REM 用暫存的範例帳本開啟（不會碰到真正的帳本）
 
-python tests\test_v3.py                              &REM 每一本舊版帳本都要能開啟、數字與會計核心一致
-python tests\test_db.py                              &REM 會計核心
+python tests\test_api.py                             &REM 每一本舊版帳本都要能開啟、數字與會計核心一致
+python tests\test_core.py                            &REM 會計核心
 ```
 
 ### 打包與發行
 
 ```bat
 packaging\build.bat                                  &REM → packaging\dist\我的理財帳本.exe
-python tools\v3_smoke.py packaging\dist\我的理財帳本.exe   &REM 新資料夾＋所有舊版帳本，每一頁截圖，約 30 秒
+python tools\smoke.py packaging\dist\我的理財帳本.exe   &REM 新資料夾＋所有舊版帳本，每一頁截圖，約 40 秒
 ```
 
-發行：修改 `app/version.py` 與 `packaging/version_info.txt` 的版本號，把這一版的新功能寫進 `v3/whatsnew.md` → 打上 `vX.Y.Z` 標籤 → 在 GitHub Release 上傳 exe（檔名必須是 `MyLedger.exe`，自動更新依這個檔名下載），並以 `v3/whatsnew.md` 作為 Release 說明。同一份說明會出現在使用者的更新視窗，以及更新後第一次開啟時的「已更新到…」。
+發行：修改 `core/version.py` 與 `packaging/version_info.txt` 的版本號，把這一版的新功能寫進 `desktop/whatsnew.md` → 打上 `vX.Y.Z` 標籤 → 在 GitHub Release 上傳 exe（檔名必須是 `MyLedger.exe`，自動更新依這個檔名下載），並以 `desktop/whatsnew.md` 作為 Release 說明。同一份說明會出現在使用者的更新視窗，以及更新後第一次開啟時的「已更新到…」。
 
-環境變數：`MY_LEDGER_DATA_DIR`（資料夾）、`MY_LEDGER_V3_DEMO=1`（範例帳本）、`MY_LEDGER_SMOKE_DIR`（煙霧測試截圖）、`MY_LEDGER_V3_SHOT`（開發用場景截圖）。
+環境變數：`MY_LEDGER_DATA_DIR`（資料夾）、`MY_LEDGER_DEMO=1`（範例帳本）、`MY_LEDGER_SMOKE_DIR`（煙霧測試截圖）、`MY_LEDGER_SHOT` 與 `MY_LEDGER_SCENES`（開發用場景截圖：`readme`、`audit`…）。
 
 ### 會計慣例
 
@@ -128,4 +128,4 @@ python tools\v3_smoke.py packaging\dist\我的理財帳本.exe   &REM 新資料�
 
 ## English summary
 
-*My Ledger* is a Traditional-Chinese personal bookkeeping app for Windows, built for a retired accountant: double-entry journals, ledgers, a six-column trial balance, balance sheet / income / cash-flow statements, an investment sub-ledger with XIRR, annual reports and Excel export. The UI is a web front end (Preact + ECharts) shown in Edge WebView2 through pywebview; all accounting lives in the Qt-free `app/` core on SQLite. It ships as a single `MyLedger.exe`, updates itself from GitHub Releases, keeps every past release's ledger loadable (tested with a fixture per release), and stores data only on the local PC.
+*My Ledger* is a Traditional-Chinese personal bookkeeping app for Windows, built for a retired accountant: double-entry journals, ledgers, a six-column trial balance, balance sheet / income / cash-flow statements, an investment sub-ledger with XIRR, annual reports and Excel export. The UI is a web front end (Preact + ECharts) shown in Edge WebView2 through pywebview; all accounting lives in the `core/` package on SQLite. It ships as a single `MyLedger.exe`, updates itself from GitHub Releases, keeps every past release's ledger loadable (tested with a fixture per release), and stores data only on the local PC.

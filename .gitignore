@@ -4,7 +4,6 @@ dist/
 build/
 *.db
 *.log
-tts_cache/
 !tests/fixtures/*.db
 # 本機開發環境
 venv/

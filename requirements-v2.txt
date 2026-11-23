@@ -1,3 +1,0 @@
-# 已停用的 v2（PySide6）介面、v2 的測試（tests/test_gui.py）與工具（tools/make_icon.py、layout_audit.py）所需
-PySide6>=6.7
-openpyxl>=3.1
