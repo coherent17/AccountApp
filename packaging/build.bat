@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-REM 建置「我的理財帳本.exe」（v3，在 Windows 上執行）。發行時把它上傳為 MyLedger.exe。
+REM 建置「我的理財帳本.exe」（在 Windows 上執行）。發行時把它上傳為 MyLedger.exe。
 cd /d "%~dp0"
 if not exist ..\venv3 (
     python -m venv ..\venv3

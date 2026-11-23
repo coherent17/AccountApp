@@ -1,4 +1,4 @@
-"""由 v3/ui/logo.svg 產生程式圖示 packaging/app.ico（16～256 像素，PNG 格式的 ICO）。
+"""由 desktop/ui/logo.svg 產生程式圖示 packaging/app.ico（16～256 像素，PNG 格式的 ICO）。
 
 用 Windows 的 v2 venv 執行（需要 PySide6 的 QtSvg 來繪製 SVG）：
     ..\\venv\\Scripts\\python.exe tools\\make_icon.py
@@ -33,7 +33,7 @@ def png(renderer: QSvgRenderer, size: int) -> bytes:
 
 def main() -> None:
     QGuiApplication(sys.argv)
-    r = QSvgRenderer(os.path.join(ROOT, "v3", "ui", "logo.svg"))
+    r = QSvgRenderer(os.path.join(ROOT, "desktop", "ui", "logo.svg"))
     images = [png(r, s) for s in SIZES]
     out = os.path.join(ROOT, "packaging", "app.ico")
     header = struct.pack("<HHH", 0, 1, len(SIZES))
@@ -44,7 +44,7 @@ def main() -> None:
         data += img
     with open(out, "wb") as f:
         f.write(header + entries + data)
-    with open(os.path.join(ROOT, "v3", "ui", "logo-256.png"), "wb") as f:
+    with open(os.path.join(ROOT, "desktop", "ui", "logo-256.png"), "wb") as f:
         f.write(images[-1])
     print("wrote", out, os.path.getsize(out), "bytes")
 

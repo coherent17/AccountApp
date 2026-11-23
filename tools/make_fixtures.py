@@ -39,7 +39,10 @@ def make(tag: str) -> None:
         if os.path.exists(p):
             os.remove(p)
     with tempfile.TemporaryDirectory() as tmp:
-        code = subprocess.run(["git", "archive", tag, "app"], cwd=ROOT, check=True, capture_output=True).stdout
+        # v3.4.1 以前帳務程式在 app/，之後改名為 core/；一律解壓為 app/（ledger_tools 與 RUNNER 以 app 匯入）
+        src = "core" if subprocess.run(["git", "cat-file", "-e", f"{tag}:core"], cwd=ROOT).returncode == 0 else "app"
+        code = subprocess.run(["git", "archive", "--prefix=app/", f"{tag}:{src}"], cwd=ROOT, check=True,
+                              capture_output=True).stdout
         subprocess.run(["tar", "-x", "-C", tmp], input=code, check=True)
         res = subprocess.run([sys.executable, "-c", RUNNER, tmp, FIX, db_path, out],
                              capture_output=True, text=True)
