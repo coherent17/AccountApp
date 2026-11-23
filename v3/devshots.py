@@ -23,9 +23,43 @@ for scale in ("normal", "large"):
         (f"mom_{scale}_reports_is", "__t.tab('收支損益表')", 2),
         (f"mom_{scale}_reports_journal", "__t.tab('日記帳')", 2),
         (f"mom_{scale}_journal_combo", "__t.openJournal()", 1.5),
-        (f"mom_{scale}_journal_combo_open", "document.querySelector('.combo input').focus()", 1),
+        (f"mom_{scale}_journal_combo_open", "const i = document.querySelector('.combo input'); i.focus(); i.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}))", 1),
+        (f"mom_{scale}_journal_up_combo_open", "document.body.click(); const i = document.querySelectorAll('.combo input')[2]; i.focus(); i.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}))", 1),
         (f"mom_{scale}_close", ESC + "; " + ESC, 0.5),
     ]
+
+# 每一頁、每個分頁與有清單的對話框，在她的螢幕（1280×720）量測看得到的列數（MY_LEDGER_V3_SCENES=audit）
+_SEARCH = ("const i = document.querySelector('.dialog input'); i.value = '2026';"
+           "i.dispatchEvent(new Event('input', {bubbles: true}))")
+AUDIT = []
+for scale in ("normal", "large"):
+    s = f"audit_{scale}_"
+    AUDIT += [(s + "dashboard", f"__t.prefs('light', '{scale}'); __t.go('dashboard')", 3),
+              (s + "transactions", "__t.go('transactions')", 2.5),
+              (s + "accounts", "__t.go('accounts')", 2.5)]
+    AUDIT += [(s + "invest_" + k, "__t.go('investments')" if i == 0 else f"__t.tab('{t}')", 2.5)
+              for i, (k, t) in enumerate([("hold", "持股明細"), ("events", "交易紀錄"), ("realized", "已實現損益"), ("perf", "報酬分析")])]
+    AUDIT += [(s + "reports_" + k, "__t.go('reports')" if i == 0 else f"__t.tab('{t}')", 2.5)
+              for i, (k, t) in enumerate([("bs", "資產負債表"), ("is", "收支損益表"), ("cf", "現金流量表"), ("monthly", "月度收支"),
+                                          ("cats", "分類與預算"), ("tags", "標籤／專案"), ("journal", "日記帳"), ("ledger", "分類帳"),
+                                          ("tb", "試算表"), ("tax", "報稅彙總")])]
+    AUDIT += [(s + "settings", "__t.go('settings')", 2.5),
+              (s + "settings_cats", "document.querySelector('.main table').closest('.inner').scrollIntoView()", 1),
+              (s + "dashboard_recent", "__t.go('dashboard')", 3),
+              (s + "dashboard_recent2", "document.querySelector('.main table').scrollIntoView({block: 'end'})", 1),
+              (s + "settings_back", "__t.go('settings')", 2),
+              (s + "dlg_chart", "__t.openChart()", 2),
+              (s + "dlg_recurring", ESC + "; __t.openRecurring()", 2),
+              (s + "dlg_due", ESC + "; __t.openDue()", 2),
+              (s + "dlg_reconcile", ESC + "; __t.openReconcile()", 2),
+              (s + "dlg_search", ESC + "; __t.openSearch()", 1),
+              (s + "dlg_search_results", _SEARCH, 2),
+              (s + "dlg_audit", ESC + "; __t.openAudit()", 2),
+              (s + "dlg_securities", ESC + "; __t.openSecurityList()", 2),
+              (s + "dlg_prices", ESC + "; __t.openPrices()", 2),
+              (s + "dlg_journal", ESC + "; __t.openUserJournal()", 2),
+              (s + "dlg_voucher", ESC + "; __t.openFirstOf('journal')", 2),
+              (s + "close", ESC + "; " + ESC + "; " + ESC, 0.5)]
 
 # README 用的截圖（MY_LEDGER_V3_SCENES=readme）：淺色、大字，範例帳本
 README = [
@@ -167,12 +201,12 @@ def run(win, out: str) -> None:
     only = [s for s in os.environ.get("MY_LEDGER_V3_SCENES", "").split(",") if s]
     time.sleep(5)
     errors = []
-    scenes = README if only == ["readme"] else MOM if only == ["mom"] else SCENES
-    if only == ["mom"]:
+    scenes = {"readme": README, "mom": MOM, "audit": AUDIT}.get(only[0] if len(only) == 1 else "", SCENES)
+    if only in (["mom"], ["audit"]):
         win.resize(1280, 720)
         time.sleep(1)
     for name, js, wait in scenes:
-        if only and only not in (["readme"], ["mom"]) and not any(name.startswith(o) for o in only):
+        if only and scenes is SCENES and not any(name.startswith(o) for o in only):
             continue
         if name == "min_window":
             win.resize(1100, 700)
@@ -184,6 +218,8 @@ def run(win, out: str) -> None:
         time.sleep(wait)
         if name.startswith("mom_") and not name.endswith(("_close", "_combo_open")):
             print(f"{name}: {win.evaluate_js('window.__t.visibleRows()')}", flush=True)
+        if name.startswith("audit_") and not name.endswith(("_close", "_dlg_search")):
+            print(f"{name}: {win.evaluate_js('window.__t.audit()')}", flush=True)
         if name.endswith("_combo_open"):
             print(f"{name}: 下拉選單顯示 {win.evaluate_js("[...document.querySelectorAll('.pop.floating > div')].filter(d => {const r=d.getBoundingClientRect(); const p=d.closest('.pop').getBoundingClientRect(); return r.top>=p.top-1 && r.bottom<=Math.min(p.bottom, innerHeight)+1}).length")} 個項目", flush=True)
         errs = json.loads(win.evaluate_js("JSON.stringify(window.__errors.splice(0))") or "[]")

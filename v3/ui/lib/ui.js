@@ -410,8 +410,9 @@ export function Combo({ value, onChange, options, placeholder = "輸入代號或
     const below = innerHeight - r.bottom - 12, above = r.top - 12;
     const up = below < 320 && above > below;
     const maxH = Math.min(Math.max(up ? above : below, 160), innerHeight * 0.7);
-    setPos({ left: r.left, width: Math.max(r.width, 300), maxHeight: maxH, ...(up ? { bottom: innerHeight - r.top + 4 } : { top: r.bottom + 4 }) });
+    setPos({ left: r.left, width: Math.max(r.width, 300), maxHeight: maxH, ...(up ? { bottom: innerHeight - r.top + 4, top: "auto" } : { top: r.bottom + 4, bottom: "auto" }) });
   };
+  const openList = () => { place(); setText(""); setHi(Math.max(0, options.indexOf(cur))); };   // 已有焦點時再點一下也會打開
   const q = (text || "").trim().toLowerCase();
   const shown = text == null ? [] : options.filter((o) => !q || o.label.toLowerCase().includes(q)).slice(0, 80);
   const pick = (o) => { setText(null); if (o) onChange(o.value); };
@@ -421,7 +422,8 @@ export function Combo({ value, onChange, options, placeholder = "輸入代號或
   }, [hi]);
   return html`<div class=${"text combo " + cls} ref=${boxRef}>
     <input value=${text ?? (cur ? cur.label : "")} placeholder=${placeholder} disabled=${disabled} title=${cur ? cur.label : ""}
-      onFocus=${(e) => { place(); setText(""); setHi(Math.max(0, options.indexOf(cur))); }}
+      onFocus=${() => openList()}
+      onMouseDown=${() => { if (text == null && document.activeElement === boxRef.current.querySelector("input")) openList(); }}
       onBlur=${() => setTimeout(() => setText(null), 150)}
       onInput=${(e) => { setText(e.target.value); setHi(0); }}
       onKeyDown=${(e) => {
@@ -431,7 +433,7 @@ export function Combo({ value, onChange, options, placeholder = "輸入代號或
         else if (e.key === "Escape") { e.stopPropagation(); setText(null); e.target.blur(); }
       }} />
     <${Icon} name="chevron_down" cls="arrow" />
-    ${text != null && shown.length > 0 && html`<${Portal}><div class="pop floating" ref=${listRef} style=${pos ? Object.entries(pos).map(([k, v]) => `${k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())}:${v}px`).join(";") : ""}>${shown.map((o, i) => html`<div class=${i === hi ? "hi" : ""}
+    ${text != null && shown.length > 0 && html`<${Portal}><div class="pop floating" ref=${listRef} style=${pos ? Object.entries(pos).map(([k, v]) => `${k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())}:${typeof v === "number" ? v + "px" : v}`).join(";") : ""}>${shown.map((o, i) => html`<div class=${i === hi ? "hi" : ""}
         onMouseDown=${(e) => { e.preventDefault(); pick(o); boxRef.current.querySelector("input").blur(); }}>
       <span class="grow">${o.label}</span>${o.hint && html`<span class="muted small">${o.hint}</span>`}</div>`)}</div></${Portal}>`}
   </div>`;

@@ -1063,3 +1063,30 @@ html.animate .nav.on::before { animation: navbar .35s cubic-bezier(.2, .8, .2, 1
 .pop.floating > div { display: flex; gap: .5rem; align-items: center; border-radius: .5rem; cursor: pointer; }
 .pop.floating > div:hover, .pop.floating > div.hi { background: var(--primary-soft); color: var(--primary); }
 .pop.floating > div { padding: .24rem .6rem; line-height: 1.4; font-size: .95rem; }
+
+/* ---------- 3.4.1 清單對話框：清單撐滿可用高度（她的回饋：每一處清單都要看得到更多列） ---------- */
+.dialog.listdlg .dbody { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.dialog.listdlg .dbody > * { flex: none; }
+.dialog.listdlg .dbody > .tablewrap, .dialog.listdlg .dbody > .jtable-wrap { flex: 1 1 auto; min-height: 11rem; max-height: none !important; }
+.share2 { min-width: 0; }
+@media (max-height: 860px) {
+  .overlay { padding: .6rem; }
+  .dialog { max-height: calc(100vh - 1.2rem); }
+  .dhead { padding: .7rem 1.2rem .5rem; }
+  .dhead .badge-ic { width: 2rem; height: 2rem; }
+  .dbody { padding: .3rem 1.3rem .7rem; }
+  .dfoot { padding-top: .6rem !important; padding-bottom: .6rem !important; }
+  .share2 { gap: .4rem; }
+  .share2 i { width: 2.6rem; }
+}
+/* 複式分錄：每一欄的輸入框都不超出欄寬（不再左右捲動） */
+table.jtable td > .text, table.jtable td > .amount, table.jtable td > .select, table.jtable td > .combo { min-width: 0; width: 100%; }
+table.jtable td .row.nowrap > * { min-width: 0; }
+@media (max-height: 860px) {
+  .dialog.journal .dbody > p.hint { display: none; }
+  table.jtable td { padding: .18rem .35rem; }
+  table.jtable .select, table.jtable .text, table.jtable .amount { min-height: 2.1rem; }
+  table.list td.elide.acnote { max-width: 7rem !important; }
+  .dialog.listdlg .dbody > p.hint:first-child { display: none; }
+  .kpis .kpi { min-height: 0; padding-top: .6rem; padding-bottom: .6rem; }
+}

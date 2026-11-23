@@ -256,7 +256,7 @@ function AuditDlg({ tid, close }) {
       const [kw, setKw] = useState("");
       const [rows, setRows] = useState(null);
       useEffect(() => { api("audit", tid, kw.trim()).then(setRows); }, [kw]);
-      return html`<${Dialog} title=${tid ? `修改紀錄　V${String(tid).padStart(6, "0")}` : "修改紀錄（稽核軌跡）"} icon="eye" width="64rem" onClose=${() => close()}
+      return html`<${Dialog} title=${tid ? `修改紀錄　V${String(tid).padStart(6, "0")}` : "修改紀錄（稽核軌跡）"} icon="eye" width="64rem" cls="listdlg" onClose=${() => close()}
           footer=${html`<span class="hint">修改紀錄由系統自動保存，無法刪除或修改，可作為帳務稽核之依據。</span><div class="grow"></div><${Btn} kind="primary" onClick=${() => close()}>關閉</${Btn}>`}>
         ${!tid && html`<div class="row" style="margin-bottom:.7rem"><${TextInput} icon="search" value=${kw} onInput=${setKw} placeholder="搜尋傳票號碼、動作或內容…" /></div>`}
         ${rows == null ? html`<div class="muted">讀取中…</div>` : html`<${DataTable} rows=${rows} maxHeight="60vh" empty="沒有修改紀錄"

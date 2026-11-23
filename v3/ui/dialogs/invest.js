@@ -120,7 +120,7 @@ function SecurityListDialog({ close }) {
     try { await api("security_archive", cur.id, !cur.archived); changed(); load(); } catch (e) { errorBox(e.message); }
   }
   async function types() { const f = await api("security_form", null, null); if (await openTypes(f.types)) load(); }
-  return html`<${Dialog} title="標的設定" icon="edit" width="66rem" onClose=${() => close()}
+  return html`<${Dialog} title="標的設定" icon="edit" width="66rem" cls="listdlg" onClose=${() => close()}
       footer=${html`<${Btn} icon="plus" onClick=${async () => { if (await openSecurity()) load(); }}>新增標的</${Btn}>
         <${Btn} icon="edit" disabled=${!cur} onClick=${() => edit(cur)}>編輯</${Btn}>
         <${Btn} icon="list" onClick=${types}>管理類型</${Btn}>
@@ -256,16 +256,16 @@ function PriceDialog({ close }) {
       changed(); toast(`已產生 ${n} 檔評價分錄（Ctrl+Z 可復原）`); close(true);
     } catch (e) { setMsg({ bad: true, text: e.message }); }
   }
-  return html`<${Dialog} title="市價評價" icon="refresh" width="56rem" onClose=${() => close()}
+  return html`<${Dialog} title="市價評價" icon="refresh" width="56rem" cls="listdlg" onClose=${() => close()}
       footer=${html`<div class="grow"></div><${Btn} onClick=${() => close()}>取消</${Btn}><${Btn} kind="primary" icon="check" onClick=${save}>產生評價分錄</${Btn}>`}>
     <div class="row wrap" style="margin-bottom:.8rem"><span class="lbl">評價日期</span><${DateInput} value=${date} onChange=${setDate} />
       <div class="grow"></div>${META.online && html`<${Btn} icon="download" disabled=${busy} onClick=${fetch}>${busy ? "下載中…" : "從網路取得收盤價"}</${Btn}>`}</div>
-    ${rows && (rows.length === 0 ? html`<div class="note">這個日期沒有持股。</div>` : html`<table class="list edit ptable">
+    ${rows && (rows.length === 0 ? html`<div class="note">這個日期沒有持股。</div>` : html`<div class="tablewrap"><table class="list edit ptable sticky">
       <thead><tr><th>代號</th><th>名稱</th><th class="r">持股</th><th class="r">最近評價市價</th><th class="r" style="width:13rem">評價市價</th></tr></thead>
       <tbody>${rows.map((h) => html`<tr><td><b>${h.code}</b></td><td>${h.name}</td><td class="r num">${num(h.shares, null, false, 0)}</td>
         <td class="r num muted">${h.price ? num(h.price, null, false, 2) : h.sold ? "已全數賣出" : "尚未評價"}</td>
         <td>${h.sold ? html`<span class="muted small">剩餘帳面價值 ${num(h.market_value, null, false, 0)} 將歸零</span>`
-          : html`<${AmountInput} value=${vals[h.id] ?? null} onChange=${(v) => setVals({ ...vals, [h.id]: v })} decimals=${4} placeholder="輸入市價" />`}</td></tr>`)}</tbody></table>`)}
+          : html`<${AmountInput} value=${vals[h.id] ?? null} onChange=${(v) => setVals({ ...vals, [h.id]: v })} decimals=${4} placeholder="輸入市價" />`}</td></tr>`)}</tbody></table></div>`)}
     <p class="hint">選擇評價日期並輸入市價（留空表示這檔不評價）。按「產生評價分錄」後才會把帳面價值調整為預估淨售價（市價×股數，扣除預估賣出手續費與證交稅），差額記為「未實現評價損益」；同一天再次評價會取代先前的市價。買進、賣出不會自動評價；已全數賣出的標的，剩餘評價會自動歸零。輸入錯誤時，可到「交易紀錄」刪除該筆市價評價。</p>
     ${msg && html`<div class=${"msg " + (msg.bad ? "bad" : "ok")}><${Icon} name=${msg.bad ? "alert" : "check"} />${msg.text}</div>`}
   </${Dialog}>`;

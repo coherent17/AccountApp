@@ -55,7 +55,7 @@ export function Accounts({ go }) {
       render: (a) => html`<div class="share2"><i><b style=${`width:${Math.max(2, Math.min(100, a.share * 100))}%`}></b></i><span class="num">${pct(a.share)}</span></div>` },
     { key: "maturity", title: "到期日", align: "c", nowrap: true, sort: (a) => a.maturity,
       render: (a) => html`<span class=${a.maturity_soon ? "c-expense" : "muted"}>${ymd(a.maturity)}</span>` },
-    { key: "note", title: "備註", elide: true, cls: () => "grow muted",
+    { key: "note", title: "備註", elide: true, cls: () => "grow muted acnote",
       tip: (a) => a.note + (a.interest ? `（年利率 ${a.interest}%）` : ""),
       render: (a) => a.note + (a.interest ? `（年利率 ${a.interest}%）` : "") },
   ];
