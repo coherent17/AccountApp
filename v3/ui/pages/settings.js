@@ -97,7 +97,7 @@ function CatTable({ kind, rows, tags }) {
       <${Btn} icon="edit" disabled=${!cur} onClick=${() => openSubject(null, cur.id)}>修改</${Btn}>
       <${Btn} icon="more" disabled=${!cur} onClick=${(e) => { const b = e.currentTarget.getBoundingClientRect(); menu({ preventDefault() {}, clientX: b.left, clientY: b.bottom + 6 }, cur); }}>更多</${Btn}></div>
     <div class="card flush inner"><${DataTable} columns=${cols} rows=${rows} selected=${sel} onSelect=${setSel} onActivate=${(r) => openSubject(null, r.id)}
-      onMenu=${menu} maxHeight="26rem" rowCls=${(r) => (r.archived ? "void-soft" : "")} /></div></div>`;
+      onMenu=${menu} sticky=${false} rowCls=${(r) => (r.archived ? "void-soft" : "")} /></div></div>`;
 }
 function BudgetDlg({ r, close }) {
   const [v, setV] = useState(r.budget || null);

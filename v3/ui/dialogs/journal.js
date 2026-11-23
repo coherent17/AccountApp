@@ -206,7 +206,7 @@ function JournalDialog({ f0, opts, close }) {
     <${Btn} onClick=${() => close()}>${ro ? "關閉" : "取消"}</${Btn}>
     ${!ro && html`<${Btn} kind="primary" icon="check" disabled=${busy} onClick=${() => save(false)}>儲存</${Btn}>`}`;
 
-  return html`<${Dialog} title=${title} icon="book" width="90rem" onClose=${() => close()} footer=${footer} cls="journal">
+  return html`<${Dialog} title=${title} icon="book" width="90rem" onClose=${() => close()} footer=${footer} cls="journal listdlg">
     <div class="jtop">
       <${Field} label="日期"><${DateInput} value=${date} onChange=${ro ? () => {} : setDate} /></${Field}>
       ${!ro && html`<${Field} label="範本"><div class="row"><${Select} value=${""} onChange=${applyTemplate} style="flex:1"

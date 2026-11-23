@@ -30,7 +30,7 @@ function RecurringManager({ close }) {
     { key: "next", title: "下次日期", align: "c", render: (r) => html`<span class="num">${r.next ? ymd(r.next) : "—"}</span>` },
     { key: "st", title: "狀態", align: "c", render: (r) => html`<span class=${"type " + (r.active ? "b-income" : "b-void")}>${r.active ? "啟用" : "停用"}</span>` },
   ];
-  return html`<${Dialog} title="定期交易" icon="restore" width="66rem" onClose=${() => close()}
+  return html`<${Dialog} title="定期交易" icon="restore" width="66rem" cls="listdlg" onClose=${() => close()}
       footer=${html`<${Btn} kind="primary" icon="plus" onClick=${() => edit(null)}>新增</${Btn}>
         <${Btn} icon="edit" disabled=${!cur_} onClick=${() => edit(cur_)}>編輯</${Btn}>
         <${Btn} icon="eye" disabled=${!cur_} onClick=${async () => { await api("recurring_toggle", cur_.id); changed(); load(); }}>啟用／停用</${Btn}>
@@ -110,15 +110,15 @@ function DueDialog({ due, close }) {
     toast(skip ? `已略過 ${res.n} 筆（本期不入帳）` : `已入帳 ${res.n} 筆定期交易（Ctrl+Z 可復原）`);
     close(true);
   }
-  return html`<${Dialog} title="定期交易到期提醒" icon="bell" accent="var(--gold)" width="54rem" onClose=${() => close()}
+  return html`<${Dialog} title="定期交易到期提醒" icon="bell" accent="var(--gold)" width="54rem" cls="listdlg" onClose=${() => close()}
       footer=${html`<${Btn} onClick=${() => close()}>稍後再說</${Btn}><div class="grow"></div>
         <${Btn} onClick=${() => go(true)}>略過所選（本期不入帳）</${Btn}><${Btn} kind="primary" icon="check" onClick=${() => go(false)}>入帳所選</${Btn}>`}>
     <p><b>有 ${due.length} 筆定期交易已到期，請確認是否入帳：</b></p>
     <p class="hint">金額若與實際不同（例如水電費），可直接修改後再入帳。</p>
-    <table class="list edit"><thead><tr><th class="c">入帳</th><th>日期</th><th>名稱</th><th class="c">類型</th><th class="r" style="width:12rem">金額</th></tr></thead>
+    <div class="tablewrap"><table class="list edit sticky"><thead><tr><th class="c">入帳</th><th>日期</th><th>名稱</th><th class="c">類型</th><th class="r" style="width:12rem">金額</th></tr></thead>
       <tbody>${rows.map((r) => html`<tr><td class="c"><${Check} checked=${r.on} onChange=${(v) => set(r.i, { on: v })} /></td>
         <td class="num">${ymd(r.date)}</td><td><b>${r.name}</b></td><td class="c"><${TypeBadge} type=${r.type} label=${r.type_label} /></td>
-        <td><${AmountInput} value=${r.amount} onChange=${(v) => set(r.i, { amount: v })} /></td></tr>`)}</tbody></table>
+        <td><${AmountInput} value=${r.amount} onChange=${(v) => set(r.i, { amount: v })} /></td></tr>`)}</tbody></table></div>
   </${Dialog}>`;
 }
 
@@ -143,7 +143,7 @@ function Reconcile({ aid0, close }) {
     changed(); toast(`「${d.name}」對帳完成，核銷 ${checked.size} 筆`); close(true);
   }
   const toggle = (id) => { const n = new Set(checked); n.has(id) ? n.delete(id) : n.add(id); setChecked(n); };
-  return html`<${Dialog} title="銀行對帳" icon="list" width="64rem" onClose=${() => close()}
+  return html`<${Dialog} title="銀行對帳" icon="list" width="64rem" cls="listdlg" onClose=${() => close()}
       footer=${html`<${Btn} icon="list" onClick=${() => setHist(!hist)}>${hist ? "回到對帳" : "對帳紀錄"}</${Btn}><div class="grow"></div>
         <${Btn} onClick=${() => close()}>取消</${Btn}><${Btn} kind="primary" icon="check" onClick=${finish}>完成對帳</${Btn}>`}>
     <p class="hint" style="margin-top:0">拿出銀行存摺或對帳單，輸入對帳單日期與期末餘額，再勾選存摺上已出現的每一筆紀錄。差額為 0 即對帳完成；未勾選的就是「未達帳項」。</p>
@@ -238,7 +238,7 @@ function SearchDialog({ go, close }) {
     { key: "detail", title: "內容", render: (r) => html`<span class="muted">${r.detail}</span>`, elide: true, cls: () => "grow" },
     { key: "amt", title: "金額", align: "r", render: (r) => (r.amount == null ? "" : html`<span class="num">${money(r.amount, r.currency || META.base)}</span>`) },
   ];
-  return html`<${Dialog} title="全域搜尋" icon="search" width="72rem" onClose=${() => close()}
+  return html`<${Dialog} title="全域搜尋" icon="search" width="72rem" cls="listdlg" onClose=${() => close()}
       footer=${html`<span class="hint">可輸入多個關鍵字（空白分隔，全部符合才列出）：傳票號碼 V000123、日期 2025-03 或 114/3/5、金額、代號，或說明、科目、標的、附件名稱。按兩下開啟。</span>
         <div class="grow"></div><${Btn} onClick=${() => close()}>關閉</${Btn}>`}>
     <${TextInput} icon="search" value=${text} onInput=${setText} placeholder="搜尋傳票、科目、投資標的、定期交易…" autofocus cls="big-search" />

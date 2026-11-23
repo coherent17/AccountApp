@@ -51,6 +51,31 @@ window.__t = {
     const fit = tr ? Math.floor((bottom - Math.max(top, th ? th.getBoundingClientRect().bottom : top)) / tr.getBoundingClientRect().height) : 0;
     return `${rows.length} 列，可容納 ${fit} 列（${hbar}）`;
   }).join("；"),
+  audit: () => {
+    // 每個看得到的表格：完整看得到幾列／共幾列、可容納幾列、是否需要左右捲動
+    const out = [];
+    for (const t of document.querySelectorAll("table")) {
+      if (!t.offsetParent || !t.tBodies[0] || t.closest(".pop")) continue;
+      const rows = [...t.tBodies[0].rows].filter((r) => r.getBoundingClientRect().height > 0);
+      if (!rows.length) continue;
+      let top = 0, bottom = innerHeight, hbar = false;
+      for (let e = t.parentElement; e && e !== document.body; e = e.parentElement) {
+        const cs = getComputedStyle(e);
+        if (/(auto|scroll|hidden)/.test(cs.overflowY)) { const r = e.getBoundingClientRect(); top = Math.max(top, r.top); bottom = Math.min(bottom, r.bottom); }
+        if (!hbar && /(auto|scroll)/.test(cs.overflowX) && e.scrollWidth > e.clientWidth + 2 && !e.classList.contains("main"))
+          hbar = `${e.scrollWidth}>${e.clientWidth}px［${[...(t.tHead ? t.tHead.rows[0].cells : [])].map((c) => c.textContent.slice(0, 4) + Math.round(c.offsetWidth)).join(" ")}］`;
+      }
+      const th = t.tHead && t.tHead.getBoundingClientRect();
+      if (th && th.height && th.top >= top - 1 && th.top < bottom) top = Math.max(top, th.bottom);
+      const vis = rows.filter((r) => { const b = r.getBoundingClientRect(); return b.top >= top - 1 && b.bottom <= bottom + 1; }).length;
+      const rh = rows.reduce((a, r) => a + r.getBoundingClientRect().height, 0) / rows.length;
+      const name = (t.closest(".dialog") ? "[對話框] " : "") + (t.className || "table").replace(/\s+/g, ".");
+      out.push(`${name} 看得到 ${vis}/${rows.length} 列，可容納約 ${Math.max(0, Math.floor((bottom - top) / rh))} 列${hbar ? "，有左右捲軸 " + hbar : ""}`);
+    }
+    const m = document.querySelector(".main");
+    if (m && m.scrollHeight > m.clientHeight + 4) out.push(`整頁可上下捲動（${m.scrollHeight}/${m.clientHeight}px）`);
+    return out.join("；") || "（沒有表格）";
+  },
   openTour, openUpdateFake: (v) => { window.__fakeUpdate(v); },
   openUserJournal: async () => openJournal({ tid: (await api("txn_list", { ...ALL, type: "journal" })).rows.find((r) => !r.source).id }),
   journalTemplate: (name) => { const s = document.querySelector(".journal .jtop select"); const i = [...s.options].findIndex((o) => o.text === name); s.value = i; s.dispatchEvent(new Event("change", { bubbles: true })); },

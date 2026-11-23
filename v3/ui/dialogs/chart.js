@@ -101,7 +101,7 @@ function ChartDialog({ close }) {
     { key: "label", title: "科目類別", render: (r) => html`<span class="muted">${r.label || ""}</span>`, nowrap: true },
     { key: "amount", title: `餘額／本年累計（${META.base}）`, align: "r", render: (r) => (r.amount == null ? "" : html`<span class="num">${num(r.amount)}</span>`) },
   ];
-  return html`<${Dialog} title="會計科目表" icon="list" width="66rem" onClose=${() => close()}
+  return html`<${Dialog} title="會計科目表" icon="list" width="66rem" cls="listdlg" onClose=${() => close()}
       footer=${html`<${Btn} kind="primary" icon="plus" onClick=${async () => { if (await openSubject()) load(); }}>新增會計科目</${Btn}>
         <${Btn} icon="edit" onClick=${() => edit()}>修改</${Btn}><${Btn} icon="archive" onClick=${archive}>封存／取消封存</${Btn}>
         <div class="grow"></div><${Btn} onClick=${() => close()}>關閉</${Btn}>`}>
