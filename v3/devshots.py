@@ -12,6 +12,21 @@ import time
 
 ESC = "window.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}))"
 
+# 她的螢幕（約 1280×720）：每一頁量測看得到的列數，再截圖（MY_LEDGER_V3_SCENES=mom）
+MOM = []
+for scale in ("normal", "large"):
+    MOM += [
+        (f"mom_{scale}_transactions", f"__t.prefs('light', '{scale}'); __t.go('transactions')", 2.5),
+        (f"mom_{scale}_invest_hold", "__t.go('investments')", 2.5),
+        (f"mom_{scale}_invest_events", "__t.tab('交易紀錄')", 2),
+        (f"mom_{scale}_reports_bs", "__t.go('reports')", 2.5),
+        (f"mom_{scale}_reports_is", "__t.tab('收支損益表')", 2),
+        (f"mom_{scale}_reports_journal", "__t.tab('日記帳')", 2),
+        (f"mom_{scale}_journal_combo", "__t.openJournal()", 1.5),
+        (f"mom_{scale}_journal_combo_open", "document.querySelector('.combo input').focus()", 1),
+        (f"mom_{scale}_close", ESC + "; " + ESC, 0.5),
+    ]
+
 # README 用的截圖（MY_LEDGER_V3_SCENES=readme）：淺色、大字，範例帳本
 README = [
     ("readme_dashboard", "__t.prefs('light', 'large'); __t.go('dashboard')", 3.5),
@@ -152,9 +167,12 @@ def run(win, out: str) -> None:
     only = [s for s in os.environ.get("MY_LEDGER_V3_SCENES", "").split(",") if s]
     time.sleep(5)
     errors = []
-    scenes = README if only == ["readme"] else SCENES
+    scenes = README if only == ["readme"] else MOM if only == ["mom"] else SCENES
+    if only == ["mom"]:
+        win.resize(1280, 720)
+        time.sleep(1)
     for name, js, wait in scenes:
-        if only and only != ["readme"] and not any(name.startswith(o) for o in only):
+        if only and only not in (["readme"], ["mom"]) and not any(name.startswith(o) for o in only):
             continue
         if name == "min_window":
             win.resize(1100, 700)
@@ -164,6 +182,10 @@ def run(win, out: str) -> None:
         except Exception as e:  # noqa: BLE001
             errors.append(f"{name}: {e}")
         time.sleep(wait)
+        if name.startswith("mom_") and not name.endswith(("_close", "_combo_open")):
+            print(f"{name}: {win.evaluate_js('window.__t.visibleRows()')}", flush=True)
+        if name.endswith("_combo_open"):
+            print(f"{name}: 下拉選單顯示 {win.evaluate_js("[...document.querySelectorAll('.pop.floating > div')].filter(d => {const r=d.getBoundingClientRect(); const p=d.closest('.pop').getBoundingClientRect(); return r.top>=p.top-1 && r.bottom<=Math.min(p.bottom, innerHeight)+1}).length")} 個項目", flush=True)
         errs = json.loads(win.evaluate_js("JSON.stringify(window.__errors.splice(0))") or "[]")
         errors += [f"{name}: {e}" for e in errs]
         _grab(win, os.path.join(out, f"v3_{name}.png"))

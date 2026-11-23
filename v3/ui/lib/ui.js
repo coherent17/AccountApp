@@ -1,4 +1,5 @@
 // 共用元件：圖示、按鈕、對話框、表單欄位、表格、右鍵選單。
+import { render } from "preact";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { ICONS } from "../icons.js";
 import { catEmoji } from "./caticon.js";
@@ -388,12 +389,29 @@ export function PeriodPicker({ state, label = "期間" }) {
     <${DateInput} value=${range[1]} onChange=${(d) => setP({ period: "自訂期間", start: range[0], end: d })} /></span></span>`;
 }
 
+/** 把內容畫在頁面最上層（document.body），不會被對話框或表格的捲動區域切掉。 */
+export function Portal({ children }) {
+  const el = useMemo(() => { const d = document.createElement("div"); document.body.appendChild(d); return d; }, []);
+  useEffect(() => () => { render(null, el); el.remove(); }, []);
+  useEffect(() => { render(children, el); });
+  return null;
+}
+
 /** 可搜尋的下拉選單：輸入代號或名稱篩選，↑↓ 選擇、Enter 確定。options: [{value, label, group?, hint?}] */
 export function Combo({ value, onChange, options, placeholder = "輸入代號或名稱搜尋…", disabled, cls = "" }) {
   const cur = options.find((o) => o.value === value);
   const [text, setText] = useState(null);       // null：顯示目前選項；文字：搜尋中
   const [hi, setHi] = useState(0);
+  const [pos, setPos] = useState(null);         // 下拉清單浮在最上層（不會被表格的捲動區域切掉），依空間決定往下或往上
   const listRef = useRef(null);
+  const boxRef = useRef(null);
+  const place = () => {
+    const r = boxRef.current.getBoundingClientRect();
+    const below = innerHeight - r.bottom - 12, above = r.top - 12;
+    const up = below < 320 && above > below;
+    const maxH = Math.min(Math.max(up ? above : below, 160), innerHeight * 0.7);
+    setPos({ left: r.left, width: Math.max(r.width, 300), maxHeight: maxH, ...(up ? { bottom: innerHeight - r.top + 4 } : { top: r.bottom + 4 }) });
+  };
   const q = (text || "").trim().toLowerCase();
   const shown = text == null ? [] : options.filter((o) => !q || o.label.toLowerCase().includes(q)).slice(0, 80);
   const pick = (o) => { setText(null); if (o) onChange(o.value); };
@@ -401,9 +419,9 @@ export function Combo({ value, onChange, options, placeholder = "輸入代號或
     const el = listRef.current && listRef.current.children[hi];
     el && el.scrollIntoView({ block: "nearest" });
   }, [hi]);
-  return html`<div class=${"text combo " + cls}>
+  return html`<div class=${"text combo " + cls} ref=${boxRef}>
     <input value=${text ?? (cur ? cur.label : "")} placeholder=${placeholder} disabled=${disabled} title=${cur ? cur.label : ""}
-      onFocus=${(e) => { setText(""); setHi(Math.max(0, options.indexOf(cur))); }}
+      onFocus=${(e) => { place(); setText(""); setHi(Math.max(0, options.indexOf(cur))); }}
       onBlur=${() => setTimeout(() => setText(null), 150)}
       onInput=${(e) => { setText(e.target.value); setHi(0); }}
       onKeyDown=${(e) => {
@@ -413,9 +431,9 @@ export function Combo({ value, onChange, options, placeholder = "輸入代號或
         else if (e.key === "Escape") { e.stopPropagation(); setText(null); e.target.blur(); }
       }} />
     <${Icon} name="chevron_down" cls="arrow" />
-    ${text != null && shown.length > 0 && html`<div class="pop" ref=${listRef}>${shown.map((o, i) => html`<div class=${i === hi ? "hi" : ""}
-        onMouseDown=${(e) => { e.preventDefault(); pick(o); e.currentTarget.closest(".combo").querySelector("input").blur(); }}>
-      <span class="grow">${o.label}</span>${o.hint && html`<span class="muted small">${o.hint}</span>`}</div>`)}</div>`}
+    ${text != null && shown.length > 0 && html`<${Portal}><div class="pop floating" ref=${listRef} style=${pos ? Object.entries(pos).map(([k, v]) => `${k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())}:${v}px`).join(";") : ""}>${shown.map((o, i) => html`<div class=${i === hi ? "hi" : ""}
+        onMouseDown=${(e) => { e.preventDefault(); pick(o); boxRef.current.querySelector("input").blur(); }}>
+      <span class="grow">${o.label}</span>${o.hint && html`<span class="muted small">${o.hint}</span>`}</div>`)}</div></${Portal}>`}
   </div>`;
 }
 
