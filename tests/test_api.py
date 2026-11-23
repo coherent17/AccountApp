@@ -8,6 +8,7 @@
 """
 
 import datetime as dt
+import csv
 import json
 import os
 import shutil
@@ -177,6 +178,21 @@ def read_everything(lg: Ledger, where: str):
     assert {"today_count", "streak", "ranking", "insights"} <= dd.keys(), where
     ok(a.first_run(), where)
     ok(a.backup_reminder(), where)
+    assert "calendar" in dd, where
+    # 3.5：提醒中心、月結、健康檢查、月報、快速記帳
+    ru = ok(a.reminders_upcoming(120), where)
+    assert all(e["date"] >= (dt.date.today() - dt.timedelta(days=7)).isoformat() for e in ru["events"]), where
+    mc = ok(a.month_close(), where)
+    assert mc["total"] == 6 and 0 <= mc["done"] <= 6 and mc["months"], where
+    for ym in mc["months"][:3]:
+        ok(a.month_close(ym), where)
+        assert ok(a.monthly_html(ym), where).startswith("<html>"), where
+    hr = ok(a.health_run(), where)
+    assert hr["bad"] == 0, (where, [c for c in hr["checks"] if c["status"] == "bad"])
+    assert {c["key"] for c in hr["checks"]} >= {"file", "trial", "vouchers", "backup", "recurring"}, where
+    assert ok(a.health_html(), where).startswith("<html>")
+    tf = ok(a.txn_form(None), where)
+    assert isinstance(tf["quick"], list) and isinstance(tf["hints"], dict), where
 
 
 def test_old_ledgers_read():
@@ -354,6 +370,127 @@ def test_whats_new_after_update():
         lg.run(db.set_setting, "last_seen_version", "3.1.0")    # 更新時存下的 GitHub 說明優先
         lg.run(db.set_setting, "update_notes", json.dumps({"version": APP_VERSION, "notes": "* 網路上的說明"}))
         assert ok(a.whats_new())["notes"] == "* 網路上的說明"
+    finally:
+        lg.close()
+
+
+def test_quick_entry():
+    """常記的項目：同一說明＋分類記過 2 次以上才列出；說明會帶出上次的分類與帳戶。"""
+    lg = Ledger(sample=True)
+    try:
+        a = lg.api
+        f = ok(a.txn_form(None))
+        assert f["quick"], "範例帳本應該有常記的項目"
+        for q in f["quick"]:
+            assert q["count"] >= 2 and q["note"] and q["category"] and q["type"] in ("income", "expense"), q
+        counts = [q["count"] for q in f["quick"]]
+        assert counts == sorted(counts, reverse=True)
+        q = f["quick"][0]
+        h = f["hints"][q["note"]]
+        assert h["type"] == q["type"] and h["category_id"] and h["account_id"]
+        # 新記一筆後，提示改用最新的帳戶
+        acc2 = next(x["id"] for x in f["accounts"] if x["id"] != h["account_id"] and x["kind"] == "asset")
+        ok(a.txn_save({"date": dt.date.today().isoformat(), "type": q["type"], "account_id": acc2, "amount": 123,
+                       "note": q["note"], "category_id": q["category_id"], "tags": []}))
+        assert ok(a.txn_form(None))["hints"][q["note"]]["account_id"] == acc2
+        assert ok(a.txn_form(1))["quick"] == []          # 編輯時不需要
+    finally:
+        lg.close()
+
+
+def test_reminders_custom():
+    from core import reminders
+    lg = Ledger(sample=True)
+    try:
+        a = lg.api
+        today = dt.date.today()
+        assert "名稱" in err(a.reminder_save({"title": " ", "date": today.isoformat()}))
+        assert "日期" in err(a.reminder_save({"title": "保費", "date": ""}))
+        day = (today + dt.timedelta(days=5)).isoformat()
+        r = ok(a.reminder_save({"title": "國泰人壽保費", "kind": "insurance", "freq": "yearly", "date": day,
+                                "amount": 36000, "lead": 10}))
+        m = ok(a.reminder_save({"title": "信用卡繳款", "kind": "card", "freq": "monthly",
+                                "date": (today.replace(day=1) - dt.timedelta(days=40)).replace(day=15).isoformat()}))
+        ev = ok(a.reminders_upcoming(90))["events"]
+        ins = [e for e in ev if e.get("id") == r["id"]]
+        assert len(ins) == 1 and ins[0]["date"] == day and ins[0]["urgent"] and ins[0]["amount"] == 36000
+        cards = [e for e in ev if e.get("id") == m["id"]]
+        assert 2 <= len(cards) <= 4 and all(e["date"][8:] == "15" for e in cards), cards
+        assert any(x["kind"] == "event" and x["event"].get("id") == r["id"] for x in ok(a.dashboard())["reminders"])
+        ok(a.reminder_save({**r, "title": "國泰人壽年繳保費"}))
+        assert [c["title"] for c in ok(a.reminders_upcoming())["custom"]].count("國泰人壽年繳保費") == 1
+        ok(a.reminder_delete(r["id"]))
+        assert all(c["id"] != r["id"] for c in ok(a.reminders_upcoming())["custom"])
+        # 每月 31 日在小月改為月底；報稅季
+        item = {"id": "x", "title": "t", "kind": "other", "freq": "monthly", "date": "2026-01-31", "lead": 7}
+        assert reminders.occurrences(item, dt.date(2026, 2, 1), dt.date(2026, 3, 31)) == [dt.date(2026, 2, 28),
+                                                                                         dt.date(2026, 3, 31)]
+        tax = [e for e in lg.run(reminders.upcoming, lg.db, 60, dt.date(2027, 4, 20)) if e["kind"] == "tax"]
+        assert [e["date"] for e in tax] == ["2027-05-01", "2027-05-31"] and tax[0]["year"] == 2026
+        lg.run(check_books, lg.db, "reminders")
+    finally:
+        lg.close()
+
+
+def test_month_close_flow():
+    from core import monthclose
+    lg = Ledger(sample=True)
+    try:
+        a = lg.api
+        ym = monthclose.previous_month()
+        st = ok(a.month_close(ym))
+        assert st["ym"] == ym and [s["key"] for s in st["steps"]] == [k for k, _, _ in monthclose.STEPS]
+        assert not next(s for s in st["steps"] if s["key"] == "budget")["ok"]        # 需要她自己確認
+        for k in ("budget", "health", "report"):
+            ok(a.month_close_check(ym, k, True))
+        st2 = ok(a.month_close(ym))
+        assert st2["done"] == st["done"] + 3
+        ok(a.month_close_check(ym, "report", False))
+        assert ok(a.month_close(ym))["done"] == st["done"] + 2
+        assert "步驟" in err(a.month_close_check(ym, "nope", True))
+        ok(a.month_close_finish(ym))
+        assert ok(a.month_close(ym))["finished"]
+        assert not any(x["kind"] == "monthclose" for x in ok(a.dashboard())["reminders"])
+        # 開啟時的提醒：每月最多一次
+        lg.run(lg.db.set_setting, "month_close", "")
+        first = lg.run(monthclose.should_prompt, lg.db, dt.date.today().replace(day=3))
+        if first:
+            lg.run(monthclose.mark_prompted, lg.db, first)
+            assert lg.run(monthclose.should_prompt, lg.db, dt.date.today().replace(day=3)) == ""
+        assert lg.run(monthclose.should_prompt, lg.db, dt.date.today().replace(day=25)) == ""
+        lg.run(check_books, lg.db, "month close")
+    finally:
+        lg.close()
+
+
+def test_smart_recon():
+    """銀行明細（存入／提出／餘額欄）自動勾選：金額相同、日期差 3 天內；帳上沒有的列出來。"""
+    lg = Ledger(sample=True)
+    try:
+        a = lg.api
+        today = dt.date.today().isoformat()
+        rc = ok(a.recon_load(None, today))
+        acc = next(x for x in rc["accounts"] if "活存" in x["name"] or "活儲" in x["name"])
+        items = ok(a.recon_load(acc["id"], today))["items"][-8:]
+        assert len(items) >= 4
+        path = os.path.join(lg.dir, "bank.csv")
+        with open(path, "w", encoding="utf-8-sig", newline="") as fh:
+            w = csv.writer(fh)
+            w.writerow(["交易日期", "摘要", "提出", "存入", "餘額"])
+            bal = 100000
+            for i, it in enumerate(items[:-1]):          # 最後一筆故意不在銀行明細裡
+                d = dt.date.fromisoformat(it["date"]) + dt.timedelta(days=2 if i == 0 else 0)
+                bal += it["effect"]
+                w.writerow([d.isoformat().replace("-", "/"), it["note"], f"{-it['effect']:,.0f}" if it["effect"] < 0 else "",
+                            f"{it['effect']:,.0f}" if it["effect"] > 0 else "", f"{bal:,.0f}"])
+            w.writerow([items[-2]["date"].replace("-", "/"), "銀行手續費", "15", "", f"{bal - 15:,.0f}"])
+        r = ok(a.recon_match(acc["id"], today, path))
+        assert set(r["matched"]) == {it["txn_id"] for it in items[:-1]}, r
+        assert items[-1]["txn_id"] in r["book_only"]
+        assert [b["amount"] for b in r["bank_only"]] == [-15.0] and r["last_balance"] == bal - 15
+        bad = os.path.join(lg.dir, "bad.csv")
+        open(bad, "w", encoding="utf-8").write("名稱,數量\na,1\n")
+        assert "日期" in err(a.recon_match(acc["id"], today, bad))
     finally:
         lg.close()
 

@@ -111,6 +111,15 @@ Environment variables (pass from WSL with `WSLENV=...` and Windows paths):
 - `search.py`: 全域搜尋 (Ctrl+F or the sidebar button). It finds vouchers, 科目, securities and recurring entries. Space-separated tokens are ANDed. A token is typed by shape: `V000123` is a voucher number, `2025-03` or `114/3/5` (民國) is a date prefix, a number matches amounts/prices/shares or a code, and anything else matches text (notes, memos, names, attachment names, void reasons). Opening a result goes to the voucher, an account's 分類帳, a category's 收支明細, a security's 交易紀錄 or the recurring entry. It is read-only.
 - Updates (`desktop/api_update.py` + `core/online.py` + `core/updater.py`): checked on open and every 4 h while open (`update_auto`, default on; `update_last_check_at`; `update_skip` silences one version). `online.fetch_latest_release()` reads the GitHub latest release, and the asset `digest` gives the SHA-256. 「立即更新」 (frozen exe only) downloads next to the exe and verifies it, backs up the ledger to `自動備份/更新前備份_v<old>_<time>.db`, renames the running exe to `.old`, moves the new one into place and restarts with PyInstaller env vars cleared (`PYINSTALLER_RESET_ENVIRONMENT`). `cleanup_old_exe()` deletes the `.old` on the next start. If the folder is not writable, the new exe goes to 下載 and she replaces it by hand. This depends on the release asset staying named `MyLedger.exe`.
 
+**Assistant features (v3.5.0, `desktop/api_tools.py`, `desktop/ui/dialogs/tools.js`).** All stored as JSON settings, no schema change:
+- `core/monthclose.py`: 月結小幫手 steps (recurring posted, bank accounts reconciled since month start, holdings valued within 10 days of month end are auto-checked; budget/health/report are ticked by her). Progress in `month_close` ({ym: {checked, finished}}); the once-a-month startup prompt uses `month_close_prompted`.
+- `core/reminders.py`: 到期提醒中心. Custom reminders in `reminders` (once/monthly/yearly; monthly clamps to month end) plus derived events (定存 maturities, next recurring date, May tax season). `upcoming()` feeds the 總覽 「近期行事曆」 card; urgent ones (within `lead` days) also go to 提醒事項.
+- `core/health.py`: 資料健康檢查 (integrity_check, trial balance pairs, every voucher balanced, investment accounts = book value, backups, due recurring, unreconciled > 60 days, stale valuations, missing attachments, year-end close hint). Records `health_last`. `printing.Report.health()` prints it.
+- `core/quick.py`: 快速記帳 chips (`frequent`: same note+category ≥ 2 times in 180 days) and note → category/account hints, returned by `txn_form` for new entries only.
+- `core/bankmatch.py`: 智慧對帳 reads a bank Excel/CSV (date + 金額 or 存入/提出, optional 餘額), matches by equal amount within ±3 days one-to-one (tries both signs for card statements); the 銀行對帳 dialog only pre-ticks, she still saves.
+- `printing.Report.monthly(ym)`: one-page 月報 (財務報表 header button, also step 6 of 月結).
+- Scenes: `MY_LEDGER_SCENES=features` screenshots all of these at 1280×720 (標準 and 大).
+
 **User data.**
 - Everything is under `文件\我的理財帳本\`:
   - `理財帳本.db`

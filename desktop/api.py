@@ -24,6 +24,7 @@ from desktop.api_journal import JournalApi
 from desktop.api_more import MoreApi
 from desktop.api_reports import ReportsApi
 from desktop.api_settings import SettingsApi
+from desktop.api_tools import ToolsApi
 from desktop.api_update import UpdateApi
 from desktop.api_txn import TxnApi
 from desktop.rpc import DbThread, exposed  # noqa: F401 — DbThread 由 desktop/run.py 匯入
@@ -119,5 +120,5 @@ class ApiBase:
         return True
 
 
-class Api(MoreApi, JournalApi, UpdateApi, SettingsApi, DataApi, ReportsApi, InvestApi, AccountsApi, TxnApi, DashboardApi, ApiBase):
+class Api(MoreApi, JournalApi, UpdateApi, SettingsApi, ToolsApi, DataApi, ReportsApi, InvestApi, AccountsApi, TxnApi, DashboardApi, ApiBase):
     """pywebview 的 js_api：所有畫面可呼叫的方法（各頁的方法分在 api_*.py）。"""

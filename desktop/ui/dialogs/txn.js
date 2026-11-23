@@ -4,6 +4,7 @@ import { META, TYPE_LABELS, api, changed, cur, html, isoToday, money, num, toast
 import { openJournal } from "./journal.js";
 import { printVoucher } from "./print.js";
 import { flashRow } from "../lib/ui.js";
+import { catEmoji } from "../lib/caticon.js";
 import { AmountInput, Btn, Chips, DataTable, DateInput, Dialog, Field, Icon, Segmented, Select, TagInput, TextInput,
          ask, errorBox, info, openModal } from "../lib/ui.js";
 
@@ -107,6 +108,23 @@ function TxnDialog({ form, opts, close }) {
     close(true);
   }
 
+  // 快速記帳：點一下常記的項目，帶入類型、分類、帳戶、說明與上次的金額（金額會選取，直接打字就能改）
+  function applyQuick(q) {
+    setType(q.type); setCategory(q.category_id); setNote(q.note); setAmount(q.amount); setAmountKey((k) => k + 1);
+    if (accs[q.account_id]) setAccount(q.account_id);
+    setMsg({ text: `已帶入「${q.note}」，確認金額後按儲存。` });
+    setTimeout(() => { const el = document.querySelector(".dialog .amount.big input"); if (el) { el.focus(); el.select(); } }, 60);
+  }
+  // 輸入以前記過的說明（例如「全聯採買」）時，自動帶入上次的分類與帳戶
+  function onNote(v) {
+    setNote(v);
+    const h = form.hints && form.hints[v.trim()];
+    if (!h || editing || h.type !== type || category) return;
+    setCategory(h.category_id);
+    if (accs[h.account_id]) setAccount(h.account_id);
+    setMsg({ text: `已依上次「${v.trim()}」帶入分類與帳戶，可以再修改。` });
+  }
+
   // 把目前輸入的內容帶到複式分錄視窗
   function toJournal() {
     const acc = account ? `account:${account}` : "";
@@ -145,6 +163,11 @@ function TxnDialog({ form, opts, close }) {
 
   return html`<${Dialog} title=${title} icon=${ICON[type]} accent=${ACCENT[type]} width="44rem" onClose=${() => close(savedAny)} footer=${footer}>
     <form class="form" onSubmit=${(e) => { e.preventDefault(); save(false); }}>
+      ${!editing && !opts.prefill && type !== "adjust" && form.quick && form.quick.length > 0 && html`<div class="quick">
+          <span class="quick-lbl"><${Icon} name="restore" />常記</span>
+          ${form.quick.map((q) => html`<button type="button" class=${"qchip k-" + q.type} onClick=${() => applyQuick(q)}
+              title=${`${q.category}・${money(q.amount, c1)}（近半年記了 ${q.count} 次）`}>
+            <span class="emo">${catEmoji(q.category, q.type)}</span>${q.note}<small class="num">${money(q.amount, c1)}</small></button>`)}</div>`}
       ${type === "adjust"
         ? html`<div class="section-title" style="color:var(--adjust)">餘額／市值調整</div>`
         : html`<${Segmented} cls="types" value=${type} onChange=${(k) => { setType(k); if (k !== type) setCategory(null); }}
@@ -165,7 +188,7 @@ function TxnDialog({ form, opts, close }) {
       ${(type === "income" || type === "expense") && html`<${Field} label="分類" top>
           ${cats.length ? html`<${Chips} items=${cats} value=${category} onChange=${setCategory} kind=${type} />`
             : html`<div class="muted">還沒有${type === "income" ? "收入" : "支出"}分類，請到「設定 → 收支分類」新增。</div>`}</${Field}>`}
-      <${Field} label="說明"><${TextInput} value=${note} onInput=${setNote} suggestions=${form.notes} placeholder="例如：市場買菜、全聯採買（可留空）" /></${Field}>
+      <${Field} label="說明"><${TextInput} value=${note} onInput=${onNote} suggestions=${form.notes} placeholder="例如：市場買菜、全聯採買（可留空）" /></${Field}>
       ${!(t && t.system) && html`<${Field} label="標籤" hint="把跨分類的紀錄歸在一起統計，例如一趟旅行；到「財務報表 → 標籤／專案」看合計。">
           <${TagInput} value=${tags} onChange=${setTags} suggestions=${form.tags} /></${Field}>`}
       <${Field} label="附件" top>

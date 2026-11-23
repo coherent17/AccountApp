@@ -124,7 +124,7 @@ function Events({ d, sid, setSid }) {
     { key: "amount", title: "股利", align: "r", render: (r) => (r.amount ? html`<span class="num">${num(r.amount)}</span>` : "") },
     { key: "nhi", title: "補充保費", align: "r", render: (r) => (r.nhi ? html`<span class="num">${num(r.nhi)}</span>` : "") },
     { key: "cash", title: "交割帳戶", render: (r) => r.cash, nowrap: true },
-    { key: "note", title: "備註", elide: true, cls: () => "grow", render: (r) => r.note },
+    { key: "note", title: "備註", elide: true, cls: () => "grow evnote", render: (r) => r.note },
   ].filter((c) => !["shares", "fee", "amount", "nhi"].includes(c.key) || (rows || []).some((r) => r[c.key]));   // 這段期間都是空白的欄位不顯示，其他欄位才放得下
   return html`<div class="card filters"><div class="frow">
       <span class="lbl">標的</span><${Select} value=${sid} onChange=${setSid} options=${[[null, "全部標的"], ...d.securities.map((s) => [s.id, s.label])]} />

@@ -9,6 +9,7 @@ import { openVoucher } from "../dialogs/txn.js";
 import { openJournal } from "../dialogs/journal.js";
 import { openAnnual, openPrint } from "../dialogs/print.js";
 import { openExport } from "../dialogs/data.js";
+import { openMonthly } from "../dialogs/tools.js";
 import { showTransactions } from "./transactions.js";
 
 const TABS = [["bs", "資產負債表", "scale"], ["is", "收支損益表", "trend_up"], ["cf", "現金流量表", "transfer"],
@@ -32,6 +33,7 @@ export function Reports({ go }) {
     <${PageHead} icon="pie" color="var(--gold)" title="財務報表" sub="資產負債表、收支損益表、分類帳與試算表">
       <${Btn} kind="income" icon="download" big onClick=${() => openExport(start, end)}>匯出 Excel 報表</${Btn}>
       <${Btn} icon="print" big onClick=${() => openPrint(start, end)}>列印／PDF</${Btn}>
+      <${Btn} icon="calendar" big onClick=${() => openMonthly()} title="一頁看完一個月：收支、預算、淨資產、投資與接下來的提醒">月報</${Btn}>
       <${Btn} kind="primary" icon="book" big onClick=${() => openAnnual(meta.years)} title="一鍵產生整年度的完整報告（封面、四大報表、比率、投資績效…）">年度財務報告</${Btn}>
     </${PageHead}>
     <div class="card filters"><div class="frow"><${PeriodPicker} state=${per} label="報表期間" /><div class="grow"></div>
