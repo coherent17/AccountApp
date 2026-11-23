@@ -86,11 +86,14 @@ function Holdings({ d, asOf, setAsOf, trade, showEvents }) {
     { key: "unr", title: "未實現損益", align: "r", render: (h) => html`<span class=${"num " + sgn(h.unrealized)}>${num(h.unrealized, h.currency, true)}</span>`, sort: (h) => h.unrealized },
     { key: "ret", title: "報酬率", align: "r", render: (h) => html`<b class=${"num " + sgn(h.return_pct || 0)}>${pctS(h.return_pct)}</b>`, sort: (h) => h.return_pct || 0 },
   ];
-  return html`<div class="row wrap"><span class="lbl">持股截至</span><${DateInput} value=${d.as_of} onChange=${setAsOf} />
-      <${Btn} kind="link" onClick=${() => setAsOf(null)} disabled=${!asOf}>最新</${Btn}></div>
-    <div class="hold">
-      <${Card} cls="flush"><${DataTable} columns=${cols} rows=${d.holdings} selected=${sel} onSelect=${setSel} onActivate=${(h) => showEvents(h.id)}
-        onMenu=${menu} defaultSort=${["code", false]} sticky=${false} empty="目前沒有持股。按「買進」登錄第一筆投資。" /></${Card}>
+  return html`<div class="row wrap hold-bar"><span class="lbl">持股截至</span><${DateInput} value=${d.as_of} onChange=${setAsOf} />
+      <${Btn} kind="link" onClick=${() => setAsOf(null)} disabled=${!asOf}>最新</${Btn}>
+      ${data.length > 0 && html`<div class="hold-mix" title="持股比重（依帳面價值）"><span class="lbl">持股比重</span>
+        <div class="segbar">${data.map((h, i) => html`<i style=${`flex:${h.base_value};background:${pal[i % pal.length]}`} title=${`${h.name}　${pct(h.base_value / total, 0)}`}></i>`)}</div>
+        <div class="mix-legend">${data.slice(0, 4).map((h, i) => html`<span><i style=${`background:${pal[i % pal.length]}`}></i>${h.name} ${pct(h.base_value / total, 0)}</span>`)}</div></div>`}</div>
+    <div class="card table-card"><${DataTable} columns=${cols} rows=${d.holdings} selected=${sel} onSelect=${setSel} onActivate=${(h) => showEvents(h.id)}
+        onMenu=${menu} defaultSort=${["code", false]} empty="目前沒有持股。按「買進」登錄第一筆投資。" /></div>
+    <div class="hold tall-only">
       ${data.length > 0 && html`<${Card} title="持股比重" icon="pie" extra=${html`<span class="muted small">依帳面價值</span>`}>
         <div class="alloc row-chart"><div class="chart small" ref=${donut}></div>
         <div class="legend">${data.map((h, i) => html`<div><i style=${`background:${pal[i % pal.length]}`}></i>${h.name}<span class="num">${pct(h.base_value / total, 0)}</span></div>`)}</div></div>
@@ -122,11 +125,11 @@ function Events({ d, sid, setSid }) {
     { key: "nhi", title: "補充保費", align: "r", render: (r) => (r.nhi ? html`<span class="num">${num(r.nhi)}</span>` : "") },
     { key: "cash", title: "交割帳戶", render: (r) => r.cash, nowrap: true },
     { key: "note", title: "備註", elide: true, cls: () => "grow", render: (r) => r.note },
-  ];
+  ].filter((c) => !["shares", "fee", "amount", "nhi"].includes(c.key) || (rows || []).some((r) => r[c.key]));   // 這段期間都是空白的欄位不顯示，其他欄位才放得下
   return html`<div class="card filters"><div class="frow">
       <span class="lbl">標的</span><${Select} value=${sid} onChange=${setSid} options=${[[null, "全部標的"], ...d.securities.map((s) => [s.id, s.label])]} />
       <${PeriodPicker} state=${per} />
-      <div class="grow"></div><${Btn} kind="danger" icon="trash" onClick=${() => del()}>刪除選取交易</${Btn}></div></div>
+      <div class="grow"></div><${Btn} kind="danger" icon="trash" onClick=${() => del()} title="刪除選取的投資交易">刪除</${Btn}></div></div>
     <div class="card table-card"><${DataTable} columns=${cols} rows=${rows || []} rowKey=${(r) => r.id ?? "j" + r.txn_id}
       selected=${sel} onSelect=${setSel} onActivate=${(r) => r.txn_id && openVoucher(r.txn_id)} onDelete=${() => del()}
       onMenu=${(e, r) => openMenu(e, [r.txn_id ? { label: "開啟分錄傳票", icon: "book", run: () => openVoucher(r.txn_id) } : null,

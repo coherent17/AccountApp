@@ -91,7 +91,7 @@
 }
 
 /* 字型大小：標準／大／特大，與 v2 設定共用 */
-html[data-scale="normal"] { font-size: 14.5px; }
+html[data-scale="normal"] { font-size: 13px; }   /* 她的回饋：標準再縮小 10% */
 html[data-scale="large"] { font-size: 16px; }
 html[data-scale="xlarge"] { font-size: 18px; }
 
@@ -984,3 +984,82 @@ html.animate .nav.on::before { animation: navbar .35s cubic-bezier(.2, .8, .2, 1
 .page:not(.fill) .hold > .card:first-child { max-height: none; }
 .alloc.row-chart { grid-template-columns: 13rem 1fr; max-width: none; gap: 1.5rem; }
 .alloc.row-chart .legend { grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); column-gap: 2rem; align-content: center; }
+
+/* =====================================================================
+   3.4 精簡版面：螢幕較矮（筆電、顯示比例放大）時，讓表格、報表看得到更多行
+   （回饋 1151123：收支明細 10 行以上、持股 5 行以上、報表 15 行以上、捲軸就在資料下方）
+   ===================================================================== */
+.pop.floating { position: fixed; z-index: 400; right: auto; overflow-y: auto; }
+.hold-bar { gap: .6rem 1rem; }
+.hold-mix { display: flex; align-items: center; gap: .7rem; flex: 1; min-width: 18rem; justify-content: flex-end; }
+.hold-mix .segbar { width: 12rem; flex: none; }
+.mix-legend { display: flex; gap: .3rem .8rem; flex-wrap: wrap; font-size: .8rem; color: var(--text-2); }
+.mix-legend span { display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap; }
+.mix-legend i { width: .55rem; height: .55rem; border-radius: 2px; display: inline-block; }
+.hold.tall-only { flex: none; }
+.hold.tall-only:empty { display: none; }
+
+@media (max-width: 1400px) { :root { --sidebar-w: 13.5rem; } }
+
+@media (max-height: 860px) {
+  .tall-only { display: none !important; }
+  .page { padding: .9rem 1.3rem 1rem; gap: .7rem; }
+  .page.fill { padding-bottom: .8rem; }
+  .page-fill { gap: .65rem; }
+  /* 頁首：標題與按鈕同一列，說明文字收起 */
+  .head { flex-wrap: nowrap; gap: .8rem; }
+  .head .sub { display: none; }
+  .head h1 { font-size: 1.45rem; }
+  .ph { gap: .7rem; flex: none; }
+  .ph-ic { width: 2.4rem; height: 2.4rem; border-radius: .8rem; }
+  .ph-ic .ic { width: 1.2rem; height: 1.2rem; }
+  .actions { flex-wrap: wrap; justify-content: flex-end; gap: .4rem; }
+  .btn, .btn.big { min-height: 2.25rem; padding: .38rem .75rem; font-size: .9rem; }
+  /* 篩選列：較緊湊、不顯示「期間／篩選」標籤 */
+  .filters { padding: .55rem .8rem; gap: .45rem; }
+  .frow { gap: .4rem; }
+  .filters .lbl { display: none; }
+  .select, .date, .amount, .text, .tagin { min-height: 2.2rem; }
+  .select select, .text input, .date input { padding-top: .3rem; padding-bottom: .3rem; }
+  .pchips button { padding: .28rem .6rem; font-size: .84rem; }
+  /* 表格：列高較低 */
+  table.list td { padding: .42rem .6rem; }
+  table.list th { padding: .4rem .6rem; }
+  table.stmt td { padding: .3rem .8rem; }
+  .table-card { min-height: 9rem; }
+  .card.foot { padding: .5rem 1rem; }
+  .card.foot .tip, .page-fill > .tip, .pagefx > .tip { display: none; }
+  /* 分頁與卡片 */
+  .tabs { padding: .2rem; }
+  .tabs button { padding: .36rem .75rem; font-size: .9rem; }
+  .card { padding: .8rem 1rem; }
+  .card h3 { margin-bottom: .5rem; }
+  .card.flush, .card.table-card { padding: 0; }
+  /* 投資管理：五張卡片排成一列、縮小 */
+  .kpis5 { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .6rem; }
+  .kpis5 .kpi { min-height: 0; padding: .55rem .8rem; gap: .1rem; }
+  .kpis5 .kpi .t { font-size: .8rem; }
+  .kpis5 .kpi .badge-ic { width: 1.6rem; height: 1.6rem; border-radius: .5rem; }
+  .kpis5 .kpi .v { font-size: 1.2rem; }
+  .kpis5 .kpi .s { font-size: .74rem; }
+  .grid.kpis { gap: .7rem; }
+  .grid.kpis .kpi { min-height: 0; padding: .7rem 1rem; }
+  .grid.kpis .kpi .v { font-size: 1.5rem; }
+  .hero .v { font-size: 1.8rem; }
+}
+.pop.floating > div { padding: .34rem .65rem; }
+@media (max-height: 860px) {
+  table.list { font-size: .9rem; }
+  table.list td.elide { max-width: 11rem; }
+  table.list td.elide.grow { max-width: 16rem; }
+  .filters .frow > .btn { margin-left: auto; }
+}
+@media (max-height: 860px) {
+  .date input { width: 9.9rem; padding-right: 0; }
+  .filters .select select { max-width: 13rem; min-width: 6rem; }
+  table.list td.elide.grow { max-width: 12rem; }
+}
+.pop.floating { background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); padding: .3rem; }
+.pop.floating > div { display: flex; gap: .5rem; align-items: center; border-radius: .5rem; cursor: pointer; }
+.pop.floating > div:hover, .pop.floating > div.hi { background: var(--primary-soft); color: var(--primary); }
+.pop.floating > div { padding: .24rem .6rem; line-height: 1.4; font-size: .95rem; }

@@ -25,7 +25,7 @@ import { openExport } from "./dialogs/data.js";
 
 const NAV = [["dashboard", "總覽", "home"], ["transactions", "收支明細", "list"], ["accounts", "帳戶管理", "wallet"],
              ["investments", "投資管理", "chart"], ["reports", "財務報表", "excel"], ["settings", "設定", "settings"]];
-const FILL = ["transactions", "reports"];
+const FILL = ["transactions", "reports", "investments"];
 const PAGES = { dashboard: Dashboard, transactions: Transactions, accounts: Accounts, investments: Investments, reports: Reports, settings: Settings };
 
 async function undo() {
@@ -41,6 +41,16 @@ const ALL = { start: "1900-01-01", end: "2999-12-31" };
 window.__t = {
   go: (p) => window.__go(p), openTxn, openAccount, openAdjust, openPrices, openRates, openSecurity, openSecurityList, openTrade, openAnnual, openPrint, openExport, openChart, openSubject, openYearClose, openJournal,
   openRecurring, openDue, openReconcile, openImport, openSearch: () => openSearch(window.__go), openWelcome,
+  // 目前畫面上「完整看得到」的表格列數（每一個表格各算一次），用來驗證她要求的行數
+  visibleRows: () => [...document.querySelectorAll(".tablewrap, .table-card")].filter((w) => w.offsetParent && w.querySelector("tbody")).map((w) => {
+    const wr = w.getBoundingClientRect(), vh = window.innerHeight;
+    const top = Math.max(wr.top, 0), bottom = Math.min(wr.bottom, vh);
+    const rows = [...w.querySelectorAll("tbody tr")].filter((tr) => { const r = tr.getBoundingClientRect(); return r.top >= top - 1 && r.bottom <= bottom + 1; });
+    const hbar = w.scrollWidth > w.clientWidth + 2 ? "有橫向捲軸" : "欄位全部顯示";
+    const tr = w.querySelector("tbody tr"), th = w.querySelector("thead");
+    const fit = tr ? Math.floor((bottom - Math.max(top, th ? th.getBoundingClientRect().bottom : top)) / tr.getBoundingClientRect().height) : 0;
+    return `${rows.length} 列，可容納 ${fit} 列（${hbar}）`;
+  }).join("；"),
   openTour, openUpdateFake: (v) => { window.__fakeUpdate(v); },
   openUserJournal: async () => openJournal({ tid: (await api("txn_list", { ...ALL, type: "journal" })).rows.find((r) => !r.source).id }),
   journalTemplate: (name) => { const s = document.querySelector(".journal .jtop select"); const i = [...s.options].findIndex((o) => o.text === name); s.value = i; s.dispatchEvent(new Event("change", { bubbles: true })); },
