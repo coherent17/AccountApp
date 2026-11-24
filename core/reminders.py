@@ -43,7 +43,8 @@ def save_custom(db: Database, item: dict) -> dict:
     lead = item.get("lead")
     clean = {"id": item.get("id") or uuid.uuid4().hex[:10], "title": title, "kind": kind, "freq": freq,
              "date": item["date"], "amount": float(amount) if amount not in (None, "") else None,
-             "lead": int(lead) if lead not in (None, "") else 7, "note": (item.get("note") or "").strip()}
+             "lead": int(lead) if lead not in (None, "") else 7, "note": (item.get("note") or "").strip(),
+             "account_id": int(item["account_id"]) if item.get("account_id") else None}   # 付款（或入帳）帳戶：納入現金流預測
     if not 0 <= clean["lead"] <= 60:
         raise ValueError("提前提醒的天數請設定在 0～60 天")
     items = [i for i in list_custom(db) if i["id"] != clean["id"]]

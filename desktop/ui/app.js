@@ -12,7 +12,7 @@ import { Reports } from "./pages/reports.js";
 import { Settings } from "./pages/settings.js";
 import { checkUpdates, openUpdate, showWhatsNew, startUpdateTimer, useAvailableUpdate } from "./dialogs/update.js";
 import { openTour } from "./dialogs/tour.js";
-import { openHealth, openMonthClose, openMonthly, openReminders, previewMonthly } from "./dialogs/tools.js";
+import { openFeedback, useFeedbackCount, openForecast, openHealth, openMonthClose, openMonthly, openReminders, previewMonthly } from "./dialogs/tools.js";
 import { openChart, openSubject, openYearClose } from "./dialogs/chart.js";
 import { openJournal } from "./dialogs/journal.js";
 import { openDue, openImport, openReconcile, openRecurring, openSearch, openWelcome } from "./dialogs/more.js";
@@ -41,7 +41,7 @@ window.__undo = undo;
 const ALL = { start: "1900-01-01", end: "2999-12-31" };
 window.__t = {
   go: (p) => window.__go(p), openTxn, openAccount, openAdjust, openPrices, openRates, openSecurity, openSecurityList, openTrade, openAnnual, openPrint, openExport, openChart, openSubject, openYearClose, openJournal,
-  openRecurring, openDue, openReconcile, openImport, openHealth, openMonthClose, openMonthly, openReminders, previewMonthly, openSearch: () => openSearch(window.__go), openWelcome,
+  openRecurring, openDue, openReconcile, openImport, openHealth, openMonthClose, openMonthly, openReminders, previewMonthly, openForecast, openFeedback, openSearch: () => openSearch(window.__go), openWelcome,
   // 目前畫面上「完整看得到」的表格列數（每一個表格各算一次），用來驗證她要求的行數
   visibleRows: () => [...document.querySelectorAll(".tablewrap, .table-card")].filter((w) => w.offsetParent && w.querySelector("tbody")).map((w) => {
     const wr = w.getBoundingClientRect(), vh = window.innerHeight;
@@ -131,6 +131,7 @@ const SECTIONS = { dashboard: "", transactions: "記帳", accounts: "記帳", in
 function SideBar({ page, go, setPref }) {
   const r = document.documentElement;
   const upd = useAvailableUpdate();
+  const fbN = useFeedbackCount();
   const owner = META.owner || "您好";
   return html`<aside class="side">
     <div class="brand"><div class="logo"><img src="logo.svg" alt="" /></div>
@@ -155,6 +156,7 @@ function SideBar({ page, go, setPref }) {
     <div class="userbox" title="資料只儲存在這台電腦">
       <div class="avatar">${owner.slice(0, 1)}</div>
       <div class="grow"><b>${owner}</b><span><span class="dot"></span>版本 ${META.version}</span></div>
+      <button class="iconbtn power fb" title="意見回饋：寫下問題或想法（可累積好幾則），產生 PDF 傳給我們" onClick=${() => openFeedback()}><${Icon} name="heart" />${fbN > 0 && html`<i class="fb-badge">${fbN}</i>`}</button>
       <button class="iconbtn power" title="結束程式（帳本會自動儲存並備份）" onClick=${() => api("quit_app")}><${Icon} name="power" /></button>
     </div>
   </aside>`;
@@ -182,6 +184,7 @@ function App() {
   useEffect(() => { const m = document.querySelector(".main"); if (m) m.scrollTop = 0; }, [page]);
 
   const Page = PAGES[page];
+  window.__pageName = (NAV.find((n) => n[0] === page) || [, ""])[1];     // 意見回饋記下是在哪一頁
   const setPref = (t, s) => {
     applyPrefs(t, s);
     api("set_pref", "theme_mode", t);

@@ -8,6 +8,7 @@ import { showTransactions } from "./transactions.js";
 import { openReconcile } from "../dialogs/more.js";
 import { openRates } from "../dialogs/invest.js";
 import { openChart } from "../dialogs/chart.js";
+import { openForecast } from "../dialogs/tools.js";
 
 export function Accounts({ go }) {
   const [archived, setArchived] = useState(false);
@@ -71,7 +72,8 @@ export function Accounts({ go }) {
     <${PageHead} icon="wallet" color="var(--income)" title="帳戶管理" sub="資產與負債科目：銀行、現金、投資、信用卡、貸款等">
       <${Btn} icon="list" big onClick=${openChart} title="檢視全部會計科目、新增科目（含自訂代號）">會計科目表</${Btn}>
       <${MenuButton} label="更多功能" items=${[{ label: "銀行對帳（與存摺逐筆核對）", icon: "check", run: () => openReconcile(current ? current.id : null) },
-                                            { label: "更新匯率", icon: "refresh", run: openRates }]} />
+                                            { label: "更新匯率", icon: "refresh", run: openRates },
+                                            { label: "現金流預測（未來幾個月的餘額）", icon: "trend_up", run: () => openForecast() }]} />
       <${Btn} kind="adjust" icon="refresh" big onClick=${() => openAdjust(current && !current.invest ? current.id : null)}>更新餘額／市值</${Btn}>
       <${Btn} kind="primary" icon="plus" big onClick=${() => openAccount()}>新增帳戶</${Btn}>
     </${PageHead}>

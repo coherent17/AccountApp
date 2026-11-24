@@ -42,6 +42,13 @@ class DashboardApi:
         for e in calendar:      # 快到的事（定存到期、保費、繳款、報稅）也放進提醒事項；定期交易由「確認入帳」處理
             if e["urgent"] and e["kind"] != "recurring" and e["days_left"] >= -7:
                 reminders.append({"kind": "event", "event": e})
+        from core import forecast as fc     # 現金流預測：未來 60 天內有帳戶會低於低水位
+        fcst = fc.forecast(db, 3, today)
+        for w in fcst["warnings"]:
+            if w["min_date"] <= (today + dt.timedelta(days=60)).isoformat():
+                reminders.append({"kind": "forecast", "name": w["name"], "date": w["min_date"], "min": w["min"],
+                                  "currency": w["currency"], "reason": w["reason"], "negative": w["negative"],
+                                  "low": fcst["low"], "action": "查看預測"})
         ym = monthclose.previous_month(today)
         if today.day <= 20 and not db.get_json("month_close", {}).get(ym, {}).get("finished") and db._q1(
                 "SELECT COUNT(*) n FROM transactions WHERE void = 0 AND source = '' AND date BETWEEN ? AND ?",
