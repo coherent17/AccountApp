@@ -91,6 +91,20 @@ for scale in ("normal", "large"):
                  (s + "health", ESC + "; " + ESC + "; __t.openHealth()", 3),
                  (s + "monthclose", ESC + "; __t.openMonthClose()", 2),
                  (s + "monthly", ESC + f"; __t.previewMonthly({_PREV})", 2.5),
+                 (s + "forecast", ESC + "; __t.go('dashboard'); __t.openForecast()", 2.5),
+                 (s + "feedback", ESC + "; __t.openFeedback()", 2),
+                 (s + "feedback_pasted", "(() => { const c = document.createElement('canvas'); c.width = 400; c.height = 300;"
+                  " const g = c.getContext('2d'); g.fillStyle = '#FDE68A'; g.fillRect(0, 0, 400, 300); g.fillStyle = '#92400E';"
+                  " g.font = '40px sans-serif'; g.fillText('手機照片（測試）', 40, 160);"
+                  " c.toBlob((b) => { const dt = new DataTransfer(); dt.items.add(new File([b], 'photo.png', {type: 'image/png'}));"
+                  " document.querySelector('.fb-text').dispatchEvent(new ClipboardEvent('paste', {clipboardData: dt, bubbles: true})); }); })()", 1.2),
+                 (s + "feedback_typed", "document.querySelector('.pillbtn').click(); const t = document.querySelector('.fb-text');"
+                  " t.value = '收支明細的字可以再大一點，月結第 2 步不知道要按哪裡。'; t.dispatchEvent(new Event('input', {bubbles: true}))", 1),
+                 (s + "feedback_added", _BTN.format("加入清單"), 1.5),
+                 (s + "feedback_second", ESC + "; __t.go('transactions'); setTimeout(() => __t.openFeedback(), 1500)", 3.5),
+                 (s + "feedback_second_typed", "document.querySelectorAll('.pillbtn')[3].click(); const t = document.querySelector('.fb-text');"
+                  " t.value = '希望可以把收支明細匯出成 PDF。'; t.dispatchEvent(new Event('input', {bubbles: true}))", 1),
+                 (s + "feedback_done", _BTN.format("產生 PDF"), 4),
                  (s + "reports_head", ESC + "; __t.go('reports')", 2.5),
                  (s + "recon_open", "__t.openReconcile()", 2),
                  (s + "recon_prep", _bank_csv, 0.5),

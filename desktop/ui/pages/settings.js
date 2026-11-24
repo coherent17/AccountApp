@@ -6,7 +6,7 @@ import { AmountInput, Btn, Card, Check, DataTable, DateInput, Dialog, Field, Ico
 import { openChart, openSubject, openYearClose } from "../dialogs/chart.js";
 import { checkUpdates } from "../dialogs/update.js";
 import { openTour } from "../dialogs/tour.js";
-import { openHealth, openMonthClose, openReminders } from "../dialogs/tools.js";
+import { openFeedback, openForecast, openHealth, openMonthClose, openReminders } from "../dialogs/tools.js";
 
 export const resolveTheme = (mode) => (mode === "dark" || (mode === "system" && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light");
 
@@ -201,7 +201,8 @@ function DataBackup({ d, reload }) {
       <${Btn} icon="folder" onClick=${() => open(d.backup_dir)}>開啟自動備份資料夾</${Btn}><${Btn} kind="danger" icon="trash" onClick=${reset}>清除所有資料…</${Btn}></div></${Field}>
     <${Field} label="帳務工具" hint="健康檢查會確認檔案完整、借貸平衡、備份正常；月結小幫手每月初帶您收好上個月的帳；提醒中心可新增保費、信用卡繳款等提醒。">
       <div class="row wrap"><${Btn} icon="heart" onClick=${() => openHealth()}>資料健康檢查</${Btn}>
-        <${Btn} icon="check" onClick=${() => openMonthClose()}>月結小幫手</${Btn}><${Btn} icon="bell" onClick=${() => openReminders()}>到期提醒中心</${Btn}></div></${Field}>
+        <${Btn} icon="check" onClick=${() => openMonthClose()}>月結小幫手</${Btn}><${Btn} icon="bell" onClick=${() => openReminders()}>到期提醒中心</${Btn}>
+        <${Btn} icon="trend_up" onClick=${() => openForecast()}>現金流預測</${Btn}><${Btn} icon="heart" onClick=${() => openFeedback()}>意見回饋</${Btn}></div></${Field}>
     <${Field} label="第二份備份" hint="每天第一次開啟程式、以及關閉程式時（有記帳的話），帳本會另外複製一份到這裡，連同憑證附件，保留最近 30 天。電腦硬碟故障時，可以用「從備份檔還原…」選這裡的檔案救回帳本。隨身碟沒插上時不會影響記帳，插上後下次開啟就會補上。">
       <div class="extra-box">
         ${e.dir ? html`<b>${e.target}</b>` : html`<span class="muted">尚未設定（建議設定一個隨身碟或 OneDrive 資料夾）</span>`}

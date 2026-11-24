@@ -5,7 +5,7 @@ import { CountUp, PALETTE, axis, barFill, chartBase, useChart, valueAxis } from 
 import { openTxn, openVoucher } from "../dialogs/txn.js";
 import { openDue } from "../dialogs/more.js";
 import { catEmoji } from "../lib/caticon.js";
-import { EventRow, openHealth, openMonthClose, openReminders } from "../dialogs/tools.js";
+import { EventRow, openForecast, openHealth, openMonthClose, openReminders } from "../dialogs/tools.js";
 import { Btn, ask, errorBox } from "../lib/ui.js";
 import { changed } from "../lib/core.js";
 
@@ -243,7 +243,12 @@ function DashboardView({ d, prefsKey, go }) {
 
     ${d.reminders.length > 0 && html`<div class="card remind rise" style="animation-delay:300ms">
       <h3><${Icon} name="bell" />提醒事項</h3>
-      ${d.reminders.map((x) => x.kind === "event"
+      ${d.reminders.map((x) => x.kind === "forecast"
+        ? html`<div class="ritem urgent"><span class="badge-ic"><${Icon} name="trend_down" /></span>
+                 <div class="txt"><b>${x.name} 預計在 ${ymd(x.date)}${x.reason ? `（${x.reason}）` : ""}${x.negative ? "變成負數" : "低於 " + money(x.low)}</b>
+                 <small>最低約 ${money(x.min, x.currency)}，可以提早轉入資金或調整付款帳戶。</small></div>
+                 <button class="btn primary" onClick=${() => openForecast()}>${x.action}</button></div>`
+        : x.kind === "event"
         ? html`<div class=${"ritem" + (x.event.days_left <= 3 ? " urgent" : "")}><span class="badge-ic"><${Icon} name=${x.event.kind === "maturity" ? "bank" : "calendar"} /></span>
                  <div class="txt"><b>${x.event.title}：${ymd(x.event.date)}（${x.event.when}）</b>
                  <small>${x.event.amount ? `金額 ${money(x.event.amount, x.event.currency)}　` : ""}${x.event.sub}</small></div></div>`
@@ -254,6 +259,7 @@ function DashboardView({ d, prefsKey, go }) {
     <div class="card cal rise" style="animation-delay:320ms">
       <h3><${Icon} name="calendar" />近期行事曆<small>接下來 60 天</small>
         <div class="cal-acts"><button class="link" onClick=${() => openMonthClose()}><${Icon} name="check" />月結小幫手</button>
+          <button class="link" onClick=${() => openForecast()}><${Icon} name="trend_up" />現金流預測</button>
           <button class="link" onClick=${() => openHealth()}><${Icon} name="heart" />健康檢查</button>
           <button class="link" onClick=${() => openReminders().then(() => changed())}><${Icon} name="bell" />管理提醒</button></div></h3>
       ${d.calendar.length ? html`<div class="cal-list">${d.calendar.map((e) => html`<${EventRow} e=${e} />`)}</div>`

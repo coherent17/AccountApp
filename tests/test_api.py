@@ -191,6 +191,12 @@ def read_everything(lg: Ledger, where: str):
     assert hr["bad"] == 0, (where, [c for c in hr["checks"] if c["status"] == "bad"])
     assert {c["key"] for c in hr["checks"]} >= {"file", "trial", "vouchers", "backup", "recurring"}, where
     assert ok(a.health_html(), where).startswith("<html>")
+    fc = ok(a.cash_forecast(6), where)
+    for acc in fc["accounts"]:
+        evs = [e for e in fc["events"] if e["account_id"] == acc["id"]]
+        assert abs(acc["start"] + sum(e["amount"] for e in evs) - acc["end"]) < 0.05, (where, acc["name"])
+        assert len(acc["series"]) == len(fc["weeks"]), where
+    assert ok(a.feedback_diag(), where)["schema"] >= 9
     tf = ok(a.txn_form(None), where)
     assert isinstance(tf["quick"], list) and isinstance(tf["hints"], dict), where
 
@@ -492,6 +498,98 @@ def test_smart_recon():
         open(bad, "w", encoding="utf-8").write("名稱,數量\na,1\n")
         assert "日期" in err(a.recon_match(acc["id"], today, bad))
     finally:
+        lg.close()
+
+
+def test_cash_forecast():
+    """現金流預測：定期交易與指定帳戶的提醒會改變餘額；低於低水位時總覽提醒；轉帳兩邊都算到。"""
+    lg = Ledger(sample=True)
+    try:
+        a = lg.api
+        f = ok(a.cash_forecast(6))
+        assert f["events"] and f["events"] == sorted(f["events"], key=lambda e: e["date"])
+        assert all(e["date"] >= f["today"] for e in f["events"])
+        recs = ok(a.recurring_list())["rows"]
+        names = {e["title"] for e in f["events"]}
+        assert {r["name"] for r in recs if r["active"]} <= names, (names, [r["name"] for r in recs])
+        tr = next((r for r in recs if r["type"] == "transfer" and r["active"]), None)
+        if tr:
+            sides = {e["account"] for e in f["events"] if e["title"] == tr["name"]}
+            assert len(sides) == 2, sides
+        bank = next(x for x in f["accounts"] if x["kind"] == "asset" and x["events"])
+        day = (dt.date.today() + dt.timedelta(days=20)).isoformat()
+        ok(a.reminder_save({"title": "年繳保費", "kind": "insurance", "freq": "once", "date": day,
+                            "amount": bank["start"] + 500000, "account_id": bank["id"]}))
+        f2 = ok(a.cash_forecast(6))
+        w = next(x for x in f2["warnings"] if x["id"] == bank["id"])
+        assert w["negative"] and w["min_date"] >= day and w["min"] < 0
+        ev = next(e for e in f2["events"] if e["title"] == "年繳保費")
+        assert ev["amount"] < 0 and not ev["inflow"]
+        assert any(x["kind"] == "forecast" and x["name"] == bank["name"] for x in ok(a.dashboard())["reminders"])
+        # 不指定帳戶的提醒不計入
+        ok(a.reminder_save({"title": "只提醒", "kind": "other", "freq": "once", "date": day, "amount": 99}))
+        assert not any(e["title"] == "只提醒" for e in ok(a.cash_forecast(6))["events"])
+        assert "0 以上" in err(a.set_forecast_low(-1))
+        ok(a.set_forecast_low(2000000))
+        assert ok(a.cash_forecast(3))["low"] == 2000000 and ok(a.cash_forecast(3))["warnings"]
+        lg.run(check_books, lg.db, "forecast")
+    finally:
+        lg.close()
+
+
+TINY_JPEG = ("/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP////////////////////////////////////////////////////////////"
+             "//////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=")
+
+
+def test_feedback_pdf():
+    """意見回饋：可累積多則（附畫面），產生 PDF 後清單清空；PDF 結構正確；不碰使用者的剪貼簿。"""
+    import base64
+    import re
+    import struct
+    import zlib
+    import desktop.api_tools as tools
+    from core import pdfimages
+    real, tools._copy_file = tools._copy_file, lambda path: False
+    lg = Ledger(sample=True)
+    try:
+        a = lg.api
+
+        def chunk(k, b):
+            return struct.pack(">I", len(b)) + k + b + struct.pack(">I", zlib.crc32(k + b) & 0xffffffff)
+        png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+               + chunk(b"IDAT", zlib.compress(b"\x00\xff\x00\x00")) + chunk(b"IEND", b""))
+        shot = "data:image/png;base64," + base64.b64encode(png).decode()
+        assert ok(a.feedback_items()) == [] and not os.path.exists(os.path.join(lg.dir, "意見回饋"))   # 只讀取不建立資料夾
+        assert "寫下" in err(a.feedback_add({"note": " ", "tag": ""}))
+        photo_only = ok(a.feedback_add({"note": "", "tag": "", "shot": shot}))          # 只貼照片也可以
+        ok(a.feedback_remove(photo_only[0]["id"]))
+        l1 = ok(a.feedback_add({"tag": "看不清楚", "note": "字太小", "page": "收支明細", "shot": shot}))
+        l2 = ok(a.feedback_add({"tag": "", "note": "月結第 2 步不知道按哪裡", "page": "總覽", "shot": ""}))
+        assert len(l1) == 1 and len(l2) == 2 and l2[0]["shot"] == shot and l2[1]["shot"] == ""
+        l3 = ok(a.feedback_add({"tag": "其他", "note": "要刪掉的", "page": "", "shot": shot}))
+        l4 = ok(a.feedback_remove(l3[2]["id"]))
+        assert [x["note"] for x in l4] == ["字太小", "月結第 2 步不知道按哪裡"]
+        assert not os.path.exists(os.path.join(lg.dir, "意見回饋", "待傳送", l3[2]["id"] + ".png"))
+        d = ok(a.feedback_diag())
+        assert d["version"] and d["vouchers"] > 0 and "windows" in d
+        jpg = "data:image/jpeg;base64," + TINY_JPEG
+        assert pdfimages.jpeg_size(base64.b64decode(TINY_JPEG)) == (1, 1)
+        r = ok(a.feedback_pdf([jpg, jpg, jpg], True))
+        data = open(r["path"], "rb").read()
+        assert data.startswith(b"%PDF-1.4") and data.rstrip().endswith(b"%%EOF") and b"/Count 3" in data
+        xref = int(re.search(rb"startxref\n(\d+)", data).group(1))
+        offs = [int(x) for x in re.findall(rb"(\d{10}) 00000 n", data[xref:])]
+        for n, o in enumerate(offs, start=1):          # 每個物件的位置都正確，PDF 閱讀程式才打得開
+            assert data[o:o + 12].startswith(b"%d 0 obj" % n), n
+        assert r["copied"] is False and ok(a.feedback_items()) == []
+        assert not [f for f in os.listdir(os.path.join(lg.dir, "意見回饋", "待傳送")) if f.endswith(".png")]
+        assert ok(a.feedback_copy(r["path"])) is False                       # 測試中不碰剪貼簿
+        assert "找不到" in err(a.feedback_copy(os.path.join(lg.dir, "理財帳本.db")))
+        r2 = ok(a.feedback_pdf([jpg], False))
+        assert r2["path"] != r["path"] and os.path.exists(r2["path"])
+        assert "沒有" in err(a.feedback_pdf([], True))
+    finally:
+        tools._copy_file = real
         lg.close()
 
 

@@ -1225,3 +1225,59 @@ table.recon tr.auto td:first-child { box-shadow: inset 3px 0 0 var(--income); }
   .hc { padding: .45rem .3rem; }
 }
 @media (max-height: 860px) { table.list td.elide.evnote { max-width: 8rem !important; } }   /* 交易紀錄在「大」字體也不必左右捲動 */
+
+/* ---------- 3.6 現金流預測、意見回饋 ---------- */
+.fc-bar { margin-bottom: .7rem; gap: .6rem; }
+.fc-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: .5rem; margin-bottom: .7rem; flex: none; }
+.fc-card { text-align: left; font: inherit; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: .15rem;
+  padding: .6rem .8rem; border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--surface); }
+.fc-card:hover, .fc-card.on { border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
+.fc-card b { font-weight: 700; }
+.fc-card span { display: flex; justify-content: space-between; gap: .5rem; color: var(--text-3); font-size: .84rem; }
+.fc-card span i { font-style: normal; color: var(--text); font-weight: 600; }
+.fc-card span small { color: var(--text-3); }
+.fc-card em { font-style: normal; font-size: .8rem; color: var(--expense); display: flex; align-items: center; gap: .3rem; margin-top: .15rem; }
+.fc-card.warn { border-color: color-mix(in srgb, var(--expense) 40%, var(--line)); background: color-mix(in srgb, var(--expense) 4%, var(--surface)); }
+.fc-chart { height: 13rem; flex: none; margin-bottom: .6rem; }
+.dialog.forecast .dbody > .tablewrap { min-height: 8rem; }
+.fb-text { width: 100%; box-sizing: border-box; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface);
+  padding: .7rem .85rem; resize: vertical; line-height: 1.6; outline: none; }
+.fb-text:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
+.fb-shot { margin-top: .7rem; display: flex; flex-direction: column; gap: .5rem; }
+.fb-shot img { max-height: 14rem; object-fit: contain; align-self: flex-start; max-width: 100%; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.mc-done kbd { font-family: var(--num-font); font-size: .82em; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: .35rem; padding: 0 .35rem; background: var(--surface-2); }
+@media (max-height: 860px) { .fc-chart { height: 10rem; } .fb-shot img { max-height: 9rem; } }
+.fc-top { display: grid; grid-template-columns: minmax(15rem, 20rem) 1fr; gap: .8rem; margin-bottom: .6rem; flex: none; }
+.fc-top.solo { grid-template-columns: 1fr; }
+.fc-top .fc-cards { grid-template-columns: 1fr; margin: 0; max-height: 13rem; overflow-y: auto; align-content: start; padding: 3px; }
+.fc-top.solo .fc-cards { grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); max-height: none; }
+.fc-top .fc-chart { margin: 0; }
+@media (max-height: 860px) { .fc-top .fc-cards { max-height: 10rem; } }
+.userbox .power.fb:hover { background: var(--primary-soft); color: var(--primary); }
+@media (max-height: 860px) {     /* 側邊欄在 720 高的螢幕、「大」字體也不必捲動 */
+  .side { padding-top: .8rem; padding-bottom: .7rem; }
+  .brand { padding-bottom: .7rem; }
+  .nav { padding-top: .5rem; padding-bottom: .5rem; }
+  .side .section-label { padding-top: .5rem; padding-bottom: .2rem; }
+  .side .prefs { gap: .25rem; padding-top: .3rem; }
+  .userbox { padding: .45rem .5rem; margin-top: .35rem; gap: .5rem; }
+  .userbox .power { width: 1.9rem; height: 1.9rem; }
+}
+/* 意見回饋：左邊寫新的一則，右邊是待傳送的清單 */
+.fb-grid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 1.1rem; }
+.fb-list { border-left: 1px solid var(--line); padding-left: 1rem; max-height: 26rem; overflow-y: auto; }
+.fb-list-h { font-weight: 700; color: var(--text-2); margin-bottom: .5rem; }
+.fb-item { display: flex; gap: .6rem; align-items: flex-start; padding: .5rem; border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--surface); }
+.fb-item + .fb-item { margin-top: .45rem; }
+.fb-item img, .fb-item .noshot { width: 5.5rem; height: 3.4rem; object-fit: cover; border-radius: .4rem; border: 1px solid var(--line); flex: none; }
+.fb-item .noshot { display: grid; place-items: center; color: var(--text-3); background: var(--surface-2); }
+.fb-item b { display: flex; gap: .4rem; align-items: baseline; font-size: .9rem; }
+.fb-item b small { color: var(--text-3); font-weight: 400; }
+.fb-item span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: .88rem; color: var(--text-2); }
+.fb-item > div > small { display: block; color: var(--text-3); font-size: .76rem; }
+.fb-item .x { border: 0; background: none; color: var(--text-3); cursor: pointer; padding: .2rem; }
+.fb-item .x:hover { color: var(--expense); }
+.userbox .power.fb { position: relative; }
+.fb-badge { position: absolute; top: -.2rem; right: -.2rem; min-width: 1.1rem; height: 1.1rem; border-radius: 999px; background: var(--expense);
+  color: #fff; font-size: .68rem; font-style: normal; font-weight: 700; display: grid; place-items: center; padding: 0 .25rem; }
+@media (max-height: 860px) { .fb-list { max-height: 18rem; } }
