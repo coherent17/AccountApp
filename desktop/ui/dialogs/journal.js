@@ -12,7 +12,8 @@ let rid = 0;
 const blank = (p = {}) => ({ id: ++rid, key: "", debit: null, credit: null, memo: "", security_id: null, shares: null, price: null,
                              orig: null, rate: null, auto: null, want: null, ...p });
 
-/** 開啟複式分錄。opts：tid（開啟／編輯）、prefill（[{key, debit, credit, memo, ...}]）、date、note、tags。 */
+/** 開啟複式分錄。opts：tid（開啟／編輯）、prefill（[{key, debit, credit, memo, ...}]）、date、note、tags、
+ *  recurring（{rec_id, date}：定期分錄修改後入帳）、draft（只輸入內容、不存檔，傳回 {lines, note, tags}：編輯定期分錄用）。 */
 export async function openJournal(opts = {}) {
   let f;
   try { f = await api("journal_form", opts.tid || null); } catch (e) { return errorBox(e.message); }
@@ -39,6 +40,7 @@ function JournalDialog({ f0, opts, close }) {
   const [info, setInfo] = useState([]);
   const [msg, setMsg] = useState(ro ? t.readonly : "");
   const [busy, setBusy] = useState(false);
+  const [reused, setReused] = useState(false);
 
   const upd = (id, patch) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   const kindOf = (r) => {
@@ -141,6 +143,36 @@ function JournalDialog({ f0, opts, close }) {
     rs[i] = { ...rs[i], [diff > 0 ? "credit" : "debit"]: Math.abs(diff) };
     setRows(rs);
   }
+  // 帶入過去的分錄（摘要相同的上一張，或常用的分錄）
+  async function reuse(h) {
+    try {
+      const p = await api("journal_reuse", h.id);
+      const fxRate = (l) => { const c = chart[l.key]; const fx = c && c.currency && c.currency !== f.base && !c.investment; const base = l.debit || l.credit || 0;
+        return { orig: fx && l.orig ? Math.abs(l.orig) : null, rate: fx ? (l.orig && base ? +(base / Math.abs(l.orig)).toFixed(6) : c.rate) : null }; };
+      setRows(p.lines.map((l) => blank({ ...l, ...fxRate(l) })));
+      if (!note.trim()) setNote(p.note);
+      if (!tags.length) setTags(p.tags);
+      setReused(true);
+      setMsg(""); toast(`已帶入 ${p.voucher}，請確認日期、摘要與金額` + (p.invest ? "（投資分錄請重新輸入股數、單價與金額）" : ""), "info");
+    } catch (e) { setMsg(e.message); }
+  }
+  const noteKey = (s) => (s || "").replace(/[\d０-９/\-.,年月日號第期()（）\s]+/g, "");
+  // 定期分錄的摘要不要帶著「11 月」：去掉年月日後面多餘的空白
+  const noMonth = (s) => (s || "").replace(/[（(]?\s*(\d{2,4}\s*年)?\s*\d{1,2}\s*月(份|\s*\d{1,2}\s*日)?\s*[)）]?/g, "").trim() || s;
+  const untouched = !t && rows.every((r) => !r.key && !r.debit && !r.credit);
+  const hint = untouched && !reused && f.history && note.trim() ? f.history.last[noteKey(note)] : null;
+  // 複製成新傳票（日期今天）
+  async function copyNew() {
+    try { const p = await api("txn_copy", t.id); close(); openJournal({ prefill: p.lines, note: p.note, tags: p.tags }); } catch (e) { setMsg(e.message); }
+  }
+  const outLines = () => rows.map((r) => ({ key: r.key, debit: r.debit, credit: r.credit, memo: r.memo, orig: kindOf(r).fx ? r.orig : null,
+    security_id: typeof r.security_id === "number" ? r.security_id : null, shares: r.shares, price: r.price }));
+  // 設為定期分錄（到期提醒、一鍵入帳）
+  async function makeRecurring() {
+    if (!ok) return setMsg("請先輸入借貸平衡的分錄，再設為定期");
+    const { openRecurringEdit } = await import("./more.js");
+    await openRecurringEdit(null, { type: "journal", note: noMonth(note), tags, date, lines: outLines(), amount: d });
+  }
   function applyTemplate(name) {
     const tp = f.templates.find((x) => x.name === name);
     if (!tp) return;
@@ -172,11 +204,11 @@ function JournalDialog({ f0, opts, close }) {
   }
 
   async function save(confirmed = false) {
+    if (opts.draft) return ok ? close({ lines: outLines().filter((l) => l.key || l.debit || l.credit), note, tags, amount: d }) : setMsg("借貸金額必須相等才能儲存");
     setMsg(""); setBusy(true);
     try {
-      const lines = rows.map((r) => ({ key: r.key, debit: r.debit, credit: r.credit, memo: r.memo, orig: kindOf(r).fx ? r.orig : null,
-                                       security_id: typeof r.security_id === "number" ? r.security_id : null, shares: r.shares, price: r.price }));
-      const res = await api("journal_save", { date, note, tags, lines }, t ? t.id : null, confirmed);
+      const lines = outLines();
+      const res = await api("journal_save", { date, note, tags, lines, recurring: opts.recurring || null }, t ? t.id : null, confirmed);
       if (res.need_confirm) {
         setBusy(false);
         if (await ask(`「${res.need_confirm.join("、")}」已有投資標的，但這張分錄沒有選擇標的與股數，金額將不會計入持股與成本。\n\n確定要這樣儲存嗎？`, { yes: "仍要儲存", no: "回去選擇標的" })) save(true);
@@ -197,16 +229,23 @@ function JournalDialog({ f0, opts, close }) {
   }
 
   const subjOptions = useMemo(() => f.chart.map((x) => ({ value: x.key, label: `${x.code}　${x.name}（${x.group}）` })), [f]);
-  const title = t ? `分錄傳票　${t.voucher}` : "複式分錄（傳票）";
+  const title = t ? `分錄傳票　${t.voucher}` : opts.draft ? "定期分錄的內容" : "複式分錄（傳票）";
   const footer = html`
     ${t && !ro && html`<${Btn} kind="danger" icon="trash" onClick=${voidIt}>作廢這張傳票</${Btn}>`}
     ${t && t.system && !t.void && html`<${Btn} kind="danger" icon="trash" onClick=${delSystem} title="一併刪除產生這張傳票的投資管理交易">刪除這張傳票</${Btn}>`}
     ${t && html`<${Btn} kind="link" icon="print" onClick=${() => printVoucher(t.id)}>列印傳票</${Btn}><${Btn} kind="link" onClick=${() => openAudit(t.id)}>修改紀錄</${Btn}>`}
+    ${t && !t.source && html`<${Btn} kind="link" icon="copy" onClick=${copyNew} title="以相同內容開一張新傳票，日期為今天">複製成新傳票</${Btn}>`}
+    ${(!t || !t.source) && !opts.draft && !opts.recurring && html`<${Btn} kind="link" icon="restore" onClick=${makeRecurring} title="每月、每季或每年固定的分錄，到期時提醒您一鍵入帳">設為定期…</${Btn}>`}
     <div class="grow"></div>
     <${Btn} onClick=${() => close()}>${ro ? "關閉" : "取消"}</${Btn}>
-    ${!ro && html`<${Btn} kind="primary" icon="check" disabled=${busy} onClick=${() => save(false)}>儲存</${Btn}>`}`;
+    ${!ro && html`<${Btn} kind="primary" icon="check" disabled=${busy} onClick=${() => save(false)}>${opts.draft ? "確定" : opts.recurring ? "入帳" : "儲存"}</${Btn}>`}`;
 
+  const freq = untouched && !reused && !note.trim() && f.history ? f.history.frequent : [];
   return html`<${Dialog} title=${title} icon="book" width="90rem" onClose=${() => close()} footer=${footer} cls="journal listdlg">
+    ${freq.length > 0 && html`<div class="quick jq"><span class="quick-lbl"><${Icon} name="restore" />常用分錄</span>
+      ${freq.map((h) => html`<button type="button" class="qchip" onClick=${() => reuse(h)} title=${`帶入 ${h.date.replace(/-/g, "/")} 的分錄（近兩年記了 ${h.count} 次）`}>${h.note}</button>`)}</div>`}
+    ${hint && html`<div class="quick jq"><span class="quick-lbl"><${Icon} name="restore" />上次「${hint.note}」</span>
+      <button type="button" class="qchip" onClick=${() => reuse(hint)}>帶入 ${hint.date.replace(/-/g, "/")} 的分錄<small class="num">${money(hint.amount)}</small></button></div>`}
     <div class="jtop">
       <${Field} label="日期"><${DateInput} value=${date} onChange=${ro ? () => {} : setDate} /></${Field}>
       ${!ro && html`<${Field} label="範本"><div class="row"><${Select} value=${""} onChange=${applyTemplate} style="flex:1"

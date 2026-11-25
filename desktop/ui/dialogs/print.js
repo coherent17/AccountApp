@@ -70,13 +70,16 @@ function PrintDialog({ o, start, end, close }) {
 }
 
 // ------------------------------------------------------------------ 年度財務報告
-export async function openAnnual(years) {
+/** 年度財務報告；year0 為預設年度。看過預覽時傳回 true。 */
+export async function openAnnual(years, year0 = null) {
   const o = await api("print_options");
-  return openModal((close) => html`<${AnnualDialog} o=${o} years=${years} close=${close} />`);
+  return openModal((close) => html`<${AnnualDialog} o=${o} years=${years} year0=${year0} close=${close} />`);
 }
-function AnnualDialog({ o, years, close }) {
+function AnnualDialog({ o, years, year0, close: done }) {
+  const [seen, setSeen] = useState(false);
+  const close = () => done(seen);
   const thisYear = new Date().getFullYear();
-  const [year, setYear] = useState(years.includes(thisYear - 1) && new Date().getMonth() < 3 ? thisYear - 1 : years[0]);
+  const [year, setYear] = useState(year0 || (years.includes(thisYear - 1) && new Date().getMonth() < 3 ? thisYear - 1 : years[0]));
   const [secs, setSecs] = useState(new Set(o.annual_saved || o.annual.filter((a) => a[2]).map((a) => a[0])));
   const [busy, setBusy] = useState(false);
   const toggle = (k, on) => { const s = new Set(secs); on ? s.add(k) : s.delete(k); setSecs(s); };
@@ -85,7 +88,7 @@ function AnnualDialog({ o, years, close }) {
     try {
       const chosen = o.annual.map((a) => a[0]).filter((k) => secs.has(k));
       api("set_setting", "annual_sections", chosen.join(","));
-      openPreview(await api("annual_html", year, chosen), `${year} 年度財務報告`);
+      openPreview(await api("annual_html", year, chosen), `${year} 年度財務報告`); setSeen(true);
     } catch (e) { errorBox(e.message); } finally { setBusy(false); }
   }
   return html`<${Dialog} title="年度財務報告" icon="book" width="44rem" onClose=${() => close()}

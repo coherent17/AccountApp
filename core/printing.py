@@ -175,12 +175,13 @@ class Report:
                 + self._table([("日期", ""), ("傳票號碼", ""), ("摘要", ""), ("代號", ""), ("會計科目", ""),
                                ("借方", ""), ("貸方", "")], rows, [12, 11, 20, 7, 22, 14, 14]))
 
-    def ledger(self, start: str, end: str, first: bool = True) -> str:
-        out = [self._head("總分類帳", f"期間：{fmt_date(start)} 至 {fmt_date(end)}　｜　資產、負債科目為原幣，其餘為本位幣", first)]
+    def ledger(self, start: str, end: str, first: bool = True, key: tuple | None = None) -> str:
+        """總分類帳；指定 key 時只列那一個會計科目（沒有異動也列出）。"""
+        out = [self._head("分類帳" if key else "總分類帳", f"期間：{fmt_date(start)} 至 {fmt_date(end)}　｜　資產、負債科目為原幣，其餘為本位幣", first)]
         n = 0
-        for sub in self.db.ledger_subjects():
-            lg = self.db.subject_ledger(sub["key"], start, end)
-            if not lg["rows"] and not lg["opening"] and not lg["closing"]:
+        for k in ([key] if key else [s["key"] for s in self.db.ledger_subjects()]):
+            lg = self.db.subject_ledger(k, start, end)
+            if not key and not lg["rows"] and not lg["opening"] and not lg["closing"]:
                 continue
             n += 1
             cur = lg["currency"]
@@ -635,6 +636,9 @@ class Report:
                "journal": lambda: self.journal(start, end, False)}
         parts += [fns[s]() for s in sections]
         return f"<html><head><style>{_CSS}</style></head><body>{''.join(parts)}</body></html>"
+
+    def build_ledger(self, key: tuple, start: str, end: str) -> str:
+        return f"<html><head><style>{_CSS}</style></head><body>{self.ledger(start, end, True, key)}</body></html>"
 
     def build_voucher(self, txn_id: int) -> str:
         return f"<html><head><style>{_CSS}</style></head><body>{self.voucher(txn_id)}</body></html>"

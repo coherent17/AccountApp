@@ -4,6 +4,7 @@ import { META, api, changed, cur, html, isoToday, money, num, toast, ymd } from 
 import { AmountInput, Btn, Check, DataTable, DateInput, Dialog, Field, Icon, Segmented, Select, TextInput, TypeBadge, ask,
          errorBox, info, openModal } from "../lib/ui.js";
 import { openVoucher } from "./txn.js";
+import { openJournal } from "./journal.js";
 
 // ------------------------------------------------------------------ 定期交易
 export const openRecurring = () => openModal((close) => html`<${RecurringManager} close=${close} />`);
@@ -54,21 +55,28 @@ function RecurringEdit({ rec, from, form, freqs, close }) {
   const [account, setAccount] = useState(data.account_id || form.accounts[0]?.id);
   const [toAccount, setTo] = useState(data.to_account_id || form.accounts[1]?.id);
   const [category, setCategory] = useState(data.category_id || null);
+  const [jr, setJr] = useState(from && from.type === "journal" ? { lines: from.lines, note: from.note, tags: from.tags, amount: from.amount } : null);
+  useEffect(() => { if (rec && rec.type === "journal") api("recurring_lines", rec.id).then((x) => setJr({ ...x, amount: data.amount })); }, []);
+  async function editLines() {
+    const r = await openJournal({ draft: true, prefill: jr ? jr.lines : [], note: jr ? jr.note : name, tags: jr ? jr.tags : [] });
+    if (r && r.lines) { setJr(r); if (!name.trim()) setName(r.note); }
+  }
   const [amount, setAmount] = useState(data.amount || null);
   const [note, setNote] = useState(data.note || "");
   const [freq, setFreq] = useState(rec ? rec.freq : "monthly");
   const [day, setDay] = useState(rec ? rec.day : +((data.date || isoToday()).slice(8)));
-  const [start, setStart] = useState(rec ? rec.start_date : isoToday());
+  // 由現有的傳票設定時，從明天起算：這一張已經記了，不要再提醒一次
+  const [start, setStart] = useState(rec ? rec.start_date : from ? isoToday(1) : isoToday());
   const [hasEnd, setHasEnd] = useState(!!(rec && rec.end_date));
   const [end, setEnd] = useState(rec && rec.end_date ? rec.end_date : isoToday(365));
   const [active, setActive] = useState(rec ? !!rec.active : true);
   const [msg, setMsg] = useState("");
-  const cats = type === "transfer" ? [] : form.categories[type];
+  const cats = form.categories[type] || [];
   async function save() {
     setMsg("");
     try {
       const n = await api("recurring_save", rec ? rec.id : null, { name, type, account_id: account, to_account_id: toAccount, category_id: category,
-        amount, note, freq, day, start_date: start, end_date: hasEnd ? end : "", active });
+        amount, note: type === "journal" ? (jr ? jr.note : "") : note, lines: jr ? jr.lines : null, tags: jr ? jr.tags : [], freq, day, start_date: start, end_date: hasEnd ? end : "", active });
       changed(); toast(`已儲存定期交易：${n}`); close(true);
     } catch (e) { setMsg(e.message); }
   }
@@ -76,12 +84,14 @@ function RecurringEdit({ rec, from, form, freqs, close }) {
       footer=${html`<div class="grow"></div><${Btn} onClick=${() => close()}>取消</${Btn}><${Btn} kind="primary" icon="check" onClick=${save}>儲存</${Btn}>`}>
     <form class="form" onSubmit=${(e) => { e.preventDefault(); save(); }}>
       <${Field} label="名稱"><${TextInput} value=${name} onInput=${setName} placeholder="例如：月退休金、水電費、保險費" autofocus /></${Field}>
-      <${Field} label="類型"><${Segmented} value=${type} onChange=${(t) => { setType(t); setCategory(null); }} options=${[["expense", "支出", "minus"], ["income", "收入", "plus"], ["transfer", "轉帳", "transfer"]]} /></${Field}>
+      <${Field} label="類型"><${Segmented} value=${type} onChange=${(t) => { setType(t); setCategory(null); }} options=${[["expense", "支出", "minus"], ["income", "收入", "plus"], ["transfer", "轉帳", "transfer"], ["journal", "複式分錄", "book"]]} /></${Field}>
+      ${type === "journal" ? html`<${Field} label="分錄內容"><div class="row wrap">${jr ? html`<span>${jr.lines.filter((l) => l.key).length} 行，借貸各 <b class="num">${num(jr.amount)}</b>${jr.note ? `，摘要：${jr.note}` : ""}</span>` : html`<span class="muted">還沒有輸入</span>`}
+          <${Btn} icon="edit" onClick=${editLines}>${jr ? "修改內容…" : "輸入分錄…"}</${Btn}></div></${Field}>` : html`
       <${Field} label=${type === "transfer" ? "轉出帳戶" : "帳戶"}><${Select} value=${account} onChange=${setAccount} options=${form.accounts.map((a) => [a.id, a.name])} /></${Field}>
       ${type === "transfer" ? html`<${Field} label="轉入帳戶"><${Select} value=${toAccount} onChange=${setTo} options=${form.accounts.map((a) => [a.id, a.name])} /></${Field}>`
         : html`<${Field} label="分類"><${Select} value=${category} onChange=${setCategory} options=${[[null, "（請選擇）"], ...cats.map((c) => [c.id, c.name])]} /></${Field}>`}
       <${Field} label="金額"><${AmountInput} value=${amount} onChange=${setAmount} /></${Field}>
-      <${Field} label="說明"><${TextInput} value=${note} onInput=${setNote} placeholder="入帳時的說明（可留空，預設為名稱）" /></${Field}>
+      <${Field} label="說明"><${TextInput} value=${note} onInput=${setNote} placeholder="入帳時的說明（可留空，預設為名稱）" /></${Field}>`}
       <${Field} label="頻率"><div class="row"><${Select} value=${freq} onChange=${setFreq} options=${freqs} />
         <div style="width:6rem"><${AmountInput} value=${day} onChange=${(v) => setDay(Math.max(1, Math.min(31, Math.round(v || 1))))} decimals=${0} suffix="日" /></div></div></${Field}>
       <${Field} label="開始日期"><${DateInput} value=${start} onChange=${setStart} /></${Field}>
@@ -102,6 +112,16 @@ export async function openDue(due = null) {
 function DueDialog({ due, close }) {
   const [rows, setRows] = useState(due.map((d, i) => ({ ...d, i, on: true })));
   const set = (i, p) => setRows(rows.map((r) => (r.i === i ? { ...r, ...p } : r)));
+  // 定期分錄：開啟分錄視窗修改後入帳，入帳後從清單移除
+  async function editPost(r) {
+    try {
+      const p = await api("recurring_lines", r.rec_id);
+      if (await openJournal({ prefill: p.lines, note: p.note, tags: p.tags, date: r.date, recurring: { rec_id: r.rec_id, date: r.date } })) {
+        const left = rows.filter((x) => x.i !== r.i);
+        left.length ? setRows(left) : close(true);
+      }
+    } catch (e) { errorBox(e.message); }
+  }
   async function go(skip) {
     const items = rows.filter((r) => r.on).map((r) => ({ rec_id: r.rec_id, date: r.date, amount: r.amount }));
     const res = await api("due_post", items, skip);
@@ -118,7 +138,8 @@ function DueDialog({ due, close }) {
     <div class="tablewrap"><table class="list edit sticky"><thead><tr><th class="c">入帳</th><th>日期</th><th>名稱</th><th class="c">類型</th><th class="r" style="width:12rem">金額</th></tr></thead>
       <tbody>${rows.map((r) => html`<tr><td class="c"><${Check} checked=${r.on} onChange=${(v) => set(r.i, { on: v })} /></td>
         <td class="num">${ymd(r.date)}</td><td><b>${r.name}</b></td><td class="c"><${TypeBadge} type=${r.type} label=${r.type_label} /></td>
-        <td><${AmountInput} value=${r.amount} onChange=${(v) => set(r.i, { amount: v })} /></td></tr>`)}</tbody></table></div>
+        <td>${r.type === "journal" ? html`<div class="row nowrap"><span class="grow r num">${num(r.amount)}</span><${Btn} icon="edit" onClick=${() => editPost(r)} title="開啟分錄，修改後入帳">修改</${Btn}></div>`
+          : html`<${AmountInput} value=${r.amount} onChange=${(v) => set(r.i, { amount: v })} />`}</td></tr>`)}</tbody></table></div>
   </${Dialog}>`;
 }
 

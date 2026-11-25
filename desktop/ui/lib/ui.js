@@ -364,7 +364,7 @@ export function Tabs({ tabs, value, onChange }) {
     ro.observe(ref.current);
     return () => ro.disconnect();
   }, []);
-  useEffect(() => { const b = ref.current && ref.current.querySelector("button.on"); b && b.scrollIntoView({ block: "nearest", inline: "nearest" }); }, [value]);
+  useEffect(() => { const b = ref.current && ref.current.querySelector("button.on"); if (b) { const el = ref.current; el.scrollLeft = b.offsetLeft - (el.clientWidth - b.offsetWidth) / 2; measure(); } }, [value]);     // 置中，不會被左右箭頭蓋住
   const scroll = (d) => ref.current.scrollBy({ left: d * ref.current.clientWidth * 0.6, behavior: "smooth" });
   return html`<div class="tabs-wrap">
     ${edge.l && html`<button class="tab-arrow l" onClick=${() => scroll(-1)} title="往左"><${Icon} name="chevron_down" /></button>`}

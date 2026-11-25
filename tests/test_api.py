@@ -170,6 +170,19 @@ def read_everything(lg: Ledger, where: str):
             if not s["key"].startswith(("account:", "equity:")):
                 assert abs(x["debit_total"] - t["period_debit"]) < 0.06 and abs(x["credit_total"] - t["period_credit"]) < 0.06, (where, s)
         assert set(tb) <= seen, (where, set(tb) - seen)        # 試算表上的每個科目都查得到分類帳
+        # 報表點選：每個連結都查得到分類帳，而且期末餘額就是報表上的金額
+        for r in tb.values():
+            x = ok(a.report_ledger(r["key"], start, end), where)
+            rate = rates.get(r["key"], (1, ""))[0]
+            assert abs(x["closing"] * rate * (1 if x["side"] == "借" else -1) - (r["debit"] - r["credit"])) < 0.06, (where, r)
+        for rows, sign in ((ok(a.report_bs(start, end, "none"))["rows"], 1), (ok(a.report_is(start, end, "none"))["rows"], 1)):
+            for r in rows:
+                if r.get("key") and r["cur"] is not None:
+                    x = ok(a.report_ledger(r["key"], start, end), (where, r))
+                    assert abs(x["closing"] * rates.get(r["key"], (1, ""))[0] - r["cur"]) < 0.06, (where, start, end, r, x["closing"])
+        for r in ok(a.report_bs(start, end, "none"))["equity"]:
+            if r["key"]:
+                assert abs(ok(a.report_ledger(r["key"], start, end))["closing"] - r["value"]) < 0.06, (where, r)
         assert ok(a.print_html(["vouchers", "journal", "ledger", "trial", "bs", "is", "equity", "ratios", "cashflow"],
                                start, end, "prior_year"), where).startswith("<html>")
     for y in rm["years"]:
@@ -211,6 +224,16 @@ def read_everything(lg: Ledger, where: str):
     assert hr["bad"] == 0, (where, [c for c in hr["checks"] if c["status"] == "bad"])
     assert {c["key"] for c in hr["checks"]} >= {"file", "trial", "vouchers", "backup", "recurring"}, where
     assert ok(a.health_html(), where).startswith("<html>")
+    ya = ok(a.year_assist(), where)
+    assert ya["total"] == 6
+    for y in ya["years"]:
+        ok(a.year_assist(y), where)
+    k0 = rm["subjects"][0]["key"]
+    assert ok(a.ledger_html(k0, "2026-01-01", "2026-12-31"), where).startswith("<html>")
+    pf = ok(a.price_form(dt.date.today().isoformat()), where)
+    pp = ok(a.price_paste("\n".join(f"{h['code']}\t{(h['price'] or 10):.2f}" for h in pf), dt.date.today().isoformat()), where)
+    assert {m["id"] for m in pp["matches"]} == {h["id"] for h in pf if not h["sold"] and h["code"].strip()} and not pp["problems"], (where, pp)
+    ok(a.journal_form(None), where)
     fc = ok(a.cash_forecast(6), where)
     for acc in fc["accounts"]:
         evs = [e for e in fc["events"] if e["account_id"] == acc["id"]]
@@ -455,6 +478,185 @@ def test_display_info():
     import desktop.api_tools as tools
     d = tools._display_info()
     assert d["screen"] and d["screen"][0] >= 640 and 100 <= d["dpi_scale"] <= 500 and 100 <= d["text_scale"] <= 225
+
+
+def test_recurring_journal():
+    """定期分錄：建立、提醒、入帳、修改後入帳、略過、復原、搜尋、預測；連結投資的科目不可設為定期。"""
+    lg = Ledger(sample=True)
+    try:
+        a, db = lg.api, lg.db
+        today = dt.date.today()
+        chart = ok(a.journal_form(None))["chart"]
+        bank = next(c["key"] for c in chart if c["name"] == "台銀活存")
+        exp = [c["key"] for c in chart if c["kind"] == "expense"][:2]
+        inv_acc = next(c["key"] for c in chart if c["investment"])
+        lines = [{"key": exp[0], "debit": 700, "memo": "本金"}, {"key": exp[1], "debit": 300}, {"key": bank, "credit": 1000}]
+        start = (today.replace(day=1) - dt.timedelta(days=1)).replace(day=1).isoformat()
+        base = {"name": "房貸繳款", "type": "journal", "freq": "monthly", "day": 1, "start_date": start, "end_date": "", "active": True}
+        assert "分錄內容" in err(a.recurring_save(None, {**base, "lines": []}))
+        assert "不平衡" in err(a.recurring_save(None, {**base, "lines": lines[:2] + [{"key": bank, "credit": 999}]}))
+        assert "投資標的" in err(a.recurring_save(None, {**base, "lines": [{"key": inv_acc, "debit": 10}, {"key": bank, "credit": 10}]}))
+        n0 = len(ok(a.recurring_list())["rows"])
+        ok(a.recurring_save(None, {**base, "lines": lines, "note": "房貸繳款", "tags": ["房貸"]}))
+        rows = ok(a.recurring_list())["rows"]
+        r = next(x for x in rows if x["name"] == "房貸繳款")
+        assert len(rows) == n0 + 1 and r["amount"] == 1000 and r["account"].startswith("借 ") and "台銀活存" in r["target"]
+        due = [d for d in ok(a.due_list()) if d["rec_id"] == r["id"]]
+        assert len(due) == 2 and due[0]["type"] == "journal"
+        bal0 = next(x["balance"] for x in db_summ(lg) if x["name"] == "台銀活存")
+        fc0 = ok(a.cash_forecast(3))
+        assert sum(1 for e in fc0["events"] if e["title"] == "房貸繳款" and e["amount"] == -1000) >= 3
+        res = ok(a.due_post([{"rec_id": r["id"], "date": due[0]["date"], "amount": 5}], False))       # 分錄不受 amount 影響
+        assert res["n"] == 1 and not res["errors"]
+        t = next(x for x in ok(a.txn_list({"start": due[0]["date"], "end": due[0]["date"]}))["rows"] if x["note"] == "房貸繳款")
+        assert t["type"] == "journal" and t["amount"] == 1000 and t["tags"] == ["房貸"]
+        assert abs(next(x["balance"] for x in db_summ(lg) if x["name"] == "台銀活存") - bal0 + 1000) < 0.01
+        assert len([d for d in ok(a.due_list()) if d["rec_id"] == r["id"]]) == 1
+        ok(a.undo())                                   # 復原：傳票作廢、下次會再提醒
+        assert len([d for d in ok(a.due_list()) if d["rec_id"] == r["id"]]) == 2
+        assert abs(next(x["balance"] for x in db_summ(lg) if x["name"] == "台銀活存") - bal0) < 0.01
+        # 修改後入帳，實際日期可以不同
+        p = ok(a.recurring_lines(r["id"]))
+        assert [x["key"] for x in p["lines"]] == [x["key"] for x in lines] and p["tags"] == ["房貸"]
+        p["lines"][0]["debit"], p["lines"][2]["credit"] = 650, 950
+        other = (dt.date.fromisoformat(due[0]["date"]) + dt.timedelta(days=2)).isoformat()
+        assert "不平衡" in err(a.journal_save({"date": other, "note": "x", "tags": [], "lines": p["lines"][:2],
+                                              "recurring": {"rec_id": r["id"], "date": due[0]["date"]}}))
+        assert len([d for d in ok(a.due_list()) if d["rec_id"] == r["id"]]) == 2        # 失敗時不會被當成已入帳
+        ok(a.journal_save({"date": other, "note": "房貸繳款（改）", "tags": [], "lines": p["lines"],
+                           "recurring": {"rec_id": r["id"], "date": due[0]["date"]}}))
+        assert [d["date"] for d in ok(a.due_list()) if d["rec_id"] == r["id"]] == [due[1]["date"]]
+        ok(a.due_post([{"rec_id": r["id"], "date": due[1]["date"]}], True))
+        assert not [d for d in ok(a.due_list()) if d["rec_id"] == r["id"]]
+        assert any(x["id"] == r["id"] for x in ok(a.search("房貸繳款"))["rows"] if x["kind"] == "recurring")
+        ok(a.recurring_save(r["id"], {**base, "name": "房貸", "lines": p["lines"]}))
+        ok(a.recurring_toggle(r["id"]))
+        read_everything(lg, "recurring journal")
+        lg.run(check_books, db, "recurring journal")
+        ok(a.recurring_delete(r["id"]))
+    finally:
+        lg.close()
+
+
+def db_summ(lg):
+    return lg.run(lambda: [dict(x) for x in lg.db.account_summaries()])
+
+
+def test_journal_reuse_and_copy():
+    """相同摘要（月份不同也算）提供上一張分錄；投資分錄不沿用股數與金額；複製傳票保留投資連結。"""
+    lg = Ledger(sample=True)
+    try:
+        a = lg.api
+        chart = ok(a.journal_form(None))["chart"]
+        bank = next(c["key"] for c in chart if c["name"] == "台銀活存")
+        exp = next(c["key"] for c in chart if c["kind"] == "expense")
+        ids = []
+        for m in (9, 10):
+            ids.append(ok(a.journal_save({"date": f"2026-{m:02d}-10", "note": f"管理費 {m} 月", "tags": [],
+                                          "lines": [{"key": exp, "debit": 100 * m}, {"key": bank, "credit": 100 * m}]}))["id"])
+        h = ok(a.journal_form(None))["history"]
+        assert h["last"]["管理費"]["id"] == ids[1] and h["last"]["管理費"]["count"] == 2
+        assert any(x["key"] == "管理費" for x in h["frequent"])
+        assert ok(a.journal_form(ids[0]))["history"]["last"] == {}          # 開啟舊傳票時不需要
+        p = ok(a.journal_reuse(ids[1]))
+        assert p["lines"][0]["debit"] == 1000 and p["lines"][0]["want"] == "debit" and not p["invest"]
+        ok(a.txn_void([ids[1]], "測試"))
+        assert ok(a.journal_form(None))["history"]["last"]["管理費"]["id"] == ids[0]
+        f = ok(a.journal_form(None))
+        sec = f["securities"][0]
+        acc = f"account:{sec['account_id']}"
+        buy = ok(a.journal_save({"date": "2026-11-01", "note": "定期買進", "tags": [], "lines": [
+            {"key": acc, "debit": 5000, "security_id": sec["id"], "shares": 50, "price": 99}, {"key": bank, "credit": 5000}]}))["id"]
+        r = ok(a.journal_reuse(buy))
+        ln = r["lines"][0]
+        assert r["invest"] and ln["security_id"] == sec["id"] and not any((ln["shares"], ln["price"], ln["debit"])) and not r["lines"][1]["credit"]
+        c = ok(a.txn_copy(buy))["lines"][0]
+        assert c["security_id"] == sec["id"] and c["shares"] == 50 and c["price"] == 99
+        sysv = lg.run(lambda: lg.db._q1("SELECT id FROM transactions WHERE source LIKE 'inv:%'"))["id"]
+        assert "不能複製" in err(a.txn_copy(sysv)) and "不能複製" in err(a.journal_reuse(sysv))
+        assert "找不到" in err(a.txn_copy(999999))
+        lg.run(check_books, lg.db, "reuse")
+    finally:
+        lg.close()
+
+
+def test_price_paste():
+    from core.pricepaste import parse
+    rows = [{"id": 1, "code": "0050", "name": "元大台灣50", "price": 100}, {"id": 2, "code": "2330", "name": "台積電", "price": 1000},
+            {"id": 3, "code": "00878", "name": "國泰永續高股息", "price": 20}, {"id": 4, "code": "2330", "name": "台積電", "price": 1000},
+            {"id": 5, "code": "9999", "name": "已賣", "price": 1, "sold": True}, {"id": 6, "code": "", "name": "全球基金", "price": 12}]
+
+    def got(t):
+        return {m["id"]: m["price"] for m in parse(t, rows)["matches"]}
+    both = {2: 1045.0, 4: 1045.0}
+    assert got("0050\t109.5\n2330\t1,045.00\n00878\t21.3") == {1: 109.5, 3: 21.3, **both}
+    assert got("50\t109.5\n878\t21.3") == {1: 109.5, 3: 21.3}                      # Excel 去掉前面的 0
+    assert got("0050,109.5\n2330,1,045") == {1: 109.5, **both}
+    assert got("台積電 1045\n全球基金\t12.5") == {6: 12.5, **both}
+    assert got("代號\t名稱\t股數\t收盤價\n2330\t台積電\t100\t1045") == both        # 標題列指出價格欄
+    assert got("名稱\t市價\t代號\n台積電\t1045\t2330") == both
+    # 沒有持有的股票，價格剛好像某個代號：絕不可以誤認
+    for bad in ("1234\t2330", "1234 2330", "1234\t50", "1234,2330", "5555\tX公司\t2330"):
+        assert got(bad) == {}, (bad, got(bad))
+    r = parse("2330\t100\t1045", rows)
+    assert not r["matches"] and "好幾個數字" in r["problems"][0]
+    r = parse("2330\t900\n2330\t950", rows)
+    assert r["matches"][0]["price"] == 900 and len(r["problems"]) == 1
+    assert parse("2330\t--", rows)["problems"] and parse("2330\t0", rows)["problems"] and got("2330\t-5") == {}
+    assert parse("2330\t1500", rows)["matches"][0]["jump"] and not parse("2330\t1100", rows)["matches"][0]["jump"]
+    assert got("9999\t5") == {} and len(parse("", rows)["missing"]) == 5
+
+
+def test_year_assist():
+    from core import yearclose
+    lg = Ledger(sample=True)
+    try:
+        a, db = lg.api, lg.db
+        y = dt.date.today().year
+        s = ok(a.year_assist(y))
+        assert [x["key"] for x in s["steps"]] == [k for k, _ in yearclose.STEPS] and not s["closed"]
+        assert not s["steps"][-1]["can_close"]                         # 今年還沒過完，不能結
+        st = lg.run(yearclose.status, db, y, dt.date(y, 12, 6))["steps"][0]       # 12/5 的已到期、12/12 與 12/15 的還沒
+        assert st["due_now"] >= 1 and "年底前還有" in st["detail"]
+        ok(a.year_assist_check(y, "health", True))
+        assert ok(a.year_assist(y))["done"] == s["done"] + 1
+        assert "自動判斷" in err(a.year_assist_check(y, "close", True))
+        assert "尚未結束" in err(a.year_close(y))
+        assert not [f for f in os.listdir(lg.dir) if f == "自動備份"]      # 不能結帳時也不留備份
+        ly = y - 1
+        snap = [ok(a.report_tb(f"{ly}-01-01", f"{ly}-12-31")), ok(a.report_bs(f"{y}-01-01", f"{y}-12-31", "none"))["rows"]]
+        assert ok(a.year_assist(ly))["steps"][-1]["can_close"]
+        ok(a.year_close(ly))
+        assert ok(a.year_assist(ly))["closed"]
+        assert any("年度結帳前備份" in f for f in os.listdir(os.path.join(lg.dir, "自動備份")))
+        assert snap == [ok(a.report_tb(f"{ly}-01-01", f"{ly}-12-31")), ok(a.report_bs(f"{y}-01-01", f"{y}-12-31", "none"))["rows"]]
+        rem = lambda d: lg.run(yearclose.reminder, db, d)  # noqa: E731
+        assert rem(dt.date(y, 12, 14)) is None and rem(dt.date(y, 12, 20)) == y and rem(dt.date(y + 1, 2, 1)) == y
+        assert rem(dt.date(y + 1, 4, 1)) is None and rem(dt.date(y, 2, 1)) is None          # 去年已經結了
+        lg.run(check_books, db, "year assist")
+    finally:
+        lg.close()
+
+
+def test_ledger_print_and_export():
+    from openpyxl import load_workbook
+    lg = Ledger(sample=True)
+    try:
+        a = lg.api
+        y = dt.date.today().year
+        rng = (f"{y}-01-01", f"{y}-12-31")
+        for s in ok(a.reports_meta())["subjects"]:
+            h = ok(a.ledger_html(s["key"], *rng))
+            assert s["label"].split("　")[1].split("（")[0] in h
+        key = next(s["key"] for s in ok(a.reports_meta())["subjects"] if s["label"].startswith("5101"))
+        name = ok(a.ledger_export_name(key, *rng))
+        assert name.endswith(".xlsx") and "5101" in name
+        f = ok(a.ledger_export(key, *rng, name))
+        ws = load_workbook(f).active
+        text = " ".join(str(c.value) for row in ws.iter_rows() for c in row if c.value is not None)
+        assert "5101" in text and "相符" in text and "1101" not in text
+    finally:
+        lg.close()
 
 
 def test_quick_entry():

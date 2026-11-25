@@ -116,6 +116,45 @@ for scale in ("normal", "large"):
                  (s + "recon_close", ESC, 0.5),
                  (s + "close", ESC + "; " + ESC, 0.5)]
 
+# 3.8：報表點選查分類帳、分錄帶入／複製／定期、年度結帳、貼上價格（MY_LEDGER_SCENES=flow）
+_CLICK = "[...document.querySelectorAll('{}')].find(b => b.textContent.includes('{}')).click()"
+_SETNOTE = ("(() => {{ const i = [...document.querySelectorAll('.dialog.journal .jtop .field.wide input')][0]; i.focus(); i.value = '{}';"
+            " i.dispatchEvent(new Event('input', {{bubbles: true}})); }})()")
+_MKJ = ("(async () => {{ const f = await pywebview.api.journal_form(null); const k = (n) => f.chart.find(c => c.name === n).key;"
+        " for (const m of [9, 10]) await pywebview.api.journal_save({{date: `2026-${{String(m).padStart(2, '0')}}-10`, note: `房貸繳款 ${{m}} 月`, tags: [],"
+        " lines: [{{key: k('房貸利息'), debit: 3200}}, {{key: k('房租房貸'), debit: 12800}}, {{key: k('台銀活存'), credit: 16000}}]}}); }})()").replace("{{", "{").replace("}}", "}")
+FLOW = []
+for scale in ("normal", "large"):
+    s = f"flow_{scale}_"
+    FLOW += [(s + "seed", f"__t.prefs('light', '{scale}'); " + _MKJ, 2),
+             (s + "tb", "__t.go('dashboard'); setTimeout(() => { window.__pendingReport = {tab: 'tb'}; __t.go('reports'); }, 300)", 3),
+             (s + "tb_scrolled", "document.querySelector('.page-fill .tablewrap').scrollTop = 200", 0.5),
+             (s + "tb_drill", "[...document.querySelectorAll('a.drill')].find(x => x.textContent.includes('餐飲')).click()", 2),
+             (s + "tb_back", _CLICK.format(".page-fill .btn", "回到試算表"), 2),
+             (s + "bs_drill", "__t.tab('資產負債表'); setTimeout(() => [...document.querySelectorAll('tr.drill')].find(x => x.textContent.includes('1102')).click(), 1500)", 3.5),
+             (s + "is_drill", "__t.tab('收支損益表'); setTimeout(() => [...document.querySelectorAll('tr.drill')].find(x => x.textContent.includes('證券買賣')).click(), 1500)", 3.5),
+             (s + "journal_new", "__t.openJournal()", 2),
+             (s + "journal_hint", _SETNOTE.format("房貸繳款 11 月"), 1),
+             (s + "journal_reused", _CLICK.format(".jq .qchip", "帶入"), 1.5),
+             (s + "journal_recurring", _CLICK.format(".dialog .btn", "設為定期"), 2),
+             (s + "journal_recurring2", "1", 1.5),
+             (s + "recurring_saved", "[...document.querySelectorAll('.dialog')].pop().querySelector('.btn.primary').click()", 1.5),
+             (s + "recurring_list", ESC + "; " + ESC + "; __t.openRecurring()", 2),
+             (s + "due", ESC + "; pywebview.api.recurring_list().then(d => { const r = d.rows.find(x => x.type === 'journal'); __t.openDue([{rec_id: r.id,"
+              " date: '2026-11-10', name: r.name, type: 'journal', type_label: '分錄', amount: r.amount}]); })", 2),
+             (s + "due_edit", "[...document.querySelectorAll('.dialog td .btn')].find(b => b.textContent.includes('修改')).click()", 2),
+             (s + "due_posted", "[...document.querySelectorAll('.dialog')].pop().querySelector('.btn.primary').click()", 2),
+             (s + "voucher_copy", ESC + "; " + ESC + "; __t.openUserJournal()", 2.5),
+             (s + "prices_paste", ESC + "; __t.openPrices()", 1.5),
+             (s + "paste_dialog", _CLICK.format(".dialog .btn", "貼上價格"), 1),
+             (s + "paste_result", "(() => { const t = [...document.querySelectorAll('.fb-text')].pop(); t.value = '50\\t111.5\\n2330\\t3,900\\n1234\\t2330\\n56\\t--';"
+              " t.dispatchEvent(new Event('input', {bubbles: true})); })()", 1.5),
+             (s + "paste_result2", "1", 1.5),
+             (s + "paste_filled", "[...document.querySelectorAll('.dialog')].pop().querySelector('.btn.primary').click()", 1),
+             (s + "year", ESC + "; " + ESC + "; __t.openYearAssist()", 2),
+             (s + "year_this", ESC + "; __t.openYearAssist(new Date().getFullYear())", 2),
+             (s + "close", ESC + "; " + ESC + "; " + ESC, 0.5)]
+
 # README 用的截圖（MY_LEDGER_SCENES=readme）：淺色、大字，範例帳本
 README = [
     ("readme_dashboard", "__t.prefs('light', 'large'); __t.go('dashboard')", 3.5),
@@ -239,6 +278,36 @@ def wait_ready(win, timeout: float = 20) -> bool:
     return False
 
 
+def _guard(fn):
+    """測試執行緒若出錯，寫下原因並關閉視窗；否則視窗會一直開著，看起來像程式當掉。"""
+    def call(win, out: str) -> None:
+        import sys
+        import traceback
+        for st in (sys.stdout, sys.stderr):
+            try:
+                st.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:  # noqa: BLE001 — 沒有主控台時
+                pass
+        try:
+            fn(win, out)
+        except Exception:  # noqa: BLE001
+            os.makedirs(out, exist_ok=True)
+            with open(os.path.join(out, "driver_error.txt"), "w", encoding="utf-8") as f:
+                try:          # 視窗當時顯示的是什麼
+                    f.write(str(win.evaluate_js("JSON.stringify({href: location.href, title: document.title, state: document.readyState,"
+                                                " scripts: [...document.scripts].map(x => x.src), res: performance.getEntriesByType('resource')"
+                                                ".map(x => [x.name, x.responseStatus, Math.round(x.duration)]), html: document.documentElement.outerHTML.slice(0, 1500)})")) + "\n")
+                except Exception as e:  # noqa: BLE001
+                    f.write(f"（無法讀取畫面：{e}）\n")
+                f.write(traceback.format_exc())
+            try:
+                win.destroy()
+            except Exception:  # noqa: BLE001
+                os._exit(1)
+    return call
+
+
+@_guard
 def smoke(win, out: str) -> None:
     """煙霧測試（與 v2 相同的 MY_LEDGER_SMOKE_DIR）：每一頁畫好後截圖為 exe_*.png，然後關閉。
     畫面程式的錯誤會自動寫進資料夾的「錯誤紀錄.log」；某一頁一直沒畫好也會記錄下來。"""
@@ -253,13 +322,14 @@ def smoke(win, out: str) -> None:
     win.destroy()
 
 
+@_guard
 def run(win, out: str) -> None:
     os.makedirs(out, exist_ok=True)
     only = [s for s in os.environ.get("MY_LEDGER_SCENES", "").split(",") if s]
     time.sleep(5)
     errors = []
-    scenes = {"readme": README, "mom": MOM, "audit": AUDIT, "features": FEATURES}.get(only[0] if len(only) == 1 else "", SCENES)
-    if only in (["mom"], ["audit"], ["features"]):
+    scenes = {"readme": README, "mom": MOM, "audit": AUDIT, "features": FEATURES, "flow": FLOW}.get(only[0] if len(only) == 1 else "", SCENES)
+    if only in (["mom"], ["audit"], ["features"], ["flow"]):
         view = os.environ.get("MY_LEDGER_VIEW")
         if view:          # 畫面可用範圍（CSS 像素）× 放大倍率 ＋ 視窗外框
             size, scale = view.split("@")
@@ -282,8 +352,10 @@ def run(win, out: str) -> None:
         time.sleep(wait)
         if name.startswith("mom_") and not name.endswith(("_close", "_combo_open")):
             print(f"{name}: {win.evaluate_js('window.__t.visibleRows()')}", flush=True)
-        if name.startswith(("audit_", "feat_")) and not name.endswith(("_close", "_dlg_search")):
+        if name.startswith(("audit_", "feat_", "flow_")) and not name.endswith(("_close", "_dlg_search")):
             print(f"{name}: {win.evaluate_js('window.__t.audit()')}", flush=True)
+        if name.startswith("flow_"):
+            print(f"   對話框：{win.evaluate_js("[...document.querySelectorAll('.dialog h2')].map(x => x.textContent).join(' > ')")}", flush=True)
         if name.endswith("_combo_open"):
             print(f"{name}: 下拉選單顯示 {win.evaluate_js("[...document.querySelectorAll('.pop.floating > div')].filter(d => {const r=d.getBoundingClientRect(); const p=d.closest('.pop').getBoundingClientRect(); return r.top>=p.top-1 && r.bottom<=Math.min(p.bottom, innerHeight)+1}).length")} 個項目", flush=True)
         errs = json.loads(win.evaluate_js("JSON.stringify(window.__errors.splice(0))") or "[]")

@@ -79,6 +79,9 @@ def main() -> int:
         view = os.environ.get("MY_LEDGER_VIEW")      # 例如 1024x528@1.875：模擬她的電腦（Windows 縮放 × 文字大小）
         if view:
             os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] += f" --force-device-scale-factor={view.split('@')[1]}"
+    import socketserver
+    # 內建網頁伺服器預設只排 5 個連線；畫面一次要載入近 30 個檔案，排不下的會被拒絕，程式就停在啟動畫面（3.8.0 修正）
+    socketserver.TCPServer.request_queue_size = 128
     import webview
     dbt = DbThread()
     try:

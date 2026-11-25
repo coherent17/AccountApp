@@ -794,16 +794,29 @@ def export_workbook(db: Database, path: str, start: str, end: str, sheets=None) 
     return path
 
 
-def _ledger_sheet(db: Database, ws, start: str, end: str, sub: str, acodes: dict) -> None:
+def export_ledger(db: Database, path: str, key: tuple, start: str, end: str) -> str:
+    """只匯出一個會計科目的分類帳。"""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "分類帳"
+    owner = db.get_setting("owner_name") or "本人"
+    sub = (f"編製者：{owner}　｜　期間：{start.replace('-', '/')} 至 {end.replace('-', '/')}　｜　"
+           f"編製時間：{dt.datetime.now():%Y/%m/%d %H:%M}")
+    _ledger_sheet(db, ws, start, end, sub, {}, [key])
+    wb.save(path)
+    return path
+
+
+def _ledger_sheet(db: Database, ws, start: str, end: str, sub: str, acodes: dict, keys: list | None = None) -> None:
     """分類帳：每個會計科目一段，期初餘額、逐筆借貸、以公式累計餘額，並與帳上期末餘額核對。"""
     s = _Sheet(ws)
     r = s.title("分類帳", sub + "　｜　資產、負債科目為原幣，其餘為本位幣", 8)
     s.header(r, ["日期", "傳票號碼", "摘要", "對方科目", "借方", "貸方", "餘額", "核對"])
     hdr = r
     n = 0
-    for subj in db.ledger_subjects():
-        lg = db.subject_ledger(subj["key"], start, end)
-        if not lg["rows"] and not lg["opening"] and not lg["closing"]:
+    for key in keys or [x["key"] for x in db.ledger_subjects()]:
+        lg = db.subject_ledger(key, start, end)
+        if not keys and not lg["rows"] and not lg["opening"] and not lg["closing"]:
             continue
         n += 1
         fmt = _num_fmt(lg["currency"])

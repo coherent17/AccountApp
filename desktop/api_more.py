@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import os
 
-from core.database import TYPE_LABELS, voucher_no
+from core.database import SPECIALS, TYPE_LABELS, voucher_no
 
 from desktop.rpc import exposed
 
@@ -24,9 +24,16 @@ class MoreApi:
         for r in db.list_recurring():
             d = r["data"]
             nxt = db.recurring_dates(r, upto)
+            side = {}
+            if d["type"] == "journal":       # 定期分錄：借方、貸方科目
+                for k in ("debit", "credit"):
+                    side[k] = "、".join(dict.fromkeys(
+                        accs.get(ln.get("account_id")) or cats.get(ln.get("category_id"))
+                        or SPECIALS.get(ln.get("special"), ("", ""))[1] for ln in d["lines"] if ln.get(k)))
             rows.append({**r, "type": d["type"], "type_label": TYPE_LABELS[d["type"]],
-                         "account": accs.get(d.get("account_id"), ""),
-                         "target": cats.get(d.get("category_id"), "") or accs.get(d.get("to_account_id"), ""),
+                         "account": f"借 {side['debit']}" if side else accs.get(d.get("account_id"), ""),
+                         "target": f"貸 {side['credit']}" if side else
+                         cats.get(d.get("category_id"), "") or accs.get(d.get("to_account_id"), ""),
                          "amount": d["amount"], "freq_label": f"{FREQ_LABELS[r['freq']]} {r['day']} 日",
                          "next": nxt[0] if nxt else "", "active": bool(r["active"])})
         return {"rows": rows, "freqs": list(FREQ_LABELS.items())}
@@ -36,6 +43,13 @@ class MoreApi:
         name, amt, t = (d.get("name") or "").strip(), d.get("amount"), d.get("type")
         if not name:
             raise ValueError("請輸入名稱")
+        if t == "journal":
+            if not d.get("lines"):
+                raise ValueError("請先輸入分錄內容")
+            data = self._db.recurring_journal_data(self._parse_lines(d["lines"]), d.get("note") or name, d.get("tags"))
+            self._db.save_recurring(rid, name, data, d["freq"], int(d["day"]), d["start_date"], d.get("end_date") or "",
+                                    bool(d.get("active", True)))
+            return name
         if not amt or amt <= 0:
             raise ValueError("請輸入金額")
         data = {"type": t, "account_id": d.get("account_id"), "amount": amt, "note": (d.get("note") or "").strip() or name}
@@ -50,6 +64,21 @@ class MoreApi:
         self._db.save_recurring(rid, name, data, d["freq"], int(d["day"]), d["start_date"], d.get("end_date") or "",
                                 bool(d.get("active", True)))
         return name
+
+    @exposed
+    def recurring_lines(self, rid: int) -> dict:
+        """定期分錄的內容，轉為複式分錄視窗的格式（編輯，或入帳前修改）。"""
+        r = next((x for x in self._db.list_recurring() if x["id"] == rid), None)
+        if not r or r["data"].get("type") != "journal":
+            raise ValueError("找不到這筆定期分錄")
+        d = r["data"]
+        fx = {a["id"] for a in self._db.list_accounts(include_archived=True) if a["currency"] != self._db.base_currency}
+        return {"note": d.get("note") or r["name"], "tags": d.get("tags") or [],
+                "lines": [{"key": f"account:{ln['account_id']}" if ln.get("account_id") else
+                           f"category:{ln['category_id']}" if ln.get("category_id") else f"special:{ln['special']}",
+                           "debit": ln["debit"] or None, "credit": ln["credit"] or None, "memo": ln.get("memo") or "",
+                           "orig": abs(ln["orig"]) if ln.get("orig") and ln.get("account_id") in fx else None}    # 只有外幣要原幣金額
+                          for ln in d["lines"]]}
 
     @exposed
     def recurring_toggle(self, rid: int) -> None:

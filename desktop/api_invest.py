@@ -166,6 +166,13 @@ class InvestApi:
                 for h in self._inv().holdings(date)]
 
     @exposed
+    def price_paste(self, text: str, date: str) -> dict:
+        """把從 Excel 複製的「代號、價格」對應到持股（只解析，不寫入）。"""
+        from core import pricepaste
+        return pricepaste.parse(text or "", [{"id": h["id"], "code": h["code"], "name": h["name"], "price": h["price"],
+                                              "sold": h["shares"] <= 1e-9} for h in self._inv().holdings(date)])
+
+    @exposed
     def price_save(self, date: str, prices: list[list]) -> int:
         inv = self._inv()
         prices = [(int(sid), float(p)) for sid, p in prices if p]

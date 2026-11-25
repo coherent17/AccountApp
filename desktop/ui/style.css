@@ -1307,3 +1307,17 @@ table.recon tr.auto td:first-child { box-shadow: inset 3px 0 0 var(--income); }
   .split { display: block; overflow-y: auto; } .split > * + * { margin-top: .6rem; }
   .split > .table-card, .split > .col:first-child { height: 100%; }      /* 表格先占滿，圖表往下捲 */
 }
+
+/* ---------- 3.8 報表點選查分類帳、常用分錄、貼上價格 ---------- */
+table.stmt tr.drill { cursor: pointer; }
+table.stmt tr.drill:hover td { background: var(--primary-soft); }
+table.stmt tr.drill:hover td.name { color: var(--primary); text-decoration: underline; text-underline-offset: .2em; }
+a.drill { cursor: pointer; color: inherit; } a.drill:hover { color: var(--primary); text-decoration: underline; text-underline-offset: .2em; }
+.nw { white-space: nowrap; }
+.quick.jq { flex: none; padding: .35rem .6rem; margin-bottom: .4rem; }
+.pp-grid { display: grid; grid-template-columns: 1fr 1.25fr; gap: 1rem; }
+.pp-res { max-height: 20rem; overflow-y: auto; }
+.pp-note { margin-top: .5rem; font-size: .86rem; color: var(--text-2); display: flex; flex-wrap: wrap; gap: .15rem .8rem; }
+.pp-note b { width: 100%; } .pp-note.bad { color: var(--expense); }
+tr.jump td { background: var(--gold-soft); }
+@media (max-width: 1100px) { .ledger-pick { width: 15.5rem; } .drilled .lbl { display: none; } }

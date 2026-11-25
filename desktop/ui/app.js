@@ -12,10 +12,10 @@ import { Reports } from "./pages/reports.js";
 import { Settings } from "./pages/settings.js";
 import { checkUpdates, openUpdate, showWhatsNew, startUpdateTimer, useAvailableUpdate } from "./dialogs/update.js";
 import { openTour } from "./dialogs/tour.js";
-import { openFeedback, useFeedbackCount, openForecast, openHealth, openMonthClose, openMonthly, openReminders, previewMonthly } from "./dialogs/tools.js";
+import { openYearAssist, openFeedback, useFeedbackCount, openForecast, openHealth, openMonthClose, openMonthly, openReminders, previewMonthly } from "./dialogs/tools.js";
 import { openChart, openSubject, openYearClose } from "./dialogs/chart.js";
 import { openJournal } from "./dialogs/journal.js";
-import { openDue, openImport, openReconcile, openRecurring, openSearch, openWelcome } from "./dialogs/more.js";
+import { openDue, openImport, openReconcile, openRecurring, openRecurringEdit, openSearch, openWelcome } from "./dialogs/more.js";
 import { showTransactions } from "./pages/transactions.js";
 import { showSecurity } from "./pages/investments.js";
 import { askVoidReason, openAudit, openTxn, openVoucher } from "./dialogs/txn.js";
@@ -41,7 +41,7 @@ window.__undo = undo;
 const ALL = { start: "1900-01-01", end: "2999-12-31" };
 window.__t = {
   go: (p) => window.__go(p), openTxn, openAccount, openAdjust, openPrices, openRates, openSecurity, openSecurityList, openTrade, openAnnual, openPrint, openExport, openChart, openSubject, openYearClose, openJournal,
-  openRecurring, openDue, openReconcile, openImport, openHealth, openMonthClose, openMonthly, openReminders, previewMonthly, openForecast, openFeedback, openSearch: () => openSearch(window.__go), openWelcome,
+  openRecurring, openDue, openReconcile, openImport, openHealth, openMonthClose, openMonthly, openReminders, previewMonthly, openForecast, openFeedback, openYearAssist, openRecurringEdit, openSearch: () => openSearch(window.__go), openWelcome,
   // 目前畫面上「完整看得到」的表格列數（每一個表格各算一次），用來驗證她要求的行數
   visibleRows: () => [...document.querySelectorAll(".tablewrap, .table-card")].filter((w) => w.offsetParent && w.querySelector("tbody")).map((w) => {
     const wr = w.getBoundingClientRect(), vh = window.innerHeight;
@@ -203,6 +203,7 @@ function App() {
 }
 
 async function boot() {
+  try { sessionStorage.removeItem("retry"); } catch (_) { /* 沒有也沒關係 */ }
   try {
     setMeta(await api("meta"));
   window.__folder = META.folder;

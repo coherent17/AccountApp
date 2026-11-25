@@ -81,7 +81,8 @@ def balance_sheet(db, end: str, cend: str | None = None) -> dict:
     def row(name, cur, prev=None, level=1, style="", **kw):
         rows.append({"name": name, "cur": cur, "prev": prev if p else None, "level": level, "style": style,
                      "share": (cur / total) if cur is not None and style != "section" else None,
-                     "orig": kw.get("orig"), "currency": kw.get("currency", base), "code": kw.get("code", "")})
+                     "orig": kw.get("orig"), "currency": kw.get("currency", base), "code": kw.get("code", ""),
+                     "key": kw.get("key")})
 
     def group(name: str, sign: int):
         cur = {a["id"]: a for a in b["groups"][name]}
@@ -94,7 +95,7 @@ def balance_sheet(db, end: str, cend: str | None = None) -> dict:
             pv = prev[aid]["base_value"] * sign if aid in prev else 0.0
             orig = cur[aid]["balance"] if aid in cur and a["currency"] != base else None
             row(f"{a['code']}　{a['name']}（{a['category']}）", v, pv, 2, orig=orig, currency=a["currency"],
-                code=a["code"])
+                code=a["code"], key=f"account:{aid}")
         row(f"{name}合計", b["totals"][name], p["totals"][name] if p else None, 1, "subtotal")
 
     rows.append({"name": "資產", "level": 0, "style": "section", "cur": None, "prev": None, "share": None,
@@ -125,9 +126,9 @@ def income_statement(db, start: str, end: str, crange: tuple[str, str] | None = 
     ti = s["total_income"] or None
     rows: list[dict] = []
 
-    def row(name, cur, prev, level=2, style="", count="", code="", kind=""):
+    def row(name, cur, prev, level=2, style="", count="", code="", kind="", key=None):
         rows.append({"name": name, "cur": cur, "prev": prev if p else None, "level": level, "style": style,
-                     "count": count, "code": code, "kind": kind,
+                     "count": count, "code": code, "kind": kind, "key": key,
                      "share": cur / ti if ti and cur is not None else None})
 
     def section(name):
@@ -143,13 +144,14 @@ def income_statement(db, start: str, end: str, crange: tuple[str, str] | None = 
         for cid in order:
             c = cur.get(cid) or prev[cid]
             row(c["name"], cur[cid]["total"] if cid in cur else 0.0, prev[cid]["total"] if cid in prev else 0.0,
-                count=str(cur[cid]["count"]) if cid in cur else "0", code=codes.get(cid, ""), kind=kind)
+                count=str(cur[cid]["count"]) if cid in cur else "0", code=codes.get(cid, ""), kind=kind,
+                key=f"category:{cid}")
         row(f"{title[:2]}合計", s[total_key], p[total_key] if p else None, 1, "subtotal", kind=kind)
     row("本期收支結餘", s["operating"], p["operating"] if p else None, 0, "total")
     section("業外損益")
-    row(f"{REALIZED_ACCOUNT}（證券買賣）", s["realized"], p["realized"] if p else None)
-    row(f"{ADJUST_ACCOUNT}（市值變動）", s["adjust"], p["adjust"] if p else None)
-    row(f"{FX_ACCOUNT}（匯率變動）", s["fx"], p["fx"] if p else None)
+    row(f"{REALIZED_ACCOUNT}（證券買賣）", s["realized"], p["realized"] if p else None, key="special:realized")
+    row(f"{ADJUST_ACCOUNT}（市值變動）", s["adjust"], p["adjust"] if p else None, key="special:adjust")
+    row(f"{FX_ACCOUNT}（匯率變動）", s["fx"], p["fx"] if p else None, key="special:fx")
     row("本期綜合損益（淨資產增減）", s["comprehensive"], p["comprehensive"] if p else None, 0, "grand")
     return {"start": start, "end": end, "crange": crange, "rows": rows, "is": s, "prev": p}
 

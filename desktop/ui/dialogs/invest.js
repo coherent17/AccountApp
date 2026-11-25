@@ -249,6 +249,16 @@ function PriceDialog({ close }) {
       setMsg({ text: `已填入 ${n} 檔收盤價（來源：${r.source}），請確認後按「產生評價分錄」。` });
     } catch (e) { setMsg({ bad: true, text: e.message }); } finally { setBusy(false); }
   }
+  // 從 Excel 複製「代號、價格」貼上：先看對應結果，確認後才填入
+  async function pastePrices(text = "") {
+    const got = await openModal((cl) => html`<${PastePrices} text0=${text} date=${date} close=${cl} />`);
+    if (!got) return;
+    const next = { ...vals };
+    for (const m of got) next[m.id] = m.price;
+    setVals(next);
+    setMsg({ text: `已填入 ${got.length} 檔市價，請確認後按「產生評價分錄」。` });
+  }
+  const onPaste = (e) => { const t = e.clipboardData?.getData("text") || ""; if (/[\t\n]/.test(t.trim())) { e.preventDefault(); pastePrices(t); } };
   async function save() {
     setMsg(null);
     try {
@@ -259,8 +269,8 @@ function PriceDialog({ close }) {
   return html`<${Dialog} title="市價評價" icon="refresh" width="56rem" cls="listdlg" onClose=${() => close()}
       footer=${html`<div class="grow"></div><${Btn} onClick=${() => close()}>取消</${Btn}><${Btn} kind="primary" icon="check" onClick=${save}>產生評價分錄</${Btn}>`}>
     <div class="row wrap" style="margin-bottom:.8rem"><span class="lbl">評價日期</span><${DateInput} value=${date} onChange=${setDate} />
-      <div class="grow"></div>${META.online && html`<${Btn} icon="download" disabled=${busy} onClick=${fetch}>${busy ? "下載中…" : "從網路取得收盤價"}</${Btn}>`}</div>
-    ${rows && (rows.length === 0 ? html`<div class="note">這個日期沒有持股。</div>` : html`<div class="tablewrap"><table class="list edit ptable sticky">
+      <div class="grow"></div><${Btn} icon="clip" onClick=${() => pastePrices()} title="從 Excel 複製代號與價格兩欄，一次貼上">貼上價格…</${Btn}>${META.online && html`<${Btn} icon="download" disabled=${busy} onClick=${fetch}>${busy ? "下載中…" : "從網路取得收盤價"}</${Btn}>`}</div>
+    ${rows && (rows.length === 0 ? html`<div class="note">這個日期沒有持股。</div>` : html`<div class="tablewrap" onPaste=${onPaste}><table class="list edit ptable sticky">
       <thead><tr><th>代號</th><th>名稱</th><th class="r">持股</th><th class="r">最近評價市價</th><th class="r" style="width:13rem">評價市價</th></tr></thead>
       <tbody>${rows.map((h) => html`<tr><td><b>${h.code}</b></td><td>${h.name}</td><td class="r num">${num(h.shares, null, false, 0)}</td>
         <td class="r num muted">${h.price ? num(h.price, null, false, 2) : h.sold ? "已全數賣出" : "尚未評價"}</td>
@@ -268,6 +278,28 @@ function PriceDialog({ close }) {
           : html`<${AmountInput} value=${vals[h.id] ?? null} onChange=${(v) => setVals({ ...vals, [h.id]: v })} decimals=${4} placeholder="輸入市價" />`}</td></tr>`)}</tbody></table></div>`)}
     <p class="hint">選擇評價日期並輸入市價（留空表示這檔不評價）。按「產生評價分錄」後才會把帳面價值調整為預估淨售價（市價×股數，扣除預估賣出手續費與證交稅），差額記為「未實現評價損益」；同一天再次評價會取代先前的市價。買進、賣出不會自動評價；已全數賣出的標的，剩餘評價會自動歸零。輸入錯誤時，可到「交易紀錄」刪除該筆市價評價。</p>
     ${msg && html`<div class=${"msg " + (msg.bad ? "bad" : "ok")}><${Icon} name=${msg.bad ? "alert" : "check"} />${msg.text}</div>`}
+  </${Dialog}>`;
+}
+
+function PastePrices({ text0, date, close }) {
+  const [text, setText] = useState(text0);
+  const [r, setR] = useState(null);
+  useEffect(() => {
+    if (!text.trim()) return setR(null);
+    const t = setTimeout(() => api("price_paste", text, date).then(setR).catch((e) => errorBox(e.message)), 200);
+    return () => clearTimeout(t);
+  }, [text]);
+  const list = (title, items, cls) => items.length > 0 && html`<div class=${"pp-note " + cls}><b>${title}（${items.length}）</b>${items.slice(0, 8).map((x) => html`<span>${x}</span>`)}${items.length > 8 ? "…" : ""}</div>`;
+  return html`<${Dialog} title="貼上價格" icon="clip" width="56rem" onClose=${() => close(null)}
+      footer=${html`<span class="hint">只會填入市價欄，還要再按「產生評價分錄」才會入帳。</span><div class="grow"></div><${Btn} onClick=${() => close(null)}>取消</${Btn}>
+        <${Btn} kind="primary" icon="check" disabled=${!r || !r.matches.length} onClick=${() => close(r.matches)}>填入${r ? ` ${r.matches.length} 檔` : ""}</${Btn}>`}>
+    <div class="pp-grid"><div><p class="muted" style="margin-top:0">在 Excel 選取「代號」與「價格」兩欄，按 Ctrl+C 複製，再到下面按 Ctrl+V 貼上。</p>
+      <textarea class="fb-text" rows="9" value=${text} onInput=${(e) => setText(e.target.value)} placeholder=${"0050\t109.5\n2330\t1045"} autofocus></textarea></div>
+      <div class="pp-res">${!r ? html`<div class="empty-mini">貼上後，這裡會顯示對應到的持股。</div>` : html`
+        ${r.matches.length > 0 && html`<table class="list compact"><thead><tr><th>標的</th><th class="r">上次</th><th class="r">市價</th></tr></thead>
+          <tbody>${r.matches.map((m) => html`<tr class=${m.jump ? "jump" : ""}><td>${m.code} ${m.name}${m.jump ? html` <span class="type b-adjust">差很多，請確認</span>` : ""}</td>
+            <td class="r num muted">${m.old ? num(m.old, null, false, 2) : "—"}</td><td class="r num"><b>${num(m.price, null, false, 2)}</b></td></tr>`)}</tbody></table>`}
+        ${list("看不懂的列", r.problems, "bad")}${list("不是您的持股", r.unknown, "")}${list("沒有貼到價格的持股", r.missing, "")}`}</div></div>
   </${Dialog}>`;
 }
 

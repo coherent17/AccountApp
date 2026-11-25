@@ -229,7 +229,11 @@ class SettingsApi:
 
     @exposed
     def year_close(self, year: int) -> int:
-        return len(self._db.close_year(int(year)))
+        """年度結帳；先把帳本備份到「自動備份」。"""
+        year = int(year)
+        if year < dt.date.today().year:
+            self._db.backup_to(os.path.join(self._folder, "自動備份", f"年度結帳前備份_{year}_{dt.datetime.now():%Y%m%d_%H%M%S}.db"))
+        return len(self._db.close_year(year))
 
     # ------------------------------------------------------------------ 備份與還原
     @exposed(db=False)
