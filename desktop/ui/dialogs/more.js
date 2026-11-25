@@ -34,7 +34,7 @@ function RecurringManager({ close }) {
   return html`<${Dialog} title="定期交易" icon="restore" width="66rem" cls="listdlg" onClose=${() => close()}
       footer=${html`<${Btn} kind="primary" icon="plus" onClick=${() => edit(null)}>新增</${Btn}>
         <${Btn} icon="edit" disabled=${!cur_} onClick=${() => edit(cur_)}>編輯</${Btn}>
-        <${Btn} icon="eye" disabled=${!cur_} onClick=${async () => { await api("recurring_toggle", cur_.id); changed(); load(); }}>啟用／停用</${Btn}>
+        <${Btn} icon="power" disabled=${!cur_} onClick=${async () => { await api("recurring_toggle", cur_.id); changed(); load(); }}>啟用／停用</${Btn}>
         <${Btn} kind="danger" icon="trash" disabled=${!cur_} onClick=${del}>刪除</${Btn}>
         <${Btn} icon="refresh" onClick=${checkDue}>檢查到期項目</${Btn}><div class="grow"></div><${Btn} onClick=${() => close()}>關閉</${Btn}>`}>
     <p class="hint" style="margin-top:0">每月固定的收入或支出（退休金、水電、保費、房租…）可設為定期交易，到期時程式會提醒您一鍵入帳。</p>
@@ -80,7 +80,7 @@ function RecurringEdit({ rec, from, form, freqs, close }) {
       changed(); toast(`已儲存定期交易：${n}`); close(true);
     } catch (e) { setMsg(e.message); }
   }
-  return html`<${Dialog} title=${rec ? "編輯定期交易" : "新增定期交易"} icon="restore" width="42rem" onClose=${() => close()}
+  return html`<${Dialog} title=${rec ? "編輯定期交易" : "新增定期交易"} icon="restore" width="42rem" guard=${[name, type, account, toAccount, category, jr, amount, note, freq, day, start, hasEnd, hasEnd && end, active]} onClose=${() => close()}
       footer=${html`<div class="grow"></div><${Btn} onClick=${() => close()}>取消</${Btn}><${Btn} kind="primary" icon="check" onClick=${save}>儲存</${Btn}>`}>
     <form class="form" onSubmit=${(e) => { e.preventDefault(); save(); }}>
       <${Field} label="名稱"><${TextInput} value=${name} onInput=${setName} placeholder="例如：月退休金、水電費、保險費" autofocus /></${Field}>
@@ -178,7 +178,7 @@ function Reconcile({ aid0, close }) {
       setTimeout(() => document.querySelector("table.recon tr.auto")?.scrollIntoView({ block: "center" }), 80);   // 捲到自動勾選的紀錄
     } catch (e) { errorBox(e.message); }
   }
-  return html`<${Dialog} title="銀行對帳" icon="list" width="64rem" cls="listdlg" onClose=${() => close()}
+  return html`<${Dialog} title="銀行對帳" icon="list" width="64rem" cls="listdlg" guard=${[...checked].sort((a, b) => a - b)} onClose=${() => close()}
       footer=${html`<${Btn} icon="list" onClick=${() => setHist(!hist)}>${hist ? "回到對帳" : "對帳紀錄"}</${Btn}>
         ${!hist && html`<${Btn} icon="upload" onClick=${smartMatch} title="選擇網路銀行下載的交易明細，自動勾選帳上對應的紀錄">匯入銀行明細自動勾選</${Btn}>`}<div class="grow"></div>
         <${Btn} onClick=${() => close()}>取消</${Btn}><${Btn} kind="primary" icon="check" onClick=${finish}>完成對帳</${Btn}>`}>
@@ -301,7 +301,7 @@ function Welcome({ close }) {
       <${Field} label="怎麼稱呼您？"><${TextInput} value=${name} onInput=${setName} placeholder="例如：游媽媽" /></${Field}>
       <button class="choice primary" onClick=${() => finish("basic")}><${Icon} name="wallet" size="1.6rem" /><div><b>建立基本帳戶，馬上開始記帳</b>
         <span>會先建立「現金」與「銀行存款」兩個帳戶，之後可以再自行新增或修改。</span></div></button>
-      <button class="choice" onClick=${() => finish("sample")}><${Icon} name="eye" size="1.6rem" /><div><b>載入範例資料，先試用看看</b>
+      <button class="choice" onClick=${() => finish("sample")}><${Icon} name="insight" size="1.6rem" /><div><b>載入範例資料，先試用看看</b>
         <span>試用後，在「總覽」頁最上方按「清除範例資料，開始正式記帳」即可一鍵清除。</span></div></button>
     </div>
   </${Dialog}>`;

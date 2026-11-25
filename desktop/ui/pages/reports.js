@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { META, api, changed, css, html, money, num, pct, toast, useLoad, ymd } from "../lib/core.js";
 import { PALETTE, axis, barFill, chartBase, donutCenter, shortMoney, useChart, valueAxis } from "../lib/charts.js";
-import { catEmoji } from "../lib/caticon.js";
+import { CatIcon } from "../lib/caticon.js";
 import { Btn, Card, Combo, DataTable, Dialog, Field, Icon, PageHead, PeriodPicker, Segmented, Select, Tabs, TextInput, ask, errorBox,
          openModal, usePeriod, Skeleton, Tip } from "../lib/ui.js";
 import { openVoucher } from "../dialogs/txn.js";
@@ -12,9 +12,9 @@ import { openExport } from "../dialogs/data.js";
 import { openMonthly } from "../dialogs/tools.js";
 import { showTransactions } from "./transactions.js";
 
-const TABS = [["bs", "資產負債表", "scale"], ["is", "收支損益表", "trend_up"], ["cf", "現金流量表", "transfer"],
-              ["monthly", "月度收支", "chart"], ["cats", "分類與預算", "pie"], ["tags", "標籤／專案", "tag"],
-              ["journal", "日記帳", "book"], ["ledger", "分類帳", "list"], ["tb", "試算表", "layers"], ["tax", "報稅彙總", "dollar"]];
+const TABS = [["bs", "資產負債表", "scale"], ["is", "收支損益表", "trend_up"], ["cf", "現金流量表", "transfer"], "|",
+              ["monthly", "月度收支", "chart"], ["cats", "分類與預算", "pie"], ["tags", "標籤／專案", "tag"], "|",
+              ["journal", "日記帳", "book"], ["ledger", "分類帳", "list"], ["tb", "試算表", "layers"], "|", ["tax", "報稅彙總", "dollar"]];
 const sgn = (v) => (v >= 0 ? "c-income" : "c-expense");
 const pctOrBlank = (v) => (v == null ? "" : pct(v));
 
@@ -39,7 +39,7 @@ export function Reports({ go }) {
   const P = { bs: BalanceSheet, is: IncomeStatement, cf: CashFlow, monthly: Monthly, cats: Categories, tags: Tags,
               journal: Journal, ledger: Ledger, tb: TrialBalance, tax: Tax }[tab];
   return html`<div class="page-fill">
-    <${PageHead} icon="pie" color="var(--gold)" title="財務報表" sub="資產負債表、收支損益表、分類帳與試算表">
+    <${PageHead} icon="report" color="var(--gold)" title="財務報表" sub="資產負債表、收支損益表、分類帳與試算表">
       <${Btn} kind="income" icon="download" big onClick=${() => openExport(start, end)}>匯出 Excel 報表</${Btn}>
       <${Btn} icon="print" big onClick=${() => openPrint(start, end)}>列印／PDF</${Btn}>
       <${Btn} icon="calendar" big onClick=${() => openMonthly()} title="一頁看完一個月：收支、預算、淨資產、投資與接下來的提醒">月報</${Btn}>
@@ -184,7 +184,7 @@ function Categories({ start, end, go }) {
     graphic: donutCenter(kind === "expense" ? "支出合計" : "收入合計", shortMoney(items.reduce((t, x) => t + x[1], 0))),
   }), [rows]);
   const cols = [
-    { key: "name", title: "分類", render: (r) => html`<span class="emo">${catEmoji(r.name, kind)}</span><b>${r.name}</b>`, sort: (r) => r.name, cls: () => "grow" },
+    { key: "name", title: "分類", render: (r) => html`<${CatIcon} name=${r.name} kind=${kind} /><b>${r.name}</b>`, sort: (r) => r.name, cls: () => "grow" },
     { key: "count", title: "筆數", align: "r", render: (r) => r.count, sort: (r) => r.count },
     { key: "total", title: "金額", align: "r", render: (r) => html`<span class="num">${num(r.total)}</span>`, sort: (r) => r.total },
     { key: "share", title: "占比", align: "r", render: (r) => html`<span class="num">${pct(r.share)}</span>`, sort: (r) => r.share },
@@ -199,7 +199,7 @@ function Categories({ start, end, go }) {
       <div class="card table-card"><${DataTable} columns=${cols} rows=${rows || []} defaultSort=${["total", true]}
         onActivate=${(r) => showTransactions(go, { category: r.id, period: "自訂期間", start, end })} empty="這個期間沒有紀錄" /></div>
       <${Card} title="分類占比" icon="pie"><div class="chart tall" ref=${ref}></div>
-        <div class="legend">${items.map(([n, v], i) => html`<div><i style=${`background:${pal[i % pal.length]}`}></i><span class="lg-name">${n === "其他" ? "" : catEmoji(n, kind)} ${n}</span><span class="num">${money(v)}</span></div>`)}</div></${Card}></div>`;
+        <div class="legend">${items.map(([n, v], i) => html`<div><i style=${`background:${pal[i % pal.length]}`}></i><span class="lg-name">${n === "其他" ? "" : html`<${CatIcon} name=${n} kind=${kind} />`}${n}</span><span class="num">${money(v)}</span></div>`)}</div></${Card}></div>`;
 }
 
 function Tags({ start, end, go }) {
@@ -324,10 +324,10 @@ function TrialBalance({ start, end, toLedger }) {
   const amt = (k, t) => ({ key: k, title: t, align: "r", render: (r) => (r[k] ? html`<span class=${"num" + (k === "debit" || k === "credit" ? " b" : "")}>${num(r[k])}</span>` : "") });
   const cols = [{ key: "code", title: "代號", align: "c", render: (r) => html`<span class="muted num">${r.code}</span>` },
                 { key: "name", title: "會計科目", render: (r) => (r.key ? html`<a class="drill" title="查看這個科目的分類帳" onClick=${() => toLedger(r.key)}><b>${r.name}</b></a>` : html`<b>${r.name}</b>`), nowrap: true, cls: () => "grow" },
-                { key: "g", title: "類別", align: "c", render: (r) => html`<span class="muted">${r.group}</span>` },
+                { key: "g", title: "類別", align: "c", nowrap: true, render: (r) => html`<span class="muted">${r.group}</span>` },
                 amt("open_debit", "期初借方"), amt("open_credit", "期初貸方"), amt("period_debit", "本期借方"), amt("period_credit", "本期貸方"),
                 amt("debit", "期末借方"), amt("credit", "期末貸方")];
-  return html`<div class="card table-card"><${DataTable} columns=${cols} rows=${all} rowKey=${(r) => r.code + r.name} rowCls=${(r) => (r._total ? "total" : "")} onActivate=${(r) => r.key && toLedger(r.key)} /></div>
+  return html`<div class="card table-card tb-card"><${DataTable} columns=${cols} rows=${all} rowKey=${(r) => r.code + r.name} rowCls=${(r) => (r._total ? "total" : "")} onActivate=${(r) => r.key && toLedger(r.key)} /></div>
     <b class=${ok ? "c-income" : "c-expense"}>期末借方 ${money(tot.debit)}　｜　期末貸方 ${money(tot.credit)}　｜　${ok ? "✓ 期初、本期、期末皆借貸平衡" : `✗ 不平衡，期末差額 ${money(tot.debit - tot.credit)}`}</b>
     <${Tip}>六欄式試算表：期初餘額＋本期借貸發生額＝期末餘額。損益科目只有本期發生額；期初淨值 = 期初前一日淨資產 + 期間內新開帳戶之期初金額。三組借貸合計都相等即表示帳務平衡。</${Tip}>`;
 }

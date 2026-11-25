@@ -4,7 +4,7 @@ import { META, PERIOD_PRESETS, api, changed, html, money, presetRange, toast, us
 import { Btn, Check, DataTable, DateInput, PeriodChips, Tip, Icon, MenuButton, PageHead, Select, TextInput, TypeBadge, ask, errorBox, info,
          openMenu } from "../lib/ui.js";
 import { askVoidReason, openAudit, openTxn, openVoucher, pickTag } from "../dialogs/txn.js";
-import { catEmoji } from "../lib/caticon.js";
+import { CatIcon } from "../lib/caticon.js";
 import { openJournal } from "../dialogs/journal.js";
 import { openImport, openRecurring, openRecurringEdit } from "../dialogs/more.js";
 import { openAdjust } from "../dialogs/account.js";
@@ -113,7 +113,7 @@ export function Transactions({ go }) {
                : { label: selected.length > 1 ? `作廢選取的 ${selected.length} 筆` : "作廢", icon: "trash", danger: true, run: () => voidSelected() }]),
       ...(!r.source ? ["-", { label: "加上標籤／專案…", icon: "tag", run: tagSelected },
                        ...selTags.map((t) => ({ label: `移除標籤「${t}」`, icon: "minus", run: () => untag(t) }))] : []),
-      "-", { label: "修改紀錄", icon: "eye", run: () => openAudit(r.id) },
+      "-", { label: "修改紀錄", icon: "restore", run: () => openAudit(r.id) },
     ]);
   }
 
@@ -123,7 +123,7 @@ export function Transactions({ go }) {
       render: (r) => html`<span class="muted num">${r.voucher}</span>${r.n_attach > 0 && html`<span title="有附件"><${Icon} name="clip" cls="mini" /></span>`}` },
     { key: "type", title: "類型", align: "c", render: (r) => html`<${TypeBadge} type=${r.void ? "void" : r.source ? "invest" : r.type} label=${r.type_label} />`, sort: (r) => r.type_label },
     { key: "category", title: "分類／科目", sort: (r) => r.category, elide: true, tip: (r) => r.category,
-      render: (r) => (r.type === "income" || r.type === "expense" ? html`<span class="emo">${catEmoji(r.category, r.type)}</span>${r.category}` : r.category) },
+      render: (r) => (r.type === "income" || r.type === "expense" ? html`<${CatIcon} name=${r.category} kind=${r.type} />${r.category}` : r.category) },
     { key: "account", title: "帳戶", render: (r) => r.account, sort: (r) => r.account, elide: true },
     { key: "note", title: "說明", elide: true, cls: () => "grow",
       tip: (r) => (r.void ? `〔作廢：${r.void_reason}〕` : "") + r.note + r.tags.map((t) => "　#" + t).join(""),
@@ -147,7 +147,7 @@ export function Transactions({ go }) {
         { label: "定期交易（每月固定收支）", icon: "restore", run: openRecurring },
         { label: "匯入 Excel／CSV", icon: "upload", run: openImport },
         { label: "匯出 Excel 報表", icon: "download", run: () => openExport(range[0], range[1]) },
-        { label: "修改紀錄（稽核軌跡）", icon: "eye", run: () => openAudit() },
+        { label: "修改紀錄（稽核軌跡）", icon: "restore", run: () => openAudit() },
         { label: "會計科目表（新增科目）", icon: "list", run: openChart },
       ]} />
     </${PageHead}>

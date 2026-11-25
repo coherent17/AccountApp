@@ -3,7 +3,7 @@
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { META, api, applyPrefs, changed, html, setMeta, toast, useToasts } from "./lib/core.js";
-import { Icon, MenuHost, ModalHost, ask, errorBox } from "./lib/ui.js";
+import { Icon, MenuHost, ModalHost, ask, closeTop, errorBox } from "./lib/ui.js";
 import { Dashboard } from "./pages/dashboard.js";
 import { Transactions } from "./pages/transactions.js";
 import { Accounts } from "./pages/accounts.js";
@@ -25,7 +25,7 @@ import { openAnnual, openPrint } from "./dialogs/print.js";
 import { openExport } from "./dialogs/data.js";
 
 const NAV = [["dashboard", "總覽", "home"], ["transactions", "收支明細", "list"], ["accounts", "帳戶管理", "wallet"],
-             ["investments", "投資管理", "chart"], ["reports", "財務報表", "excel"], ["settings", "設定", "settings"]];
+             ["investments", "投資管理", "chart"], ["reports", "財務報表", "report"], ["settings", "設定", "settings"]];
 const FILL = ["transactions", "reports", "investments"];
 const PAGES = { dashboard: Dashboard, transactions: Transactions, accounts: Accounts, investments: Investments, reports: Reports, settings: Settings };
 
@@ -77,11 +77,11 @@ window.__t = {
     if (m && m.scrollHeight > m.clientHeight + 4) out.push(`整頁可上下捲動（${m.scrollHeight}/${m.clientHeight}px）`);
     return out.join("；") || "（沒有表格）";
   },
-  openTour, openUpdateFake: (v) => { window.__fakeUpdate(v); },
+  closeTop, openTour, openUpdateFake: (v) => { window.__fakeUpdate(v); },
   openUserJournal: async () => openJournal({ tid: (await api("txn_list", { ...ALL, type: "journal" })).rows.find((r) => !r.source).id }),
   journalTemplate: (name) => { const s = document.querySelector(".journal .jtop select"); const i = [...s.options].findIndex((o) => o.text === name); s.value = i; s.dispatchEvent(new Event("change", { bubbles: true })); },
   tab: (label) => [...document.querySelectorAll(".tabs button")].find((b) => b.textContent.includes(label)).click(), openVoucher, openAudit, askVoid: () => askVoidReason(2),
-  prefs: (t, s) => window.__setPrefs(t, s),
+  prefs: (t, s) => window.__setPrefs(t, s), side: (mini) => { if ((document.documentElement.dataset.side === "mini") !== mini) window.__toggleSide(); },
   editFirst: async () => openVoucher((await api("txn_list", { ...ALL, type: "expense" })).rows[0].id),
   openFirstOf: async (type) => openVoucher((await api("txn_list", { ...ALL, type })).rows[0].id),
   menuFirst: () => {
@@ -128,8 +128,16 @@ window.__farewell = (steps = [], done = false) => {
 
 const SECTIONS = { dashboard: "", transactions: "記帳", accounts: "記帳", investments: "資產", reports: "報表", settings: "" };
 
+/** 側邊欄收合（只剩圖示）：記在這台電腦，下次開啟照舊。 */
+function setSide(mini) {
+  document.documentElement.dataset.side = mini ? "mini" : "full";
+  try { localStorage.setItem("side", mini ? "mini" : "full"); } catch (_) { /* 沒有也沒關係 */ }
+}
+
 function SideBar({ page, go, setPref }) {
   const r = document.documentElement;
+  const [mini, setMini] = useState(r.dataset.side === "mini");
+  window.__toggleSide = () => { const v = r.dataset.side !== "mini"; setSide(v); setMini(v); };
   const upd = useAvailableUpdate();
   const fbN = useFeedbackCount();
   const owner = META.owner || "您好";
@@ -137,26 +145,26 @@ function SideBar({ page, go, setPref }) {
     <div class="brand"><div class="logo"><img src="logo.svg" alt="" /></div>
       <div><b>我的理財帳本</b><span>個人資產與記帳管理</span></div></div>
     ${NAV.map(([k, label, ic], i) => html`<button class=${"nav" + (page === k ? " on" : "")} onClick=${() => go(k)}
-        title=${"Ctrl+" + (i + 1)}><${Icon} name=${ic} />${label}</button>`)}
+        title=${label + "（Ctrl+" + (i + 1) + "）"}><${Icon} name=${ic} /><span>${label}</span></button>`)}
     <div class="grow"></div>
     ${upd && html`<button class="update-pill" onClick=${openUpdate} title="按一下查看更新內容並更新"><span class="pulse"></span>
       <div><b>有新版本 ${upd.version}</b><small>按這裡更新</small></div><${Icon} name="download" /></button>`}
-    <div class="section-label">快速功能</div>
-    <button class="nav" onClick=${() => openTxn({ type: "expense" })}><${Icon} name="plus" />記一筆<kbd>Ctrl+N</kbd></button>
-    <button class="nav" onClick=${() => openSearch(go)}><${Icon} name="search" />搜尋<kbd>Ctrl+F</kbd></button>
-    <button class="nav" onClick=${undo}><${Icon} name="undo" />復原<kbd>Ctrl+Z</kbd></button>
+    <div class="section-label"><span>快速功能</span><button class="iconbtn side-toggle" title=${(mini ? "展開" : "收合") + "側邊欄（Ctrl+B），表格會有更多空間"} onClick=${() => window.__toggleSide()}><${Icon} name=${mini ? "sidebar_open" : "sidebar"} /></button></div>
+    <button class="nav" title="記一筆（Ctrl+N）" onClick=${() => openTxn({ type: "expense" })}><${Icon} name="plus" /><span>記一筆</span><kbd>Ctrl+N</kbd></button>
+    <button class="nav" title="搜尋（Ctrl+F）" onClick=${() => openSearch(go)}><${Icon} name="search" /><span>搜尋</span><kbd>Ctrl+F</kbd></button>
+    <button class="nav" title="復原上一步（Ctrl+Z）" onClick=${undo}><${Icon} name="undo" /><span>復原</span><kbd>Ctrl+Z</kbd></button>
     <div class="prefs">
       <div class="seg mini" title="外觀：切換後立即生效">
-        <button class=${r.dataset.theme === "light" ? "on" : ""} onClick=${() => setPref("light", r.dataset.scale)}>淺色</button>
-        <button class=${r.dataset.theme === "dark" ? "on" : ""} onClick=${() => setPref("dark", r.dataset.scale)}><${Icon} name="moon" />深色</button></div>
+        <button class=${r.dataset.theme === "light" ? "on" : ""} onClick=${() => setPref("light", null)}><${Icon} name="sun" />淺色</button>
+        <button class=${r.dataset.theme === "dark" ? "on" : ""} onClick=${() => setPref("dark", null)}><${Icon} name="moon" />深色</button></div>
       <div class="seg mini" title="文字大小">
         ${[["normal", "標準"], ["large", "大"], ["xlarge", "特大"]].map(([k, l]) =>
-          html`<button class=${r.dataset.scale === k ? "on" : ""} onClick=${() => setPref(r.dataset.theme, k)}>${l}</button>`)}</div>
+          html`<button class=${r.dataset.scale === k ? "on" : ""} onClick=${() => setPref(null, k)}>${l}</button>`)}</div>
     </div>
     <div class="userbox" title="資料只儲存在這台電腦">
       <div class="avatar">${owner.slice(0, 1)}</div>
       <div class="grow"><b>${owner}</b><span><span class="dot"></span>版本 ${META.version}</span></div>
-      <button class="iconbtn power fb" title="意見回饋：寫下問題或想法（可累積好幾則），產生 PDF 傳給我們" onClick=${() => openFeedback()}><${Icon} name="heart" />${fbN > 0 && html`<i class="fb-badge">${fbN}</i>`}</button>
+      <button class="iconbtn power fb" title="意見回饋：寫下問題或想法（可累積好幾則），產生 PDF 傳給我們" onClick=${() => openFeedback()}><${Icon} name="chat" />${fbN > 0 && html`<i class="fb-badge">${fbN}</i>`}</button>
       <button class="iconbtn power" title="結束程式（帳本會自動儲存並備份）" onClick=${() => api("quit_app")}><${Icon} name="power" /></button>
     </div>
   </aside>`;
@@ -174,6 +182,7 @@ function App() {
     const onKey = (e) => {
       if (window.__modalOpen) return;
       if (e.ctrlKey && e.key >= "1" && e.key <= "6") { go(NAV[+e.key - 1][0]); e.preventDefault(); }
+      else if (e.ctrlKey && (e.key === "b" || e.key === "B")) { e.preventDefault(); window.__toggleSide(); }
       else if (e.ctrlKey && (e.key === "n" || e.key === "N")) { e.preventDefault(); openTxn({ type: "expense" }); }
       else if (e.ctrlKey && (e.key === "f" || e.key === "F")) { e.preventDefault(); openSearch(go); }
       else if (e.ctrlKey && (e.key === "z" || e.key === "Z") && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); undo(); }
@@ -186,9 +195,10 @@ function App() {
   const Page = PAGES[page];
   window.__pageName = (NAV.find((n) => n[0] === page) || [, ""])[1];     // 意見回饋記下是在哪一頁
   const setPref = (t, s) => {
-    applyPrefs(t, s);
-    api("set_pref", "theme_mode", t);
-    api("set_pref", "font_scale", s);
+    const r = document.documentElement;                          // 只存有改的那一項：換字體不會把「跟隨 Windows」改掉
+    applyPrefs(t || r.dataset.theme, s || r.dataset.scale);
+    if (t) { META.theme = t; api("set_pref", "theme_mode", t); }
+    if (s) { META.font_scale = s; api("set_pref", "font_scale", s); }
     force((x) => x + 1);
   };
   window.__setPrefs = (t, s) => { applyPrefs(t, s); force((x) => x + 1); };

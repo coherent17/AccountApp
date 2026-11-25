@@ -49,12 +49,12 @@ class DashboardApi:
                 reminders.append({"kind": "forecast", "name": w["name"], "date": w["min_date"], "min": w["min"],
                                   "currency": w["currency"], "reason": w["reason"], "negative": w["negative"],
                                   "low": fcst["low"], "action": "查看預測"})
-        ym = monthclose.previous_month(today)
-        if today.day <= 20 and not db.get_json("month_close", {}).get(ym, {}).get("finished") and db._q1(
+        close_ym = monthclose.previous_month(today)
+        if today.day <= 20 and not db.get_json("month_close", {}).get(close_ym, {}).get("finished") and db._q1(
                 "SELECT COUNT(*) n FROM transactions WHERE void = 0 AND source = '' AND date BETWEEN ? AND ?",
-                (month_start(ym), month_end(ym)))["n"]:
-            reminders.append({"kind": "monthclose", "ym": ym,
-                              "text": f"{monthclose.label(ym)}的月結還沒完成：對帳、評價、檢視預算，一步一步帶您完成。",
+                (month_start(close_ym), month_end(close_ym)))["n"]:
+            reminders.append({"kind": "monthclose", "ym": close_ym,
+                              "text": f"{monthclose.label(close_ym)}的月結還沒完成：對帳、評價、檢視預算，一步一步帶您完成。",
                               "action": "開始月結"})
         from core import yearclose
         yc = yearclose.reminder(db, today)

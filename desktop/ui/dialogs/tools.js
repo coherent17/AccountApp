@@ -8,7 +8,7 @@ import { openPrices } from "./invest.js";
 import { openAnnual, openPreview } from "./print.js";
 import { openYearClose } from "./chart.js";
 
-const KIND_ICON = { insurance: "heart", card: "card", tax: "dollar", dividend: "coins", other: "bell",
+const KIND_ICON = { insurance: "c_shield", card: "card", tax: "dollar", dividend: "coins", other: "bell",
                     maturity: "bank", recurring: "restore" };
 const KIND_COLOR = { insurance: "var(--expense)", card: "var(--transfer)", tax: "var(--gold)", dividend: "var(--income)",
                      other: "var(--primary)", maturity: "var(--adjust)", recurring: "var(--primary)" };
@@ -79,7 +79,7 @@ function ReminderEdit({ item, kinds, freqs, accounts, close }) {
     await api("reminder_delete", item.id); toast("已刪除提醒"); close(true);
   }
   const placeholder = { insurance: "例如：國泰人壽保費", card: "例如：國泰信用卡繳款", tax: "例如：房屋稅、地價稅", dividend: "例如：0056 除息", other: "例如：健康檢查" }[kind];
-  return html`<${Dialog} title=${item ? "修改提醒" : "新增提醒"} icon="bell" width="40rem" onClose=${() => close()}
+  return html`<${Dialog} title=${item ? "修改提醒" : "新增提醒"} icon="bell" width="40rem" guard=${[title, kind, freq, date, amount, lead, note, account]} onClose=${() => close()}
       footer=${html`${item && html`<${Btn} kind="danger" icon="trash" onClick=${del}>刪除</${Btn}>`}<div class="grow"></div>
         <${Btn} onClick=${() => close()}>取消</${Btn}><${Btn} kind="primary" icon="check" onClick=${save}>儲存</${Btn}>`}>
     <form class="form" onSubmit=${(e) => { e.preventDefault(); save(); }}>
@@ -118,7 +118,7 @@ function Health({ close }) {
   }
   const tone = !r ? "run" : r.bad ? "bad" : r.warn ? "warn" : "ok";
   const label = { backup: "設定備份", backup2: "設定備份", due: "確認入帳", recon: "去對帳", prices: "市價評價", yearclose: "到財務報表", restore: "還原備份" };
-  return html`<${Dialog} title="資料健康檢查" icon="heart" width="50rem" cls="listdlg" onClose=${() => close(!!r)}
+  return html`<${Dialog} title="資料健康檢查" icon="pulse" width="50rem" cls="listdlg" onClose=${() => close(!!r)}
       footer=${html`<div class="grow"></div><${Btn} icon="refresh" onClick=${run} disabled=${!r}>重新檢查</${Btn}>
         <${Btn} icon="print" onClick=${async () => openPreview(await api("health_html"), "帳務健康檢查報告")} disabled=${!r}>列印報告</${Btn}>
         <${Btn} kind="primary" onClick=${() => close(!!r)}>完成</${Btn}>`}>
@@ -315,7 +315,7 @@ const FB_TAGS = ["看不清楚", "操作不順", "數字不對", "希望新增�
 let fbCount = 0;
 const fbSubs = new Set();
 const setFbCount = (n) => { fbCount = n; fbSubs.forEach((f) => f(n)); };
-/** 側邊欄 ♡ 上的數字：還沒做成 PDF 的回饋則數。 */
+/** 側邊欄 意見回饋 上的數字：還沒做成 PDF 的回饋則數。 */
 export function useFeedbackCount() {
   const [n, setN] = useState(fbCount);
   useEffect(() => { fbSubs.add(setN); api("feedback_items").then((x) => setFbCount(x.length)).catch(() => {}); return () => fbSubs.delete(setN); }, []);
@@ -417,7 +417,7 @@ function Feedback({ shot: shot0, items0, close }) {
     return list;
   }
   async function add() {
-    try { const l = await addItem(); setMsg(`已加入，清單共 ${l.length} 則。可以繼續使用程式，有其他問題再按 ♡ 加入；準備好了就按「產生 PDF」。`); }
+    try { const l = await addItem(); setMsg(`已加入，清單共 ${l.length} 則。可以繼續使用程式，有其他問題再按「意見回饋」加入；準備好了就按「產生 PDF」。`); }
     catch (e) { errorBox(e.message); }
   }
   async function makePdf() {
@@ -445,7 +445,7 @@ function Feedback({ shot: shot0, items0, close }) {
     toast(ok ? "已再複製一次，可以到 LINE 按 Ctrl+V 貼上" : "無法複製，請從資料夾把 PDF 拖進 LINE", ok ? "ok" : "info");
   }
   if (res) {
-    return html`<${Dialog} title="意見回饋" icon="heart" width="44rem" onClose=${() => close(true)}
+    return html`<${Dialog} title="意見回饋" icon="chat" width="44rem" onClose=${() => close(true)}
         footer=${html`<${Btn} icon="copy" onClick=${copyAgain}>再複製一次</${Btn}><${Btn} icon="folder" onClick=${() => api("open_path", res.folder)}>開啟資料夾</${Btn}>
           <${Btn} icon="eye" onClick=${() => api("open_path", res.path)}>看看 PDF</${Btn}><div class="grow"></div>
           <${Btn} kind="primary" onClick=${() => close(true)}>完成</${Btn}>`}>
@@ -457,7 +457,7 @@ function Feedback({ shot: shot0, items0, close }) {
         <p class="muted small">${res.path}</p></div>
     </${Dialog}>`;
   }
-  return html`<${Dialog} title="意見回饋" icon="heart" width="62rem" onClose=${() => close()}
+  return html`<${Dialog} title="意見回饋" icon="chat" width="62rem" guard=${[note]} onClose=${() => close()}
       footer=${html`<span class="hint">不會自動上傳；產生的 PDF 存在「意見回饋」資料夾，由您傳給我們。</span><div class="grow"></div>
         <${Btn} onClick=${() => close()}>關閉</${Btn}>
         <${Btn} icon="plus" disabled=${!dirty || busy} onClick=${add}>加入清單</${Btn}>

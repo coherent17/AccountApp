@@ -54,7 +54,7 @@ function SecurityDialog({ form: f0, close }) {
       changed(); toast(`已儲存投資標的：${r.name}`); close(r.id);
     } catch (e) { setMsg(e.message); }
   }
-  return html`<${Dialog} title=${s ? "編輯投資標的" : "新增投資標的"} icon="chart" width="42rem" onClose=${() => close()}
+  return html`<${Dialog} title=${s ? "編輯投資標的" : "新增投資標的"} icon="chart" width="42rem" guard=${[code, name, note, type, fee, feeMin, tax]} onClose=${() => close()}
       footer=${html`<div class="grow"></div><${Btn} onClick=${() => close()}>取消</${Btn}><${Btn} kind="primary" icon="check" onClick=${save}>儲存</${Btn}>`}>
     <form class="form" onSubmit=${(e) => { e.preventDefault(); save(); }}>
       <${Field} label="投資帳戶"><${Select} value=${account} onChange=${setAccount} disabled=${!!s || !!form.account_id}
@@ -65,9 +65,9 @@ function SecurityDialog({ form: f0, close }) {
       <${Field} label="類型"><div class="row"><${Select} value=${type} onChange=${pick} style="flex:1"
           options=${[...types.map((t) => [t.name, `${t.name}（手續費 ${+(t.fee_rate * 100).toFixed(4)}%、證交稅 ${+(t.tax_rate * 100).toFixed(3)}%）`]), ["", "自訂（只用於這個標的）"]]} />
         <${Btn} onClick=${manage}>管理類型…</${Btn}></div></${Field}>
-      <${Field} label="手續費率"><div class="row narrow"><${AmountInput} value=${fee} onChange=${setFee} decimals=${4} suffix="%" /></div></${Field}>
+      <${Field} label="手續費率"><div class="row narrow"><${AmountInput} value=${fee} onChange=${setFee} decimals=${4} trim suffix="%" /></div></${Field}>
       <${Field} label="最低手續費"><div class="row narrow"><${AmountInput} value=${feeMin} onChange=${setFeeMin} decimals=${0} suffix="元" /></div></${Field}>
-      <${Field} label="證交稅率"><div class="row narrow"><${AmountInput} value=${tax} onChange=${setTax} decimals=${3} suffix="%" /></div></${Field}>
+      <${Field} label="證交稅率"><div class="row narrow"><${AmountInput} value=${tax} onChange=${setTax} decimals=${3} trim suffix="%" /></div></${Field}>
       <div class="hint">手續費一般為 0.1425%，有折扣時請輸入折扣後的費率（例如 6 折為 0.0855%）。手續費與證交稅依券商慣例無條件捨去至元。<br />
         投資科目請先在「帳戶管理」建立（類別選「短期投資」、「長期投資」、「股票」、「基金」或「債券」，期初餘額填 0）。</div>
       ${msg && html`<div class="msg bad"><${Icon} name="alert" />${msg}</div>`}
@@ -92,15 +92,15 @@ function TypesDialog({ types, close }) {
       close(true);
     } catch (e) { setMsg(e.message); }
   }
-  return html`<${Dialog} title="管理標的類型" icon="list" width="52rem" onClose=${() => close()}
+  return html`<${Dialog} title="管理標的類型" icon="list" width="52rem" guard=${rows} onClose=${() => close()}
       footer=${html`<${Btn} icon="plus" onClick=${() => setRows([...rows, { name: "", old: "", fee: 0.1425, min: 20, tax: 0.3 }])}>新增類型</${Btn}>
         <div class="grow"></div><${Btn} onClick=${() => close()}>取消</${Btn}><${Btn} kind="primary" icon="check" onClick=${save}>儲存</${Btn}>`}>
     <table class="list edit"><thead><tr><th>類型名稱</th><th class="r">手續費率</th><th class="r">最低手續費</th><th class="r">證交稅率</th><th></th></tr></thead>
       <tbody>${rows.map((r, i) => html`<tr>
         <td><${TextInput} value=${r.name} onInput=${(v) => set(i, "name", v)} placeholder="例如 股票（6 折）" /></td>
-        <td style="width:9rem"><${AmountInput} value=${r.fee} onChange=${(v) => set(i, "fee", v)} decimals=${4} suffix="%" /></td>
+        <td style="width:9rem"><${AmountInput} value=${r.fee} onChange=${(v) => set(i, "fee", v)} decimals=${4} trim suffix="%" /></td>
         <td style="width:8rem"><${AmountInput} value=${r.min} onChange=${(v) => set(i, "min", v)} decimals=${0} suffix="元" /></td>
-        <td style="width:8rem"><${AmountInput} value=${r.tax} onChange=${(v) => set(i, "tax", v)} decimals=${3} suffix="%" /></td>
+        <td style="width:8rem"><${AmountInput} value=${r.tax} onChange=${(v) => set(i, "tax", v)} decimals=${3} trim suffix="%" /></td>
         <td><button class="iconbtn" title="刪除這個類型" onClick=${() => setRows(rows.filter((_, j) => j !== i))}><${Icon} name="trash" /></button></td></tr>`)}</tbody></table>
     <p class="hint">修改類型的費率後，屬於該類型的標的會一併改用新費率，市價評價分錄也會依新費率重算（已結帳期間有評價的標的不會變更）。刪除類型時，原屬該類型的標的保留目前費率，改為「自訂」。</p>
     ${msg && html`<div class="msg bad"><${Icon} name="alert" />${msg}</div>`}
@@ -203,7 +203,7 @@ function TradeDialog({ kind, sid0, close }) {
       changed(); toast(`已登錄${l}，分錄已自動產生（Ctrl+Z 可復原）`); close(true);
     } catch (e) { setMsg(e.message); }
   }
-  return html`<${Dialog} title=${label} icon=${icon} accent=${color} width="42rem" onClose=${() => close()}
+  return html`<${Dialog} title=${label} icon=${icon} accent=${color} width="42rem" guard=${[shares, amount, note]} onClose=${() => close()}
       footer=${html`<div class="grow"></div><${Btn} onClick=${() => close()}>取消</${Btn}><${Btn} kind="primary" icon="check" onClick=${save}>儲存</${Btn}>`}>
     <form class="form" onSubmit=${(e) => { e.preventDefault(); save(); }}>
       <${Field} label="投資標的" hint=${sid ? `目前持股 ${num(st.shares, null, false, 0)}　平均成本 ${num(st.avg_cost, null, false, 2)}　最近評價市價 ${num(st.price, null, false, 2)}` : "請先新增投資標的"}>
@@ -211,11 +211,11 @@ function TradeDialog({ kind, sid0, close }) {
           <${Btn} kind="link" icon="plus" onClick=${newSec}>新增標的</${Btn}></div></${Field}>
       <${Field} label="日期"><${DateInput} value=${date} onChange=${setDate} /></${Field}>
       ${(kind === "buy" || kind === "sell") && html`
-        <${Field} label="股數（單位）"><${AmountInput} value=${shares} onChange=${setShares} decimals=${4} autofocus /></${Field}>
-        <${Field} label="成交價"><${AmountInput} value=${price} onChange=${setPrice} decimals=${4} suffix=${cur(c).name} /></${Field}>
+        <${Field} label="股數（單位）"><${AmountInput} value=${shares} onChange=${setShares} decimals=${4} trim autofocus /></${Field}>
+        <${Field} label="成交價"><${AmountInput} value=${price} onChange=${setPrice} decimals=${4} trim suffix=${cur(c).name} /></${Field}>
         <${Field} label="手續費"><${AmountInput} value=${fee} onChange=${(v) => { setFee(v); setFeeTouched(true); }} code=${c} /></${Field}>
         ${kind === "sell" && html`<${Field} label="證券交易稅"><${AmountInput} value=${tax} onChange=${(v) => { setTax(v); setFeeTouched(true); }} code=${c} /></${Field}>`}`}
-      ${kind === "stock_div" && html`<${Field} label="配發股數"><${AmountInput} value=${shares} onChange=${setShares} decimals=${4} autofocus /></${Field}>`}
+      ${kind === "stock_div" && html`<${Field} label="配發股數"><${AmountInput} value=${shares} onChange=${setShares} decimals=${4} trim autofocus /></${Field}>`}
       ${kind === "cash_div" && html`
         <${Field} label="股利總額"><${AmountInput} value=${amount} onChange=${setAmount} code=${c} autofocus /></${Field}>
         <${Field} label="健保補充保費"><${AmountInput} value=${nhi} onChange=${(v) => { setNhi(v); setNhiTouched(true); }} code=${c} /></${Field}>`}
@@ -266,7 +266,7 @@ function PriceDialog({ close }) {
       changed(); toast(`已產生 ${n} 檔評價分錄（Ctrl+Z 可復原）`); close(true);
     } catch (e) { setMsg({ bad: true, text: e.message }); }
   }
-  return html`<${Dialog} title="市價評價" icon="refresh" width="56rem" cls="listdlg" onClose=${() => close()}
+  return html`<${Dialog} title="市價評價" icon="refresh" width="56rem" cls="listdlg" guard=${vals} onClose=${() => close()}
       footer=${html`<div class="grow"></div><${Btn} onClick=${() => close()}>取消</${Btn}><${Btn} kind="primary" icon="check" onClick=${save}>產生評價分錄</${Btn}>`}>
     <div class="row wrap" style="margin-bottom:.8rem"><span class="lbl">評價日期</span><${DateInput} value=${date} onChange=${setDate} />
       <div class="grow"></div><${Btn} icon="clip" onClick=${() => pastePrices()} title="從 Excel 複製代號與價格兩欄，一次貼上">貼上價格…</${Btn}>${META.online && html`<${Btn} icon="download" disabled=${busy} onClick=${fetch}>${busy ? "下載中…" : "從網路取得收盤價"}</${Btn}>`}</div>
@@ -275,7 +275,7 @@ function PriceDialog({ close }) {
       <tbody>${rows.map((h) => html`<tr><td><b>${h.code}</b></td><td>${h.name}</td><td class="r num">${num(h.shares, null, false, 0)}</td>
         <td class="r num muted">${h.price ? num(h.price, null, false, 2) : h.sold ? "已全數賣出" : "尚未評價"}</td>
         <td>${h.sold ? html`<span class="muted small">剩餘帳面價值 ${num(h.market_value, null, false, 0)} 將歸零</span>`
-          : html`<${AmountInput} value=${vals[h.id] ?? null} onChange=${(v) => setVals({ ...vals, [h.id]: v })} decimals=${4} placeholder="輸入市價" />`}</td></tr>`)}</tbody></table></div>`)}
+          : html`<${AmountInput} value=${vals[h.id] ?? null} onChange=${(v) => setVals({ ...vals, [h.id]: v })} decimals=${4} trim placeholder="輸入市價" />`}</td></tr>`)}</tbody></table></div>`)}
     <p class="hint">選擇評價日期並輸入市價（留空表示這檔不評價）。按「產生評價分錄」後才會把帳面價值調整為預估淨售價（市價×股數，扣除預估賣出手續費與證交稅），差額記為「未實現評價損益」；同一天再次評價會取代先前的市價。買進、賣出不會自動評價；已全數賣出的標的，剩餘評價會自動歸零。輸入錯誤時，可到「交易紀錄」刪除該筆市價評價。</p>
     ${msg && html`<div class=${"msg " + (msg.bad ? "bad" : "ok")}><${Icon} name=${msg.bad ? "alert" : "check"} />${msg.text}</div>`}
   </${Dialog}>`;
@@ -323,12 +323,12 @@ function RateDialog({ close }) {
   async function save() {
     try { await api("rate_save", vals); changed(); toast("匯率已更新"); close(true); } catch (e) { setMsg({ bad: true, text: e.message }); }
   }
-  return html`<${Dialog} title="更新匯率" icon="refresh" width="40rem" onClose=${() => close()}
+  return html`<${Dialog} title="更新匯率" icon="refresh" width="40rem" guard=${vals} onClose=${() => close()}
       footer=${html`${META.online && rows && rows.length > 0 && html`<${Btn} icon="download" disabled=${busy} onClick=${fetch}>${busy ? "下載中…" : "從網路取得參考匯率"}</${Btn}>`}
         <div class="grow"></div><${Btn} onClick=${() => close()}>取消</${Btn}><${Btn} kind="primary" icon="check" disabled=${!rows || !rows.length} onClick=${save}>儲存</${Btn}>`}>
     ${rows && (rows.length === 0 ? html`<div class="note">目前沒有外幣帳戶。</div>` : html`<div class="form">${rows.map((x) => html`
       <${Field} label=${`1 ${x.name}（${x.code}）＝`} hint=${"使用的帳戶：" + x.accounts.join("、")}>
-        <${AmountInput} value=${vals[x.code]} onChange=${(v) => setVals({ ...vals, [x.code]: v })} decimals=${4} suffix=${cur(META.base).name} /></${Field}>`)}</div>`)}
+        <${AmountInput} value=${vals[x.code]} onChange=${(v) => setVals({ ...vals, [x.code]: v })} decimals=${4} trim suffix=${cur(META.base).name} /></${Field}>`)}</div>`)}
     <p class="hint">可參考銀行牌告的「即期」買賣中價。匯率變動造成的價值差異會列入「兌換損益」。</p>
     ${msg && html`<div class=${"msg " + (msg.bad ? "bad" : "ok")}><${Icon} name=${msg.bad ? "alert" : "check"} />${msg.text}</div>`}
   </${Dialog}>`;
