@@ -176,15 +176,14 @@ class Report:
                                ("借方", ""), ("貸方", "")], rows, [12, 11, 20, 7, 22, 14, 14]))
 
     def ledger(self, start: str, end: str, first: bool = True) -> str:
-        codes = self.db.account_codes()
-        out = [self._head("總分類帳", f"期間：{fmt_date(start)} 至 {fmt_date(end)}　｜　金額為各帳戶原幣", first)]
+        out = [self._head("總分類帳", f"期間：{fmt_date(start)} 至 {fmt_date(end)}　｜　資產、負債科目為原幣，其餘為本位幣", first)]
         n = 0
-        for acc in sorted(self.db.list_accounts(include_archived=True), key=lambda a: codes[a["id"]]):
-            lg = self.db.ledger(acc["id"], start, end)
+        for sub in self.db.ledger_subjects():
+            lg = self.db.subject_ledger(sub["key"], start, end)
             if not lg["rows"] and not lg["opening"] and not lg["closing"]:
                 continue
             n += 1
-            cur = acc["currency"]
+            cur = lg["currency"]
             rows = [self._tr([(fmt_date(start), "c"), ("", ""), ("期初餘額（上期結轉）", "b"), ("", ""), ("", ""),
                               ("", ""), (fmt_num(lg["opening"], cur), "r")])]
             for r in lg["rows"]:
@@ -195,13 +194,13 @@ class Report:
             rows.append(self._tr([("", ""), ("", ""), ("本期合計／期末餘額", "b"), ("", ""),
                                   (fmt_num(lg["debit_total"], cur), "r"), (fmt_num(lg["credit_total"], cur), "r"),
                                   (fmt_num(lg["closing"], cur), "r")], "tot"))
-            out.append(f'<h2>{codes[acc["id"]]}　{escape(acc["name"])}'
+            out.append(f'<h2>{lg["code"]}　{escape(lg["name"])}'
                        f'<span style="font-size:9pt; font-weight:normal; color:#475569">'
-                       f'　（{escape(acc["category"])}，{cur}，正常餘額在{lg["normal_side"]}方）</span></h2>')
+                       f'　（{escape(lg["label"])}，{cur}，正常餘額在{lg["normal_side"]}方）</span></h2>')
             out.append(self._table([("日期", ""), ("傳票號碼", ""), ("摘要", ""), ("對方科目", ""), ("借方", ""),
                                     ("貸方", ""), ("餘額", "")], rows, [12, 11, 21, 20, 12, 12, 12]))
         if not n:
-            out.append("<p>本期間沒有任何帳戶紀錄。</p>")
+            out.append("<p>本期間沒有任何紀錄。</p>")
         return "".join(out)
 
     # ------------------------------------------------------------------ 報表

@@ -818,11 +818,13 @@ def test_export_sheet_selection_and_ledger():
                 bal[r] = prev + (e - f if "+E" in g else f - e)
             else:
                 bal[r] = bal[int(g[2:])]
-                closing = float(ws.cell(r, 8).value.split("-")[1].split(",")[0])
+                closing = float(ws.cell(r, 8).value.split("-(")[1].split(")")[0])
                 assert abs(bal[r] - closing) < 0.01, (r, bal[r], closing)
                 blocks += 1
-    assert blocks == len([a for a in db.account_summaries(include_archived=True)
-                          if db.ledger(a["id"], lo, hi)["rows"] or a["balance"]])
+    # 全部會計科目（1151125 意見）：資產負債之外，損益、業外與權益科目也各有一段
+    live = [x for x in (db.subject_ledger(s["key"], lo, hi) for s in db.ledger_subjects())
+            if x["rows"] or x["opening"] or x["closing"]]
+    assert blocks == len(live) and {"收入", "費用"} <= {x["label"] for x in live}
     # 只選部分報表：被引用的收支明細隱藏保留，其餘移除
     part = export_workbook(db, os.path.join(d, "part.xlsx"), lo, hi, ["收支損益表", "分類帳"])
     wb = load_workbook(part)
@@ -873,7 +875,7 @@ def random_operations(seed, steps=60):
 
     for step in range(steps):
         op = rnd.choice(["exp", "inc", "jbuy", "jbuy", "jsell", "jsell", "buy", "sell", "div", "jdiv", "sdiv",
-                         "price", "price", "void", "reverse", "edit", "rate", "close"])
+                         "price", "price", "void", "reverse", "edit", "rate", "close", "noacc"])
         try:
             sid = rnd.choice(secs)
             q = rnd.choice([100, 500, 1000, 1500])
@@ -882,6 +884,12 @@ def random_operations(seed, steps=60):
                 db.add_transaction(type="expense" if op == "exp" else "income",
                                    account_id=rnd.choice([bank, card]), amount=rnd.randint(1, 50000),
                                    date=day(), category_id=cat_e if op == "exp" else cat_i, note=op)
+            elif op == "noacc":       # 沒有資產負債科目的分錄：重分類、轉淨值調整
+                amt = rnd.randint(1, 30000)
+                journals.append(db.add_journal(day(), "重分類", [
+                    {"category_id": cat_e, "debit": amt},
+                    rnd.choice([{"category_id": cat_i, "credit": amt}, {"special": "equity", "credit": amt},
+                                {"special": "realized", "credit": amt}])]))
             elif op == "jbuy":
                 fee, _ = inv.fees_for(sid, "buy", q, p)
                 amt = money_round(q * p + fee)
@@ -1196,13 +1204,20 @@ def test_journal_validation():
     a = db.list_accounts()[0]["id"]
     c = db.list_categories("expense")[0]["id"]
     for bad in ([{"account_id": a, "debit": 100}, {"category_id": c, "credit": 90}],
-                [{"category_id": c, "debit": 100}, {"category_id": c, "credit": 100}],
+                [{"category_id": c, "debit": 100}, {"category_id": c, "credit": 90}],
                 [{"account_id": a, "debit": 100}]):
         try:
             db.add_journal("2026-10-01", "x", bad)
             assert False, bad
         except ValueError:
             pass
+    # 不限定要有資產或負債科目（1151125 意見）
+    c2 = db.list_categories("expense")[1]["id"]
+    net = db.net_worth()["net"]
+    tid = db.add_journal("2026-10-01", "重分類", [{"category_id": c, "debit": 100}, {"category_id": c2, "credit": 100}])
+    db.update_journal(tid, "2026-10-01", "重分類", [{"category_id": c, "debit": 80}, {"special": "equity", "credit": 80}])
+    assert abs(db.net_worth()["net"] - net) < 0.01
+    check_books(db, "journal without account")
 
 
 def test_recurring():

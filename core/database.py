@@ -1194,9 +1194,7 @@ class Database:
         c = round(sum(x["credit"] for x in out), 2)
         if abs(d - c) > 0.004:
             raise ValueError(f"借貸不平衡：借方合計 {d:,.2f}，貸方合計 {c:,.2f}，差額 {d - c:,.2f}")
-        if not any(x["account_id"] for x in out):
-            raise ValueError("分錄至少要包含一個帳戶（資產或負債科目）")
-        return out
+        return out      # 不限定要有資產或負債科目（她的要求，2026-11-25）：例如費用重分類、損益科目轉淨值調整
 
     def add_journal(self, date: str, note: str, lines: list[dict], source: str = "",
                     log: str = "新增", txn_id: int | None = None, tags=None) -> int:
@@ -1205,7 +1203,7 @@ class Database:
         self._check_open(date)
         items = self._normalize_lines(lines)
         total = round(sum(x["debit"] for x in items), 2)
-        first_acc = next(x["account_id"] for x in items if x["account_id"])
+        first_acc = next((x["account_id"] for x in items if x["account_id"]), None)
         now = _now()
         cur = self.conn.execute(
             "INSERT INTO transactions(id, date, type, account_id, amount, note, source, created_at,"
@@ -1263,7 +1261,7 @@ class Database:
         before = self.describe(txn_id)
         snap = self._snapshot(txn_id)
         total = round(sum(x["debit"] for x in items), 2)
-        first_acc = next(x["account_id"] for x in items if x["account_id"])
+        first_acc = next((x["account_id"] for x in items if x["account_id"]), None)
         self.conn.execute(
             "UPDATE transactions SET date = ?, account_id = ?, amount = ?, note = ?, updated_at = ?"
             " WHERE id = ?", (date, first_acc, total, (note or "").strip(), _now(), txn_id))
@@ -1761,6 +1759,80 @@ class Database:
             "rows": rows,
             "normal_side": "借" if acc["kind"] == "asset" else "貸",
         }
+
+    def ledger_subjects(self) -> list[dict]:
+        """分類帳可選的全部會計科目（資產、負債、權益、收入、費用、業外損益），含已封存，依代號排序。"""
+        out = [{"key": s["key"], "code": s["code"], "name": s["name"], "group": s["group"],
+                "archived": bool(s["archived"])} for s in self.chart_of_accounts(include_archived=True)]
+        out.append({"key": ("equity", EQUITY_CODE), "code": EQUITY_CODE, "name": EQUITY_ACCOUNT, "group": "權益",
+                    "archived": False})
+        return sorted(out, key=lambda x: x["code"])
+
+    def subject_ledger(self, key: tuple, start: str, end: str) -> dict:
+        """任一會計科目的分類帳，格式與 ledger() 相同。資產、負債為原幣；其餘為本位幣。
+        損益、淨值調整科目每個期間由 0 起算（前期損益已併入期初淨值），與試算表一致；
+        期初淨值列前一日淨資產與期間內新開帳戶的開帳金額。"""
+        kind, sid = key
+        if kind == "account":
+            lg = self.ledger(int(sid), start, end)
+            a = lg["account"]
+            return {**lg, "code": a["code"], "name": a["name"], "currency": a["currency"], "label": a["category"]}
+        base = self.base_currency
+        opening, rows, posts = 0.0, [], []
+        credit_side = True
+        if kind == "category":
+            c = self.get_category(int(sid))
+            if not c:
+                raise ValueError("科目不存在")
+            code, name, label = c["code"], c["name"], "收入" if c["kind"] == "income" else "費用"
+            credit_side = c["kind"] == "income"
+            posts = self._q("SELECT p.txn_id, p.date, p.base AS amt, t.type, t.note FROM v_cat_post p"
+                            " JOIN transactions t ON t.id = p.txn_id WHERE p.category_id = ? AND p.date BETWEEN ? AND ?"
+                            " ORDER BY p.date, p.txn_id", (int(sid), start, end))
+        elif kind == "special":
+            if sid not in SPECIALS:
+                raise ValueError("科目不存在")
+            code, name, label = SPECIALS[sid]
+            posts = self._q("SELECT p.txn_id, p.date, p.gain AS amt, t.type, t.note FROM v_special_post p"
+                            " JOIN transactions t ON t.id = p.txn_id WHERE p.special = ? AND p.date BETWEEN ? AND ?"
+                            " ORDER BY p.date, p.txn_id", (sid, start, end))
+        elif kind == "equity":
+            code, name, label = EQUITY_CODE, EQUITY_ACCOUNT, "權益"
+            prev = (_dt.date.fromisoformat(start) - _dt.timedelta(days=1)).isoformat()
+            opening = self.net_worth(prev)["net"]
+            for a in self._q("SELECT * FROM accounts WHERE opening_date BETWEEN ? AND ? AND opening_balance <> 0"
+                             " ORDER BY opening_date, id", (start, end)):
+                posts.append({"txn_id": None, "date": a["opening_date"], "type": "", "note": "期初開帳", "counter": a["name"],
+                              "amt": a["opening_balance"] * (1 if a["kind"] == "asset" else -1) * a["rate"]})
+        else:
+            raise ValueError("科目不存在")
+        running = opening
+        cache: dict[int, str] = {}
+        for p in posts:
+            amt = p["amt"] or 0.0
+            if abs(amt) < 0.005:
+                continue
+            running += amt
+            credit = (amt > 0) == credit_side
+            counter = p.get("counter")
+            if counter is None:
+                if p["txn_id"] not in cache:
+                    t = self.get_transaction(p["txn_id"])
+                    cache[p["txn_id"]] = "、".join(dict.fromkeys(
+                        ln["name"] for ln in self.txn_lines_of(t, live=False)
+                        if not (ln["kind"] == kind and str(ln["id"]) == str(sid))))
+                counter = cache[p["txn_id"]]
+            rows.append({"id": p["txn_id"], "date": p["date"],
+                         "voucher": voucher_no(p["txn_id"]) if p["txn_id"] else "開帳",
+                         "summary": p["note"] or TYPE_LABELS.get(p["type"], ""), "counter": counter,
+                         "debit": 0.0 if credit else money_round(abs(amt)),
+                         "credit": money_round(abs(amt)) if credit else 0.0,
+                         "balance": money_round(running), "type": p["type"]})
+        return {"account": None, "code": code, "name": name, "currency": base, "label": label,
+                "opening": money_round(opening), "closing": money_round(running),
+                "debit_total": money_round(sum(r["debit"] for r in rows)),
+                "credit_total": money_round(sum(r["credit"] for r in rows)),
+                "rows": rows, "normal_side": "貸" if credit_side else "借"}
 
     def journal(self, start: str, end: str) -> list[dict]:
         """日記簿：每張傳票的借貸分錄（以本位幣表示，帳戶行依目前匯率重估）。"""

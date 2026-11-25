@@ -70,6 +70,10 @@ def ranges(lg):
     return out
 
 
+def db_accounts(lg):
+    return lg.run(lambda: [dict(x) for x in lg.db.list_accounts(include_archived=True)])
+
+
 # ---------------------------------------------------------------------- 讀取：每一本舊帳本
 def read_everything(lg: Ledger, where: str):
     a, db = lg.api, lg.db
@@ -150,6 +154,22 @@ def read_everything(lg: Ledger, where: str):
             lgd = ok(a.report_ledger(acc["id"], start, end), where)
             assert abs(lgd["opening"] + lgd["debit_total"] * (1 if lgd["side"] == "借" else -1)
                        - lgd["credit_total"] * (1 if lgd["side"] == "借" else -1) - lgd["closing"]) < 0.05, (where, acc)
+        # 分類帳：全部會計科目，每一科目都要與試算表相同
+        tb = {r["code"]: r for r in ok(a.report_tb(start, end), where)}
+        rates = {f"account:{x['id']}": (x["rate"], x["kind"]) for x in db_accounts(lg)}
+        seen = set()
+        for s in rm["subjects"]:
+            x = ok(a.report_ledger(s["key"], start, end), (where, s))
+            code = s["label"].split("　")[0]
+            seen.add(code)
+            rate = rates.get(s["key"], (1, ""))[0]
+            side = 1 if x["side"] == "借" else -1
+            t = tb.get(code, {"debit": 0, "credit": 0, "period_debit": 0, "period_credit": 0})
+            assert abs(x["closing"] * rate * side - (t["debit"] - t["credit"])) < 0.06, (where, start, end, s, x["closing"], t)
+            assert abs(x["opening"] + side * (x["debit_total"] - x["credit_total"]) - x["closing"]) < 0.06, (where, s)
+            if not s["key"].startswith(("account:", "equity:")):
+                assert abs(x["debit_total"] - t["period_debit"]) < 0.06 and abs(x["credit_total"] - t["period_credit"]) < 0.06, (where, s)
+        assert set(tb) <= seen, (where, set(tb) - seen)        # 試算表上的每個科目都查得到分類帳
         assert ok(a.print_html(["vouchers", "journal", "ledger", "trial", "bs", "is", "equity", "ratios", "cashflow"],
                                start, end, "prior_year"), where).startswith("<html>")
     for y in rm["years"]:
@@ -380,6 +400,63 @@ def test_whats_new_after_update():
         lg.close()
 
 
+def test_journal_without_account():
+    """複式分錄不限定要有資產或負債科目（1151125 意見）：存、改、迴轉、作廢、復原與所有報表都要正常。"""
+    lg = Ledger(sample=True)
+    try:
+        a, db = lg.api, lg.db
+        today = dt.date.today().isoformat()
+        chart = ok(a.journal_form(None))["chart"]
+        exp = [c["key"] for c in chart if c["kind"] == "expense"][:2]
+        inc = next(c["key"] for c in chart if c["kind"] == "income")
+        net0 = lg.run(lambda: db.net_worth()["net"])
+        year = (today[:4] + "-01-01", today[:4] + "-12-31")
+        tot0 = {c["id"]: c["total"] for c in lg.run(db.category_totals, *year, "expense")}
+
+        def line(key, dr=0, cr=0):
+            return {"key": key, "debit": dr, "credit": cr}
+        lines = [line(exp[0], dr=1200), line(exp[1], cr=1200)]
+        r = ok(a.journal_save({"date": today, "note": "費用重分類", "lines": lines, "tags": ["重分類"]}, None))
+        tid = r["id"] if isinstance(r, dict) else r
+        tot1 = {c["id"]: c["total"] for c in lg.run(db.category_totals, *year, "expense")}
+        i0, i1 = int(exp[0].split(":")[1]), int(exp[1].split(":")[1])
+        assert abs(tot1.get(i0, 0) - tot0.get(i0, 0) - 1200) < 0.01 and abs(tot1.get(i1, 0) - tot0.get(i1, 0) + 1200) < 0.01
+        # 損益轉淨值調整：淨資產不變、試算表仍平衡
+        t2 = ok(a.journal_save({"date": today, "note": "轉淨值調整", "lines": [line(inc, dr=500), line("special:equity", cr=500)],
+                                "tags": []}, None))
+        t2 = t2["id"] if isinstance(t2, dict) else t2
+        assert abs(lg.run(lambda: db.net_worth()["net"]) - net0) < 0.01
+        lg.run(check_books, db, "journal without account")
+        ok(a.journal_save({"date": today, "note": "費用重分類（改）", "lines": [line(exp[0], dr=900), line(exp[1], cr=900)],
+                           "tags": []}, tid))
+        read_everything(lg, "journal without account")
+        row = next(x for x in ok(a.txn_list({"start": today, "end": today}))["rows"] if x["id"] == tid)
+        assert row["account"] == "" and row["category"] and row["amount"] == 900
+        for q in ("重分類", "900"):
+            assert any(x["id"] == tid for x in ok(a.search(q))["rows"] if x["kind"] == "voucher"), q
+        ok(a.voucher(tid)); ok(a.voucher_html(tid)); ok(a.journal_form(tid))
+        rev = lg.run(db.reverse_transaction, tid)
+        ok(a.txn_void([rev], "測試"))
+        ok(a.undo())
+        ok(a.undo())
+        lg.run(check_books, db, "journal without account after undo")
+        assert lg.run(lambda: db.net_worth()["net"]) == net0
+        assert "兩行" in err(a.journal_save({"date": today, "note": "x", "lines": [line(exp[0], dr=1)], "tags": []}, None))
+        assert "不平衡" in err(a.journal_save({"date": today, "note": "x", "lines": [line(exp[0], dr=2), line(exp[1], cr=1)], "tags": []}, None))
+        path = lg.path
+    finally:
+        lg.close()
+    db2 = Database(path)          # 重新開啟帳本也正常
+    check_books(db2, "reopened")
+    db2.close()
+
+
+def test_display_info():
+    import desktop.api_tools as tools
+    d = tools._display_info()
+    assert d["screen"] and d["screen"][0] >= 640 and 100 <= d["dpi_scale"] <= 500 and 100 <= d["text_scale"] <= 225
+
+
 def test_quick_entry():
     """常記的項目：同一說明＋分類記過 2 次以上才列出；說明會帶出上次的分類與帳戶。"""
     lg = Ledger(sample=True)
@@ -572,6 +649,7 @@ def test_feedback_pdf():
         assert not os.path.exists(os.path.join(lg.dir, "意見回饋", "待傳送", l3[2]["id"] + ".png"))
         d = ok(a.feedback_diag())
         assert d["version"] and d["vouchers"] > 0 and "windows" in d
+        assert ok(a.feedback_capture()) == "" and "失敗" in ok(a.feedback_diag())["capture"]      # 測試沒有視窗：原因要留在診斷資訊
         jpg = "data:image/jpeg;base64," + TINY_JPEG
         assert pdfimages.jpeg_size(base64.b64decode(TINY_JPEG)) == (1, 1)
         r = ok(a.feedback_pdf([jpg, jpg, jpg], True))

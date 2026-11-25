@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import { META, api, changed, css, html, money, num, pct, toast, useLoad, ymd } from "../lib/core.js";
 import { PALETTE, axis, barFill, chartBase, donutCenter, shortMoney, useChart, valueAxis } from "../lib/charts.js";
 import { catEmoji } from "../lib/caticon.js";
-import { Btn, Card, DataTable, Dialog, Field, Icon, PageHead, PeriodPicker, Segmented, Select, Tabs, TextInput, ask, errorBox,
+import { Btn, Card, Combo, DataTable, Dialog, Field, Icon, PageHead, PeriodPicker, Segmented, Select, Tabs, TextInput, ask, errorBox,
          openModal, usePeriod, Skeleton, Tip } from "../lib/ui.js";
 import { openVoucher } from "../dialogs/txn.js";
 import { openJournal } from "../dialogs/journal.js";
@@ -271,8 +271,8 @@ function Journal({ start, end }) {
 }
 
 function Ledger({ start, end, meta, pending }) {
-  const [aid, setAid] = useState(pending.account || (meta.accounts[0] && meta.accounts[0].id));
-  const [lg] = useLoad(() => (aid ? api("report_ledger", aid, start, end) : null), [aid, start, end]);
+  const [key, setKey] = useState(pending.account ? `account:${pending.account}` : (meta.accounts[0] ? `account:${meta.accounts[0].id}` : meta.subjects[0]?.key));
+  const [lg] = useLoad(() => (key ? api("report_ledger", key, start, end) : null), [key, start, end]);
   const c = lg ? lg.currency : META.base;
   const rows = lg ? [{ key: "o", date: start, voucher: "", summary: "期初餘額（上期結轉）", counter: "", debit: 0, credit: 0, balance: lg.opening, _total: true },
                      ...lg.rows.map((r, i) => ({ ...r, key: i })),
@@ -286,11 +286,11 @@ function Ledger({ start, end, meta, pending }) {
     { key: "cr", title: "貸方", align: "r", render: (r) => (r.credit ? html`<span class="num c-expense">${num(r.credit, c)}</span>` : "") },
     { key: "b", title: "餘額", align: "r", render: (r) => html`<b class="num">${num(r.balance, c)}</b>` },
   ];
-  return html`<div class="row wrap"><span class="lbl">帳戶（科目）</span><${Select} value=${aid} onChange=${setAid} options=${meta.accounts.map((a) => [a.id, a.label])} />
+  return html`<div class="row wrap"><span class="lbl">會計科目</span><div class="ledger-pick"><${Combo} value=${key} onChange=${setKey} options=${meta.subjects.map((s) => ({ value: s.key, label: s.label }))} /></div>
       <div class="grow"></div>${lg && html`<b>期初 ${money(lg.opening, c)}　→　期末 ${money(lg.closing, c)}（${lg.side}餘）</b>`}</div>
     <div class="card table-card"><${DataTable} columns=${cols} rows=${rows} rowKey=${(r) => r.key} rowCls=${(r) => (r._total ? "total" : "")}
       onActivate=${(r) => r.id && openVoucher(r.id)} /></div>
-    <${Tip}>借方：資產增加／負債減少；貸方：資產減少／負債增加。資產帳戶餘額在借方，負債帳戶餘額在貸方。按兩下可開啟傳票。</${Tip}>`;
+    <${Tip}>可輸入代號或名稱選擇任何會計科目。資產、費用餘額在借方；負債、權益、收入餘額在貸方。收入、費用與業外損益每個期間由 0 起算（與試算表一致）。按兩下可開啟傳票。</${Tip}>`;
 }
 
 function TrialBalance({ start, end }) {

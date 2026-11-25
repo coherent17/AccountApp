@@ -57,6 +57,10 @@ for scale in ("normal", "large"):
               (s + "dlg_audit", ESC + "; __t.openAudit()", 2),
               (s + "dlg_securities", ESC + "; __t.openSecurityList()", 2),
               (s + "dlg_prices", ESC + "; __t.openPrices()", 2),
+              (s + "ledger_expense", ESC + "; window.__pendingReport = {tab: 'ledger'}; __t.go('reports')", 2.5),
+              (s + "ledger_combo", "const li = document.querySelector('.ledger-pick input'); li.focus();"
+               " li.value = '51'; li.dispatchEvent(new Event('input', {bubbles: true}))", 1),
+              (s + "ledger_picked", "document.querySelector('.pop.floating > div').dispatchEvent(new MouseEvent('mousedown', {bubbles: true}))", 2),
               (s + "dlg_journal", ESC + "; __t.openUserJournal()", 2),
               (s + "dlg_voucher", ESC + "; __t.openFirstOf('journal')", 2),
               (s + "close", ESC + "; " + ESC + "; " + ESC, 0.5)]
@@ -256,8 +260,15 @@ def run(win, out: str) -> None:
     errors = []
     scenes = {"readme": README, "mom": MOM, "audit": AUDIT, "features": FEATURES}.get(only[0] if len(only) == 1 else "", SCENES)
     if only in (["mom"], ["audit"], ["features"]):
-        win.resize(1280, 720)
-        time.sleep(1)
+        view = os.environ.get("MY_LEDGER_VIEW")
+        if view:          # 畫面可用範圍（CSS 像素）× 放大倍率 ＋ 視窗外框
+            size, scale = view.split("@")
+            w, h = (round(int(x) * float(scale)) for x in size.split("x"))
+            win.resize(w + 16, h + 39)
+        else:
+            win.resize(1280, 720)
+        time.sleep(1.5)
+        print("viewport", win.evaluate_js("innerWidth + 'x' + innerHeight + '@' + devicePixelRatio"), flush=True)
     for name, js, wait in scenes:
         if only and scenes is SCENES and not any(name.startswith(o) for o in only):
             continue

@@ -39,11 +39,13 @@ class ToolsApi:
         """擷取本程式目前的畫面（只拍這個視窗），傳回 PNG 的 data URL；失敗時傳回空字串。"""
         from desktop.screenshot import grab_window
         path = os.path.join(tempfile.gettempdir(), "myledger_feedback_shot.png")
+        self._fb_capture = "正常"
         try:
             grab_window(int(self._window.native.Handle.ToInt64()), path)
             with open(path, "rb") as f:
                 return "data:image/png;base64," + base64.b64encode(f.read()).decode()
-        except Exception:  # noqa: BLE001 — 拍不到畫面時仍可只寫文字
+        except Exception as e:  # noqa: BLE001 — 拍不到畫面時仍可只寫文字；原因寫進診斷資訊
+            self._fb_capture = f"失敗：{type(e).__name__} {e}"[:120]
             return ""
         finally:
             if os.path.exists(path):
@@ -126,7 +128,7 @@ class ToolsApi:
         if os.path.exists(log):
             with open(log, encoding="utf-8", errors="replace") as f:
                 tail = f.read()[-3000:]
-        return {"version": APP_VERSION, "windows": platform.platform(), "schema": SCHEMA_VERSION,
+        return {"version": APP_VERSION, "windows": platform.platform(), **_display_info(), "capture": getattr(self, "_fb_capture", "—"), "schema": SCHEMA_VERSION,
                 "accounts": n("SELECT COUNT(*) n FROM accounts"), "vouchers": n("SELECT COUNT(*) n FROM transactions"),
                 "securities": n("SELECT COUNT(*) n FROM securities"), "recurring": n("SELECT COUNT(*) n FROM recurring"),
                 "closed_until": db.closed_until, "error_log": tail}
@@ -219,6 +221,27 @@ class ToolsApi:
         m = bankmatch.match(book, st["rows"], date)
         return {**m, "rows": len(st["rows"]), "last_date": st["last_date"], "last_balance": st["last_balance"],
                 "later": sum(1 for r in st["rows"] if r["date"] > date)}
+
+
+def _display_info() -> dict:
+    """螢幕的實際解析度、Windows 縮放與「協助工具 → 文字大小」（畫面裡的 screen／devicePixelRatio 是三者相乘後的結果，
+    不能直接當成解析度與縮放）。讀不到時為 None。"""
+    out = {"screen": None, "dpi_scale": None, "text_scale": None}
+    try:
+        import ctypes
+        u = ctypes.windll.user32       # pywebview 已設為 DPI 感知，所以這裡是實際像素
+        out["screen"] = [u.GetSystemMetrics(0), u.GetSystemMetrics(1)]
+        out["dpi_scale"] = round(u.GetDpiForSystem() / 96 * 100)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import winreg
+        out["text_scale"] = 100        # 從沒調整過時沒有這個值
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Accessibility") as k:
+            out["text_scale"] = int(winreg.QueryValueEx(k, "TextScaleFactor")[0])
+    except Exception:  # noqa: BLE001
+        pass
+    return out
 
 
 def _copy_file(path: str) -> bool:

@@ -346,9 +346,11 @@ async function buildPages(items, diag) {
   [c, g] = page();                                                  // 最後一頁：診斷資訊
   y = head(g, "診斷資訊", "給協助修改程式的人看：版本、電腦環境、資料筆數與最近的錯誤紀錄（不含金額）");
   const env = [["程式版本", diag.version], ["資料結構", `v${diag.schema}`], ["Windows", diag.windows],
-    ["視窗大小", `${innerWidth}×${innerHeight}（螢幕 ${screen.width}×${screen.height}，縮放 ${Math.round(devicePixelRatio * 100)}%）`],
+    ["螢幕", `${diag.screen ? diag.screen.join("×") : "—"}，Windows 縮放 ${diag.dpi_scale || "—"}%，文字大小 ${diag.text_scale || "—"}%`],
+    ["可用範圍", `${innerWidth}×${innerHeight}（合計放大 ${Math.round(devicePixelRatio * 100)}%，頁面縮放 ${Math.round(outerWidth / innerWidth * 100)}%）`],
     ["字體／外觀", `${{ normal: "標準", large: "大", xlarge: "特大" }[document.documentElement.dataset.scale] || "—"}／${document.documentElement.dataset.theme === "dark" ? "深色" : "淺色"}`],
     ["瀏覽元件", (navigator.userAgent.match(/Edg\/[\d.]+/) || ["—"])[0]],
+    ["畫面擷取", `${diag.capture}（附畫面 ${items.filter((x) => x.shot).length}/${items.length} 則）`],
     ["資料筆數", `帳戶 ${diag.accounts}、傳票 ${diag.vouchers}、投資標的 ${diag.securities}、定期交易 ${diag.recurring}`],
     ["已結帳至", diag.closed_until || "（未結帳）"]];
   for (const [k, v] of env) { para(g, k, y, { size: 26, color: "#64748B" }); y = para(g, "　　　　　　" + v, y, { size: 26 }) + 4; }
