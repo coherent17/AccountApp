@@ -1,8 +1,8 @@
 // 共用元件：圖示、按鈕、對話框、表單欄位、表格、右鍵選單。
-import { render } from "preact";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
+import { createContext, render } from "preact";
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { ICONS } from "../icons.js";
-import { catEmoji } from "./caticon.js";
+import { CatIcon } from "./caticon.js";
 import { PERIOD_PRESETS, dateLabel, decimalsFor, evalAmount, html, isoOf, num, parseDate, presetRange } from "./core.js";
 
 export const Icon = ({ name, size, cls = "" }) =>
@@ -21,10 +21,23 @@ export function Btn({ kind = "", icon, children, onClick, title, disabled, type 
 let modalSet = null;
 let modalSeq = 0;
 const stack = [];          // 目前開著的對話框（由下而上），Esc 關閉最上面的一個
+const ModalCtx = createContext(null);
+// 有尚未儲存的內容（Dialog 的 guard）時，Esc、點外面、✕ 與「取消」都會先問，避免打到一半的傳票不見
+export const closeTop = () => { const m = stack[stack.length - 1]; if (m) m.close(undefined); };     // 測試用：不詢問，直接關掉最上面的對話框
+let quitting = false;
+window.__unsaved = () => !quitting && stack.some((m) => m.dirty);
+window.__askQuit = async () => {
+  if (await discard("剛才輸入的內容還沒有儲存。確定要放棄並結束程式嗎？", "放棄並結束")) { quitting = true; window.pywebview.api.quit_app(); }
+};
+function discard(text = "剛才輸入的內容還沒有儲存，要放棄嗎？", yes = "放棄") {
+  return ask(text, { title: "尚未儲存", yes, no: "繼續編輯", danger: true });
+}
 export function openModal(render) {
   return new Promise((resolve) => {
     const id = ++modalSeq;
-    const m = { id, render };
+    const m = { id, render, dirty: false };
+    m.canClose = async () => !m.dirty || !!(await discard());
+    m.tryClose = async (v) => { if (await m.canClose()) m.close(v); };
     m.close = (v) => {
       const i = stack.indexOf(m);
       if (i < 0) return;
@@ -41,7 +54,11 @@ export function ModalHost() {
   modalSet = setList;
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === "Escape" && stack.length) { e.preventDefault(); e.stopPropagation(); stack[stack.length - 1].close(undefined); }
+      if (e.key !== "Escape" || !stack.length) return;
+      if (document.querySelector(".menu")) return;                                  // 右鍵選單自己會關
+      e.preventDefault(); e.stopPropagation();
+      if (document.querySelector(".pop")) { document.activeElement && document.activeElement.blur(); return; }   // 先收起下拉清單，不關對話框
+      stack[stack.length - 1].tryClose(undefined);
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
@@ -49,21 +66,27 @@ export function ModalHost() {
   window.__modalOpen = list.length > 0;
   return list.map((m, i) => html`<div class="overlay" key=${m.id} style=${`z-index:${50 + i}`}
       onMouseDown=${(e) => { if (e.target === e.currentTarget) e.currentTarget.dataset.down = "1"; }}
-      onMouseUp=${(e) => { if (e.target === e.currentTarget && e.currentTarget.dataset.down) m.close(undefined); delete e.currentTarget.dataset.down; }}>
-    ${m.render(m.close)}</div>`);
+      onMouseUp=${(e) => { if (e.target === e.currentTarget && e.currentTarget.dataset.down) m.tryClose(undefined); delete e.currentTarget.dataset.down; }}>
+    <${ModalCtx.Provider} value=${m}>${m.render(m.close, m)}</${ModalCtx.Provider}></div>`);
 }
 
-/** 對話框外框：標題列、內容、按鈕列。 */
-export function Dialog({ title, icon, accent, width = "38rem", onClose, children, footer, cls = "" }) {
+/** 對話框外框：標題列、內容、按鈕列。guard：表單目前的內容（任何可轉成 JSON 的值），使用者改過就算「尚未儲存」。 */
+export function Dialog({ title, icon, accent, width = "38rem", onClose, children, footer, cls = "", guard }) {
   const ref = useRef(null);
+  const m = useContext(ModalCtx);
+  const g = useRef({ first: null, touched: false });
+  const now = guard === undefined ? null : JSON.stringify(guard);
+  if (!g.current.touched) g.current.first = now;                 // 開啟後由程式帶入的預設值不算修改
+  if (m) m.dirty = now != null && g.current.touched && now !== g.current.first;
+  const touch = () => { g.current.touched = true; };
   useEffect(() => {
     const el = ref.current && ref.current.querySelector("[data-autofocus] input, [data-autofocus], input:not([type=hidden]):not(.native), select, textarea, button.primary");
     if (el) setTimeout(() => el.focus(), 30);
   }, []);
   return html`<div class=${"dialog " + cls} ref=${ref} style=${`width:min(${width}, calc(100vw - 3rem))`} role="dialog">
     <div class="dhead">${icon && html`<span class="badge-ic" style=${accent ? `background:color-mix(in srgb, ${accent} 14%, transparent);color:${accent}` : ""}><${Icon} name=${icon} /></span>`}
-      <h2>${title}</h2><button class="x" onClick=${() => onClose()} title="關閉（Esc）"><${Icon} name="close" /></button></div>
-    <div class="dbody">${children}</div>
+      <h2>${title}</h2><button class="x" onClick=${async () => { if (!m || await m.canClose()) onClose(); }} title="關閉（Esc）"><${Icon} name="close" /></button></div>
+    <div class="dbody" onInput=${touch} onKeyDownCapture=${touch} onMouseDownCapture=${touch}>${children}</div>
     ${footer && html`<div class="dfoot">${footer}</div>`}
   </div>`;
 }
@@ -135,9 +158,9 @@ export function DateInput({ value, onChange, cls = "" }) {
 }
 
 /** 金額欄：可輸入算式（120+35*2），離開欄位時計算並加上千分位。value 為數字或 null。 */
-export function AmountInput({ value, onChange, code, decimals, allowNegative = false, big, placeholder, autofocus, suffix }) {
+export function AmountInput({ value, onChange, code, decimals, allowNegative = false, big, placeholder, autofocus, suffix, trim }) {
   const d = decimals ?? decimalsFor(code);
-  const fmt = (v) => (v == null ? "" : num(v, code, false, d));
+  const fmt = (v) => { if (v == null) return ""; const s = num(v, code, false, d); return trim && s.includes(".") ? s.replace(/\.?0+$/, "") : s; };     // trim：1,000.0000 顯示為 1,000
   const [text, setText] = useState(fmt(value));
   const focused = useRef(false);
   useEffect(() => { if (!focused.current) setText(fmt(value)); }, [value, d]);
@@ -207,7 +230,7 @@ export function Segmented({ value, onChange, options, cls = "" }) {
 export function Chips({ items, value, onChange, kind }) {
   return html`<div class=${"chips k-" + (kind || "")}>${items.map((it) =>
     html`<button type="button" class=${it.id === value ? "on" : ""} onClick=${() => onChange(it.id)} title=${it.code ? it.code + "　" + it.name : it.name}>
-      <span class="emo">${catEmoji(it.name, kind)}</span>${it.name}</button>`)}</div>`;
+      <${CatIcon} name=${it.name} kind=${kind} />${it.name}</button>`)}</div>`;
 }
 
 // ------------------------------------------------------------------ 右鍵選單
@@ -350,7 +373,7 @@ export function PeriodChips({ value, onChange }) {
 }
 
 // ------------------------------------------------------------------ 分頁、期間
-/** 分頁：一列的膠囊軌道；放不下時左右出現箭頭，選到的分頁會自動捲到看得見的地方。 */
+/** 分頁：一列的膠囊軌道；放不下時左右出現箭頭，選到的分頁會自動捲到看得見的地方。"|" 是分組的細線。 */
 export function Tabs({ tabs, value, onChange }) {
   const ref = useRef(null);
   const [edge, setEdge] = useState({ l: false, r: false });
@@ -368,8 +391,8 @@ export function Tabs({ tabs, value, onChange }) {
   const scroll = (d) => ref.current.scrollBy({ left: d * ref.current.clientWidth * 0.6, behavior: "smooth" });
   return html`<div class="tabs-wrap">
     ${edge.l && html`<button class="tab-arrow l" onClick=${() => scroll(-1)} title="往左"><${Icon} name="chevron_down" /></button>`}
-    <div class="tabs" role="tablist" ref=${ref} onScroll=${measure}>${tabs.map(([k, label, icon]) => html`<button role="tab" class=${value === k ? "on" : ""}
-      onClick=${() => onChange(k)}>${icon && html`<${Icon} name=${icon} />`}${label}</button>`)}</div>
+    <div class="tabs" role="tablist" ref=${ref} onScroll=${measure}>${tabs.map((x) => (x === "|" ? html`<i class="tab-sep"></i>` : x)).map((x) => (!Array.isArray(x) ? x : (([k, label, icon]) => html`<button role="tab" class=${value === k ? "on" : ""}
+      onClick=${() => onChange(k)}>${icon && html`<${Icon} name=${icon} />`}${label}</button>`)(x)))}</div>
     ${edge.r && html`<button class="tab-arrow r" onClick=${() => scroll(1)} title="往右，還有更多分頁"><${Icon} name="chevron_down" /></button>`}
   </div>`;
 }

@@ -10,7 +10,8 @@ import json
 import os
 import time
 
-ESC = "window.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}))"
+ESC = "window.dispatchEvent(new MouseEvent('mousedown')); __t.closeTop()"          # 關選單與最上面的對話框（不詢問）
+REAL_ESC = "window.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}))"   # 真的按 Esc（會詢問尚未儲存的內容）
 
 # 她的螢幕（約 1280×720）：每一頁量測看得到的列數，再截圖（MY_LEDGER_SCENES=mom）
 MOM = []
@@ -44,9 +45,13 @@ for scale in ("normal", "large"):
                                           ("cats", "分類與預算"), ("tags", "標籤／專案"), ("journal", "日記帳"), ("ledger", "分類帳"),
                                           ("tb", "試算表"), ("tax", "報稅彙總")])]
     AUDIT += [(s + "settings", "__t.go('settings')", 2.5),
-              (s + "settings_cats", "document.querySelector('.main table').closest('.inner').scrollIntoView()", 1),
-              (s + "dashboard_recent", "__t.go('dashboard')", 3),
-              (s + "dashboard_recent2", "document.querySelector('.main table').scrollIntoView({block: 'end'})", 1),
+              (s + "settings_cats", "__t.tab('收支分類')", 1.5), (s + "settings_close", "__t.tab('結帳')", 1.5),
+              (s + "settings_data", "__t.tab('資料管理與備份')", 1.5), (s + "settings_net", "__t.tab('網路與更新')", 1.5),
+              (s + "dashboard_mid", "__t.go('dashboard'); setTimeout(() => { document.querySelector('.main').scrollTop = 430; }, 1500)", 3),
+              (s + "dashboard_end", "document.querySelector('.main').scrollTop = 9999", 1.5),
+              (s + "mini_dashboard", "__t.side(true); __t.go('dashboard')", 2.5), (s + "mini_accounts", "__t.go('accounts')", 2.5),
+              (s + "mini_tb", "window.__pendingReport = {tab: 'tb'}; __t.go('reports')", 2.5), (s + "mini_transactions", "__t.go('transactions'); ", 2.5),
+              (s + "full_again", "__t.side(false)", 1),
               (s + "settings_back", "__t.go('settings')", 2),
               (s + "dlg_chart", "__t.openChart()", 2),
               (s + "dlg_recurring", ESC + "; __t.openRecurring()", 2),
@@ -87,7 +92,7 @@ FEATURES = []
 for scale in ("normal", "large"):
     s = f"feat_{scale}_"
     FEATURES += [(s + "dashboard", f"__t.prefs('light', '{scale}'); __t.go('dashboard')", 3),
-                 (s + "calendar", "document.querySelector('.cal').scrollIntoView({block: 'center'})", 1),
+                 (s + "calendar", "document.querySelector('.soon').scrollIntoView({block: 'center'})", 1),
                  (s + "txn_quick", "document.querySelector('.main').scrollTop = 0; __t.openTxn({type: 'expense'})", 1.5),
                  (s + "txn_quick_used", "document.querySelector('.qchip').click()", 1),
                  (s + "reminders", ESC + "; __t.openReminders()", 1.5),
@@ -123,6 +128,9 @@ _SETNOTE = ("(() => {{ const i = [...document.querySelectorAll('.dialog.journal 
 _MKJ = ("(async () => {{ const f = await pywebview.api.journal_form(null); const k = (n) => f.chart.find(c => c.name === n).key;"
         " for (const m of [9, 10]) await pywebview.api.journal_save({{date: `2026-${{String(m).padStart(2, '0')}}-10`, note: `房貸繳款 ${{m}} 月`, tags: [],"
         " lines: [{{key: k('房貸利息'), debit: 3200}}, {{key: k('房租房貸'), debit: 12800}}, {{key: k('台銀活存'), credit: 16000}}]}}); }})()").replace("{{", "{").replace("}}", "}")
+XL = [("xl_" + p, f"__t.prefs('light', 'xlarge'); __t.go('{p}')", 2.5) for p in ("dashboard", "transactions", "accounts", "investments", "reports", "settings")]
+XL += [("xl_dark_dashboard", "__t.prefs('dark', 'normal'); __t.go('dashboard')", 2.5), ("xl_dark_reports", "__t.go('reports')", 2.5), ("xl_dark_tx", "__t.go('transactions')", 2.5),
+       ("xl_dark_txn", "__t.openTxn({type: 'expense'})", 2), ("xl_dark_settings", ESC + "; __t.go('settings')", 2)]
 FLOW = []
 for scale in ("normal", "large"):
     s = f"flow_{scale}_"
@@ -155,10 +163,76 @@ for scale in ("normal", "large"):
              (s + "year_this", ESC + "; __t.openYearAssist(new Date().getFullYear())", 2),
              (s + "close", ESC + "; " + ESC + "; " + ESC, 0.5)]
 
+# 3.9：尚未儲存的內容不會因為 Esc、點外面、✕、取消、關視窗而不見；沒改過的表單不會多問（MY_LEDGER_SCENES=guard）
+_TITLES = "[...document.querySelectorAll('.dialog h2')].map(x => x.textContent).join(' > ')"
+_TYPE = "(() => {{ const i = [...document.querySelectorAll('.dialog')].pop().querySelector('{}'); i.focus(); i.value = '{}'; i.dispatchEvent(new Event('input', {{bubbles: true}})); }})()"
+_TOPBTN = "[...[...document.querySelectorAll('.dialog')].pop().querySelectorAll('.dfoot .btn')].find(b => b.textContent.includes('{}')).click()"
+_OUTSIDE = ("(() => { const o = [...document.querySelectorAll('.overlay')].pop(); for (const t of ['mousedown', 'mouseup']) o.dispatchEvent(new MouseEvent(t, {bubbles: true})); })()")
+_XBTN = "[...document.querySelectorAll('.dialog')].pop().querySelector('.dhead .x').click()"
+_TOUCH = "[...document.querySelectorAll('.dialog')].pop().querySelector('.dbody').dispatchEvent(new MouseEvent('mousedown', {bubbles: true}))"
+_JN = ".jtop .field.wide input"
+GUARD_STEPS = [     # (說明, 動作, 等幾秒, 之後對話框應該是)
+    ("沒輸入：Esc 直接關", "__t.openJournal()", 1.5, "複式分錄（傳票）"), ("", REAL_ESC, .6, ""),
+    ("開啟分錄", "__t.openJournal()", 1.5, "複式分錄（傳票）"), ("打摘要", _TYPE.format(_JN, "還沒存的分錄"), .6, "複式分錄（傳票）"),
+    ("下拉開著按 Esc：只收清單", "[...document.querySelectorAll('.jtable .combo input')][0].focus()", .6, "複式分錄（傳票）"), ("", REAL_ESC, .6, "複式分錄（傳票）"),
+    ("Esc 先問", REAL_ESC, .6, "複式分錄（傳票） > 尚未儲存"), ("再按 Esc：回到編輯", REAL_ESC, .6, "複式分錄（傳票）"),
+    ("點外面先問", _OUTSIDE, .6, "複式分錄（傳票） > 尚未儲存"), ("繼續編輯", _TOPBTN.format("繼續編輯"), .6, "複式分錄（傳票）"),
+    ("✕ 先問", _XBTN, .6, "複式分錄（傳票） > 尚未儲存"), ("繼續編輯", _TOPBTN.format("繼續編輯"), .6, "複式分錄（傳票）"),
+    ("取消先問", _TOPBTN.format("取消"), .6, "複式分錄（傳票） > 尚未儲存"), ("放棄", _TOPBTN.format("放棄"), .6, ""),
+    ("記一筆：打金額後 Esc 先問", "__t.openTxn({type: 'expense'})", 1.5, "記一筆"), ("", _TYPE.format(".amount input", "120"), .5, "記一筆"), ("", REAL_ESC, .6, "記一筆 > 尚未儲存"),
+    ("放棄", _TOPBTN.format("放棄"), .6, ""),
+    ("改回原樣不用問", "__t.openTxn({type: 'expense'})", 1.5, "記一筆"), ("", _TYPE.format(".amount input", "120"), .5, "記一筆"), ("", _TYPE.format(".amount input", ""), .5, "記一筆"), ("", REAL_ESC, .6, ""),
+    ("帳戶：打名稱後 ✕ 先問", "__t.openAccount()", 1.5, "新增帳戶"), ("", _TYPE.format("input", "測試"), .5, "新增帳戶"), ("", _XBTN, .6, "新增帳戶 > 尚未儲存"), ("放棄", _TOPBTN.format("放棄"), .6, ""),
+]
+for _n, _open, _t in [("編輯帳戶", "__t.openAccount(1)", "編輯帳戶"), ("買進", "__t.openTrade('buy')", "買進"), ("市價評價", "__t.openPrices()", "市價評價"), ("匯率", "__t.openRates()", "更新匯率"),
+                      ("銀行對帳", "__t.openReconcile()", "銀行對帳"), ("標的", "__t.openSecurity(1)", "編輯投資標的"), ("更新餘額", "__t.openAdjust()", "更新餘額／市值"),
+                      ("定期", "__t.openRecurringEdit(null)", "新增定期交易"), ("科目", "__t.openSubject('expense')", "新增會計科目")]:
+    GUARD_STEPS += [(f"{_n}：點一下、沒改內容，Esc 直接關", _open, 1.8, _t), ("", _TOUCH, .4, _t), ("", REAL_ESC, .6, "")]
+
+
+def _guard_check(win, out: str) -> None:
+    bad = 0
+    for label, js, wait, want in GUARD_STEPS:
+        win.evaluate_js(js)
+        time.sleep(wait)
+        got = win.evaluate_js(_TITLES) or ""
+        ok = got == want
+        bad += not ok
+        print(("OK  " if ok else "BAD ") + (label or "　〃") + ("" if ok else f"：預期「{want}」，實際「{got}」"), flush=True)
+        if label == "Esc 先問":
+            _grab(win, os.path.join(out, "guard_ask.png"))
+        if not ok:
+            for _ in range(4):
+                win.evaluate_js(ESC)
+    # 股數不顯示多餘的小數
+    win.evaluate_js("__t.openUserJournal()")
+    time.sleep(2)
+    v = win.evaluate_js("[...document.querySelectorAll('.jtable input[placeholder=\"股數\"]')].map(i => i.value + '|' + (i.scrollWidth <= i.clientWidth)).join(' ')")
+    print("股數欄：", v, flush=True)
+    win.evaluate_js(ESC)
+    # 側邊欄與設定頁的字體大小同步
+    win.evaluate_js("__t.go('settings')")
+    time.sleep(1.5)
+    sync = "[...document.querySelectorAll('.seg')].map(s => [...s.querySelectorAll('.on')].map(b => b.textContent).join('')).join(',')"
+    for lab in ("特大", "標準", "大"):
+        win.evaluate_js(f"[...document.querySelectorAll('.side .seg button')].find(b => b.textContent === '{lab}').click()")
+        time.sleep(.6)
+        print("字體同步", lab, "→", win.evaluate_js(sync), flush=True)
+    win.evaluate_js("[...document.querySelectorAll('.main .seg button')].find(b => b.textContent === '標準').click()")
+    time.sleep(.6)
+    print("設定頁改標準 →", win.evaluate_js(sync), flush=True)
+    win.evaluate_js("[...document.querySelectorAll('.main .seg button')].find(b => b.textContent.includes('Windows')).click()")
+    time.sleep(.6)
+    win.evaluate_js("[...document.querySelectorAll('.side .seg button')].find(b => b.textContent === '大').click()")
+    time.sleep(.6)
+    print("跟隨 Windows 後換字體，外觀設定仍是 →", win.evaluate_js("[...document.querySelectorAll('.main .seg')].pop().querySelector('.on').textContent"), flush=True)
+    print("GUARD", "ALL PASSED" if not bad else f"{bad} FAILED", flush=True)
+
+
 # README 用的截圖（MY_LEDGER_SCENES=readme）：淺色、大字，範例帳本
 README = [
     ("readme_dashboard", "__t.prefs('light', 'large'); __t.go('dashboard')", 3.5),
-    ("readme_insights", "document.querySelector('.main').scrollTop = 640", 2),
+    ("readme_insights", "document.querySelector('.insights-row').scrollIntoView()", 2),
     ("readme_transactions", "document.querySelector('.main').scrollTop = 0; __t.go('transactions')", 2.5),
     ("readme_txn_dialog", "__t.openTxn({type: 'expense'})", 1.8),
     ("readme_journal", ESC + "; __t.openUserJournal()", 2.5),
@@ -227,8 +301,8 @@ SCENES = [
     ("export", ESC + "; __t.openExport('2026-01-01', '2026-12-31')", 1.5),
     ("reports_dark", ESC + "; __t.prefs('dark', 'large'); __t.tab('資產負債表')", 2.5),
     ("settings", ESC + "; __t.prefs('light', 'large'); __t.go('settings')", 2.5),
-    ("settings_mid", "document.querySelector('.main').scrollTop = 900", 1.2),
-    ("settings_lower", "document.querySelector('.main').scrollTop = 99999", 1.2),
+    ("settings_mid", "__t.tab('收支分類')", 1.2),
+    ("settings_lower", "__t.tab('資料管理與備份')", 1.2),
     ("chart", "document.querySelector('.main').scrollTop = 0; __t.openChart()", 2),
     ("subject", ESC + "; __t.openSubject('asset')", 1.5),
     ("year_close", ESC + "; __t.openYearClose(2025)", 2),
@@ -328,8 +402,8 @@ def run(win, out: str) -> None:
     only = [s for s in os.environ.get("MY_LEDGER_SCENES", "").split(",") if s]
     time.sleep(5)
     errors = []
-    scenes = {"readme": README, "mom": MOM, "audit": AUDIT, "features": FEATURES, "flow": FLOW}.get(only[0] if len(only) == 1 else "", SCENES)
-    if only in (["mom"], ["audit"], ["features"], ["flow"]):
+    scenes = {"readme": README, "mom": MOM, "audit": AUDIT, "features": FEATURES, "flow": FLOW, "xl": XL, "guard": [("guard", _guard_check, 0.5)]}.get(only[0] if len(only) == 1 else "", SCENES)
+    if only in (["mom"], ["audit"], ["features"], ["flow"], ["guard"]) or (only and os.environ.get("MY_LEDGER_VIEW")):
         view = os.environ.get("MY_LEDGER_VIEW")
         if view:          # 畫面可用範圍（CSS 像素）× 放大倍率 ＋ 視窗外框
             size, scale = view.split("@")
@@ -373,6 +447,24 @@ def closing(win, out: str) -> None:
     os.makedirs(out, exist_ok=True)
     time.sleep(4)
     _grab(win, os.path.join(out, "before_close.png"))
+    if os.environ.get("MY_LEDGER_CLOSE_DIRTY"):        # 有打到一半的傳票時關視窗：先問；繼續編輯後內容還在；放棄才結束
+        win.evaluate_js("__t.openJournal()")
+        time.sleep(1.5)
+        win.evaluate_js(_TYPE.format(_JN, "還沒存的分錄"))
+        time.sleep(0.5)
+        threading.Thread(target=win.destroy, daemon=True).start()
+        time.sleep(1.5)
+        print("關視窗 →", win.evaluate_js(_TITLES), flush=True)
+        _grab(win, os.path.join(out, "close_ask.png"))
+        win.evaluate_js(_TOPBTN.format("繼續編輯"))
+        time.sleep(0.6)
+        print("繼續編輯 →", win.evaluate_js(_TITLES), "｜", win.evaluate_js(f"document.querySelector('.dialog.journal {_JN}').value"), flush=True)
+        threading.Thread(target=win.destroy, daemon=True).start()
+        time.sleep(1.5)
+        win.evaluate_js("setTimeout(() => " + _TOPBTN.format("放棄並結束") + ", 50)")
+        time.sleep(0.5)
+        print("放棄並結束 →", win.evaluate_js("!!document.getElementById('farewell')"), flush=True)
+        return
     threading.Thread(target=win.destroy, daemon=True).start()     # 與按視窗的 ✕ 相同：觸發結束畫面
     time.sleep(0.35)
     try:

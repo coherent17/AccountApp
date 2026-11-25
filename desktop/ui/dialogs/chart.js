@@ -48,7 +48,7 @@ function SubjectDialog({ f, nature0, close }) {
   }
   const explain = acc ? (n === "asset" && f.invest_categories.includes(category) ? INVEST_HINT : "資產、負債科目會出現在「帳戶管理」與資產負債表；流動或非流動依科目類別自動判斷。")
     : "收入、費用科目會出現在收支損益表，記帳時可直接選用。";
-  return html`<${Dialog} title=${c ? "修改會計科目" : "新增會計科目"} icon="list" width="42rem" onClose=${() => close()}
+  return html`<${Dialog} title=${c ? "修改會計科目" : "新增會計科目"} icon="list" width="42rem" guard=${[n, name, code, category, currency, opening, budget, tax]} onClose=${() => close()}
       footer=${html`<div class="grow"></div><${Btn} onClick=${() => close()}>取消</${Btn}><${Btn} kind="primary" icon="check" onClick=${save}>儲存</${Btn}>`}>
     <form class="form" onSubmit=${(e) => { e.preventDefault(); save(); }}>
       <${Field} label="科目性質">${c ? html`<b>${NATURES.find((x) => x[0] === n)[1]}</b>` : html`<${Segmented} value=${n} onChange=${setN} options=${NATURES} />`}</${Field}>

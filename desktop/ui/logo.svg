@@ -1,33 +1,71 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#5566EC"/>
-      <stop offset="0.55" stop-color="#4A50D6"/>
-      <stop offset="1" stop-color="#7140CC"/>
-    </linearGradient>
-    <radialGradient id="glow" cx="0.28" cy="0.18" r="0.75">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.38"/>
-      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="coin" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FFD66B"/>
-      <stop offset="1" stop-color="#F2A516"/>
-    </linearGradient>
-    <linearGradient id="page" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FFFFFF"/>
-      <stop offset="1" stop-color="#E9ECFF"/>
-    </linearGradient>
-  </defs>
-  <rect width="256" height="256" rx="58" fill="url(#bg)"/>
-  <rect width="256" height="256" rx="58" fill="url(#glow)"/>
-  <!-- 帳本：一本打開的書，上面是上升的長條 -->
-  <path d="M40 170 Q84 150 128 170 Q172 150 216 170 L216 196 Q172 176 128 196 Q84 176 40 196 Z" fill="url(#page)"/>
-  <path d="M128 170 L128 196" stroke="#B9C0F5" stroke-width="4"/>
-  <rect x="62" y="112" width="30" height="50" rx="9" fill="#FFFFFF" fill-opacity="0.92"/>
-  <rect x="113" y="84" width="30" height="78" rx="9" fill="#FFFFFF"/>
-  <rect x="164" y="98" width="30" height="64" rx="9" fill="#FFFFFF" fill-opacity="0.92"/>
-  <circle cx="188" cy="62" r="27" fill="url(#coin)"/>
-  <circle cx="188" cy="62" r="19" fill="none" stroke="#FFF3C9" stroke-width="4" stroke-opacity="0.85"/>
-  <path d="M174 70 L184 60 L191 66 L202 54" stroke="#9A5E00" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M193 53 L203 53 L203 63" stroke="#9A5E00" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<!-- 我的理財帳本：攤開的帳本（兩頁是借與貸、頁上是一行行的分錄），走勢線經過資料點向上升起，盡頭是一枚金幣。 -->
+<defs>
+<linearGradient id="bg" x1=".12" y1="0" x2=".88" y2="1">
+<stop offset="0" stop-color="#2A3BB0"/>
+<stop offset=".48" stop-color="#3D3DBD"/>
+<stop offset="1" stop-color="#5E35B8"/>
+</linearGradient>
+<radialGradient id="gc" cx=".1" cy=".06" r=".85">
+<stop offset="0" stop-color="#46D4FF" stop-opacity=".72"/>
+<stop offset=".45" stop-color="#4C9CFF" stop-opacity=".22"/>
+<stop offset="1" stop-color="#4C9CFF" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="gv" cx=".96" cy="1" r=".8">
+<stop offset="0" stop-color="#C768FF" stop-opacity=".62"/>
+<stop offset="1" stop-color="#A855F7" stop-opacity="0"/>
+</radialGradient>
+<linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#fff" stop-opacity=".6"/>
+<stop offset=".35" stop-color="#fff" stop-opacity=".06"/>
+<stop offset="1" stop-color="#fff" stop-opacity=".16"/>
+</linearGradient>
+<linearGradient id="pl" x1=".1" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#FFFFFF"/>
+<stop offset=".6" stop-color="#EAF1FF"/>
+<stop offset="1" stop-color="#A9C2FA"/>
+</linearGradient>
+<linearGradient id="pr" x1=".9" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#FFFFFF"/>
+<stop offset=".6" stop-color="#F2EEFF"/>
+<stop offset="1" stop-color="#BFB0F5"/>
+</linearGradient>
+<linearGradient id="rise" x1="0" y1="1" x2="1" y2="0">
+<stop offset="0" stop-color="#19B8E6"/>
+<stop offset=".45" stop-color="#4C7DF2"/>
+<stop offset=".72" stop-color="#FFC04A"/>
+<stop offset="1" stop-color="#FFE09A"/>
+</linearGradient>
+<linearGradient id="gold" x1=".2" y1="0" x2=".8" y2="1">
+<stop offset="0" stop-color="#FFF1C4"/>
+<stop offset=".5" stop-color="#FFCB55"/>
+<stop offset="1" stop-color="#F09A14"/>
+</linearGradient>
+<radialGradient id="halo">
+<stop offset=".3" stop-color="#FFE3A3" stop-opacity=".62"/>
+<stop offset="1" stop-color="#FFD479" stop-opacity="0"/>
+</radialGradient>
+</defs>
+<path d="M80 4H176C226 4 252 30 252 80V176C252 226 226 252 176 252H80C30 252 4 226 4 176V80C4 30 30 4 80 4Z" fill="url(#bg)"/>
+<path d="M80 4H176C226 4 252 30 252 80V176C252 226 226 252 176 252H80C30 252 4 226 4 176V80C4 30 30 4 80 4Z" fill="url(#gc)"/>
+<path d="M80 4H176C226 4 252 30 252 80V176C252 226 226 252 176 252H80C30 252 4 226 4 176V80C4 30 30 4 80 4Z" fill="url(#gv)"/>
+<path d="M128 214C100 202 66 200 28 208C22 182 20 160 22 132L34 130C32 150 34 172 38 196C76 190 106 196 128 214Z" fill="#fff" fill-opacity=".38"/>
+<path d="M 128 214 C 156 202 190 200 228 208 C 234 182 236 160 234 132 L 222 130 C 224 150 222 172 218 196 C 180 190 150 196 128 214 Z" fill="#fff" fill-opacity=".38"/>
+<path d="M128 214C106 196 76 190 38 196C34 168 32 142 34 112C72 106 106 114 128 136Z" fill="url(#pl)"/>
+<path d="M 128 214 C 150 196 180 190 218 196 C 222 168 224 142 222 112 C 184 106 150 114 128 136 Z" fill="url(#pr)"/>
+<g fill="none" stroke="#4C5BD6" stroke-opacity=".30" stroke-width="5" stroke-linecap="round">
+<path d="M50 130C66 128 80 130 92 134"/>
+<path d="M164 174C178 169 192 167 206 168"/>
+<path d="M164 152C178 147 192 145 204 146"/>
+</g>
+<path d="M52 172C84 174 104 160 124 136C146 108 164 88 194 66" fill="none" stroke="url(#rise)" stroke-width="11" stroke-linecap="round"/>
+<circle cx="52" cy="172" r="9.5" fill="#fff"/>
+<circle cx="52" cy="172" r="5" fill="#2F8FEA"/>
+<circle cx="107" cy="154" r="9.5" fill="#fff"/>
+<circle cx="107" cy="154" r="5" fill="#2F8FEA"/>
+<circle cx="198" cy="62" r="46" fill="url(#halo)"/>
+<circle cx="198" cy="62" r="31" fill="none" stroke="#FFE9B8" stroke-opacity=".55" stroke-width="3" stroke-dasharray="60 136" stroke-linecap="round" transform="rotate(-70 198 62)"/>
+<circle cx="198" cy="62" r="21" fill="url(#gold)"/>
+<path d="M198 50L201.4 58.6L210 62L201.4 65.4L198 74L194.6 65.4L186 62L194.6 58.6Z" fill="#fff" fill-opacity=".92"/>
+<path d="M80 4H176C226 4 252 30 252 80V176C252 226 226 252 176 252H80C30 252 4 226 4 176V80C4 30 30 4 80 4Z" fill="none" stroke="url(#rim)" stroke-width="2.5"/>
 </svg>

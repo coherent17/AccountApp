@@ -7,7 +7,7 @@
   <link rel="icon" href="logo.svg">
   <link rel="stylesheet" href="style.css">
   <script>
-    try { const p = JSON.parse(localStorage.getItem("prefs") || "null"); if (p) { document.documentElement.dataset.theme = p[0]; document.documentElement.dataset.scale = p[1]; } } catch (_) {}
+    try { const p = JSON.parse(localStorage.getItem("prefs") || "null"); if (p) { document.documentElement.dataset.theme = p[0]; document.documentElement.dataset.scale = p[1]; } document.documentElement.dataset.side = localStorage.getItem("side") || "full"; } catch (_) {}
     // 畫面程式的錯誤：留給自動測試檢查，並寫進資料夾的「錯誤紀錄.log」
     // 保險：萬一有程式檔沒載入成功，自動重新載入（最多 3 次），不會停在啟動畫面
     window.__retry = () => {

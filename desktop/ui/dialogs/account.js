@@ -50,7 +50,7 @@ function AccountDialog({ form, close }) {
     } catch (e) { setMsg(e.message); }
   }
 
-  return html`<${Dialog} title=${a ? "編輯帳戶" : "新增帳戶"} icon="wallet" width="40rem" onClose=${() => close()}
+  return html`<${Dialog} title=${a ? "編輯帳戶" : "新增帳戶"} icon="wallet" width="40rem" guard=${[kind, name, category, code, currency, rate, opening, openDate, hasMat, hasMat && maturity, interest, note]} onClose=${() => close()}
       footer=${html`<div class="grow"></div><${Btn} onClick=${() => close()}>取消</${Btn}>
         <${Btn} kind="primary" icon="check" onClick=${save}>儲存</${Btn}>`}>
     <form class="form" onSubmit=${(e) => { e.preventDefault(); save(); }}>
@@ -62,13 +62,13 @@ function AccountDialog({ form, close }) {
       <${Field} label="科目代號" hint=${hint}><${TextInput} value=${code} onInput=${(v) => setCode(v.replace(/\D/g, "").slice(0, 6))} placeholder="3～6 位數字" /></${Field}>
       <${Field} label="幣別"><${Select} value=${currency} onChange=${setCurrency} options=${form.currencies.map((c) => [c.code, `${c.name}（${c.code}）`])} /></${Field}>
       ${currency !== form.base && html`<${Field} label="匯率" hint=${`1 ${cur(currency).name} = ? ${cur(form.base).name}`}>
-        <${AmountInput} value=${rate} onChange=${setRate} decimals=${4} /></${Field}>`}
+        <${AmountInput} value=${rate} onChange=${setRate} decimals=${4} trim /></${Field}>`}
       <${Field} label=${kind === "asset" ? "期初餘額" : "期初欠款"} hint="請填入此帳戶在「期初日期」當天的金額，之後的收支會自動累計。">
         <${AmountInput} value=${opening} onChange=${setOpening} code=${currency} suffix=${cur(currency).name} /></${Field}>
       <${Field} label="期初日期"><${DateInput} value=${openDate} onChange=${setOpenDate} /></${Field}>
       <${Field} label="到期"><div class="row wrap"><${Check} checked=${hasMat} onChange=${setHasMat}>設定到期日（定存、債券、保單、貸款）</${Check}>
         ${hasMat && html`<${DateInput} value=${maturity} onChange=${setMaturity} />`}</div></${Field}>
-      <${Field} label="年利率"><div class="row"><div style="width:10rem"><${AmountInput} value=${interest} onChange=${setInterest} decimals=${3} placeholder="0" /></div><span>%</span></div></${Field}>
+      <${Field} label="年利率"><div class="row"><div style="width:10rem"><${AmountInput} value=${interest} onChange=${setInterest} decimals=${3} trim placeholder="0" /></div><span>%</span></div></${Field}>
       <${Field} label="備註"><${TextInput} value=${note} onInput=${setNote} placeholder="可記錄帳號末四碼等（可留空）" /></${Field}>
       ${msg && html`<div class="msg bad"><${Icon} name="alert" />${msg}</div>`}
       <button type="submit" hidden></button>
@@ -97,7 +97,7 @@ function AdjustDialog({ aid, close }) {
     try { const n = await api("adjust_save", account, date, value, note); changed(); toast(`已更新「${n}」金額（Ctrl+Z 可復原）`); close(true); }
     catch (e) { setMsg(e.message); }
   }
-  return html`<${Dialog} title="更新餘額／市值" icon="refresh" accent="var(--adjust)" width="38rem" onClose=${() => close()}
+  return html`<${Dialog} title="更新餘額／市值" icon="refresh" accent="var(--adjust)" width="38rem" guard=${[value, note]} onClose=${() => close()}
       footer=${html`<div class="grow"></div><${Btn} onClick=${() => close()}>取消</${Btn}><${Btn} kind="primary" icon="check" onClick=${save}>儲存</${Btn}>`}>
     <p class="hint">適用於市值會變動的資產（保單、外幣…），或帳戶實際餘額與帳本不符時。輸入「目前實際金額」，系統會自動記錄差額。股票、基金請到「投資管理」使用市價評價。</p>
     <form class="form" onSubmit=${(e) => { e.preventDefault(); save(); }}>

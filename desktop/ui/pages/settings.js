@@ -1,7 +1,7 @@
 // 設定：個人設定與外觀、收支分類與預算、結帳、網路與版本更新、資料管理與備份、關於。
 import { useState } from "preact/hooks";
 import { META, api, changed, html, money, toast, useLoad, ymd } from "../lib/core.js";
-import { AmountInput, Btn, Card, Check, DataTable, DateInput, Dialog, Field, Icon, PageHead, Segmented, Select, TextInput, ask,
+import { AmountInput, Btn, Card, Check, DataTable, DateInput, Dialog, Field, Icon, PageHead, Segmented, Select, Tabs, TextInput, ask,
          errorBox, info, openMenu, openModal, Skeleton } from "../lib/ui.js";
 import { openChart, openSubject, openYearClose } from "../dialogs/chart.js";
 import { checkUpdates } from "../dialogs/update.js";
@@ -10,20 +10,25 @@ import { openFeedback, openForecast, openHealth, openMonthClose, openReminders, 
 
 export const resolveTheme = (mode) => (mode === "dark" || (mode === "system" && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light");
 
+const TABS = [["me", "個人與外觀", "user"], ["cats", "收支分類", "layers"], ["close", "結帳", "lock"], ["data", "資料管理與備份", "save"], ["net", "網路與更新", "globe"]];
+let lastTab = "me";          // 同一次開啟期間記住看到哪一頁
+
 export function Settings() {
   const [d, reload] = useLoad(() => api("settings_page"));
+  const [tab, setTab] = useState(lastTab);
   if (!d) return html`<${Skeleton} />`;
+  const go = (t) => { lastTab = t; setTab(t); };
   return html`
     <${PageHead} icon="settings" color="var(--transfer)" title="設定" sub="個人資料、收支分類與預算、結帳、備份與還原" />
-    <${Personal} d=${d} reload=${reload} />
-    <${Categories} d=${d} />
-    <${Closing} d=${d} />
-    <${Network} d=${d} />
-    <${DataBackup} d=${d} reload=${reload} />
-    <${Card} title="關於" icon="info">
+    <${Tabs} value=${tab} onChange=${go} tabs=${TABS} />
+    ${tab === "me" && html`<${Personal} d=${d} reload=${reload} />`}
+    ${tab === "cats" && html`<${Categories} d=${d} />`}
+    ${tab === "close" && html`<${Closing} d=${d} />`}
+    ${tab === "data" && html`<${DataBackup} d=${d} reload=${reload} />`}
+    ${tab === "net" && html`<${Network} d=${d} /><${Card} title="關於" icon="info">
       <p class="muted" style="margin:0;line-height:1.9">我的理財帳本　版本 ${META.version}<br />
         個人資產管理與記帳工具：日記帳、分類帳、資產負債表、收支損益表、試算表及 Excel 匯出。<br />所有資料僅儲存於本機電腦，不會上傳至網路。</p>
-    </${Card}>`;
+    </${Card}>`}`;
 }
 
 // ------------------------------------------------------------------ 個人設定
@@ -32,8 +37,8 @@ function Personal({ d, reload }) {
   const r = document.documentElement;
   const [, force] = useState(0);
   const set = async (k, v, msg) => { await api("set_pref_setting", k, v); if (msg) toast(msg); };
-  const theme = (mode) => { set("theme_mode", mode, "已套用新的外觀"); window.__setPrefs(resolveTheme(mode), r.dataset.scale); d.theme = mode; force((x) => x + 1); };
-  const scale = (s) => { set("font_scale", s); window.__setPrefs(r.dataset.theme, s); d.font_scale = s; force((x) => x + 1); };
+  const theme = (mode) => { set("theme_mode", mode, "已套用新的外觀"); META.theme = mode; window.__setPrefs(resolveTheme(mode), r.dataset.scale); force((x) => x + 1); };
+  const scale = (s) => { set("font_scale", s); META.font_scale = s; window.__setPrefs(r.dataset.theme, s); force((x) => x + 1); };
   const anim = (on) => { set("animations", on, on ? "已開啟動畫效果" : "已關閉動畫效果"); r.classList.toggle("animate", on); d.animations = on; force((x) => x + 1); };
   async function base(code) {
     if (code === d.base) return;
@@ -43,15 +48,15 @@ function Personal({ d, reload }) {
     META.base = code; changed(); reload();
     info("本位幣已變更。");
   }
-  return html`<${Card} title="個人設定與外觀" icon="settings"><div class="form">
+  return html`<${Card} title="個人設定與外觀" icon="user"><div class="form">
     <${Field} label="稱呼" hint="顯示在首頁問候與報表「編製者」欄"><div class="row"><${TextInput} cls="grow" value=${name} onInput=${setName} />
       <${Btn} kind="primary" onClick=${async () => { await set("owner_name", name, "已儲存稱呼"); META.owner = name.trim(); changed(); }}>儲存</${Btn}></div></${Field}>
-    <${Field} label="文字大小"><${Segmented} value=${d.font_scale} onChange=${scale} options=${[["normal", "標準"], ["large", "大"], ["xlarge", "特大"]]} /></${Field}>
+    <${Field} label="文字大小"><${Segmented} value=${r.dataset.scale} onChange=${scale} options=${[["normal", "標準"], ["large", "大"], ["xlarge", "特大"]]} /></${Field}>
     <${Field} label="外觀" hint="深色模式在晚上或光線較暗時比較不刺眼，切換後立即生效。列印與 PDF 仍使用白底。">
-      <${Segmented} value=${d.theme} onChange=${theme} options=${[["light", "淺色", "eye"], ["dark", "深色", "moon"], ["system", "跟隨 Windows 設定", "settings"]]} /></${Field}>
+      <${Segmented} value=${META.theme} onChange=${theme} options=${[["light", "淺色", "sun"], ["dark", "深色", "moon"], ["system", "跟隨 Windows 設定", "monitor"]]} /></${Field}>
     <${Field} label="動畫效果" hint="若電腦較舊、覺得畫面不夠流暢，或偏好簡潔畫面，可以關閉。">
       <${Check} checked=${d.animations} onChange=${anim}>開啟動畫效果（畫面轉場、數字滾動、圖表動畫）</${Check}></${Field}>
-    <${Field} label="新功能導覽"><div class="row"><${Btn} icon="eye" onClick=${openTour}>重新觀看導覽</${Btn}><span class="muted small">介紹記一筆、搜尋、復原與外觀設定</span></div></${Field}>
+    <${Field} label="新功能導覽"><div class="row"><${Btn} icon="insight" onClick=${openTour}>重新觀看導覽</${Btn}><span class="muted small">介紹記一筆、搜尋、復原與外觀設定</span></div></${Field}>
     <${Field} label="本位幣" hint="所有報表與資產合計皆以本位幣表示；外幣帳戶依帳戶中設定的匯率換算。">
       <${Select} value=${d.base} onChange=${base} options=${d.currencies} /></${Field}>
   </div></${Card}>`;
@@ -144,7 +149,7 @@ function Closing({ d }) {
 function Network({ d }) {
   const [online, setOnline] = useState(d.online);
   const [auto, setAuto] = useState(d.update_auto);
-  return html`<${Card} title="網路" icon="refresh"><div class="form">
+  return html`<${Card} title="網路" icon="globe"><div class="form">
     <${Field} label="網路更新" hint="開啟後，「市價評價」與「更新匯率」會多一個「從網路取得」按鈕。只會下載公開資料、不會上傳任何個人資料；股價來源為臺灣證券交易所與櫃買中心官方開放資料，匯率為 ExchangeRate-API 國際參考匯率。沒有網路時仍可手動輸入，所有功能都不受影響。">
       <${Check} checked=${online} onChange=${async (v) => { setOnline(v); await api("set_pref_setting", "online_updates", v); META.online = v; toast(v ? "已開啟網路更新（選用）" : "已關閉網路更新，程式不會連線"); }}>允許連線更新匯率與股價（選用，預設關閉）</${Check}></${Field}>
     <${Field} label="版本更新" hint=${`目前版本 ${META.version}。檢查時只會向 GitHub 查詢最新版本號碼；有新版本時會顯示更新內容，按「立即更新」就會自動下載、換成新版並重新開啟，帳本資料不會變動（更新前會先備份）。`}>
@@ -200,9 +205,9 @@ function DataBackup({ d, reload }) {
       <${Btn} icon="save" onClick=${backupNow}>立即備份到…</${Btn}><${Btn} icon="restore" onClick=${restore}>從備份檔還原…</${Btn}>
       <${Btn} icon="folder" onClick=${() => open(d.backup_dir)}>開啟自動備份資料夾</${Btn}><${Btn} kind="danger" icon="trash" onClick=${reset}>清除所有資料…</${Btn}></div></${Field}>
     <${Field} label="帳務工具" hint="健康檢查會確認檔案完整、借貸平衡、備份正常；月結小幫手每月初帶您收好上個月的帳；提醒中心可新增保費、信用卡繳款等提醒。">
-      <div class="row wrap"><${Btn} icon="heart" onClick=${() => openHealth()}>資料健康檢查</${Btn}>
+      <div class="row wrap"><${Btn} icon="pulse" onClick=${() => openHealth()}>資料健康檢查</${Btn}>
         <${Btn} icon="check" onClick=${() => openMonthClose()}>月結小幫手</${Btn}><${Btn} icon="lock" onClick=${() => openYearAssist()}>年度結帳小幫手</${Btn}><${Btn} icon="bell" onClick=${() => openReminders()}>到期提醒中心</${Btn}>
-        <${Btn} icon="trend_up" onClick=${() => openForecast()}>現金流預測</${Btn}><${Btn} icon="heart" onClick=${() => openFeedback()}>意見回饋</${Btn}></div></${Field}>
+        <${Btn} icon="trend_up" onClick=${() => openForecast()}>現金流預測</${Btn}><${Btn} icon="chat" onClick=${() => openFeedback()}>意見回饋</${Btn}></div></${Field}>
     <${Field} label="第二份備份" hint="每天第一次開啟程式、以及關閉程式時（有記帳的話），帳本會另外複製一份到這裡，連同憑證附件，保留最近 30 天。電腦硬碟故障時，可以用「從備份檔還原…」選這裡的檔案救回帳本。隨身碟沒插上時不會影響記帳，插上後下次開啟就會補上。">
       <div class="extra-box">
         ${e.dir ? html`<b>${e.target}</b>` : html`<span class="muted">尚未設定（建議設定一個隨身碟或 OneDrive 資料夾）</span>`}

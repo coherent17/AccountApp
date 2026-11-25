@@ -264,6 +264,29 @@ def test_sample_ledger_read():
         lg.close()
 
 
+def test_dashboard_ranking_is_this_month():
+    """本月支出排行與洞察要是「本月」的數字（v3.5.0～v3.8.0 誤用上個月）：合計等於本月支出，上月欄等於上月。"""
+    lg = Ledger(sample=True)
+    try:
+        today = dt.date.today()
+        first = today.replace(day=1)
+        last = first - dt.timedelta(days=1)
+        def spent(a, b):
+            return {r["category_id"]: r["t"] for r in lg.dbt.run(
+                lg.db._q, "SELECT category_id, SUM(base) t FROM v_cat_post WHERE kind = 'expense' AND date BETWEEN ? AND ? GROUP BY category_id",
+                (a.isoformat(), b.isoformat()))}
+        nxt = (first + dt.timedelta(days=32)).replace(day=1) - dt.timedelta(days=1)
+        cur, prev = spent(first, nxt), spent(last.replace(day=1), last)
+        d = ok(lg.api.dashboard())
+        for r in d["ranking"]:
+            assert abs(r["total"] - cur[r["id"]]) < 0.01 and abs(r["prev"] - prev.get(r["id"], 0)) < 0.01, r
+        if len(cur) <= 6:
+            assert abs(sum(r["total"] for r in d["ranking"]) - d["month"]["expense"]) < 0.01
+        assert sum(r["total"] for r in d["ranking"]) <= d["month"]["expense"] + 0.01
+    finally:
+        lg.close()
+
+
 # ---------------------------------------------------------------------- 寫入：每一個功能都要維持帳務平衡
 def test_writes_keep_books_balanced():
     lg = Ledger(sample=True)

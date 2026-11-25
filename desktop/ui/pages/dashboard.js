@@ -4,9 +4,9 @@ import { Icon, Skeleton, Tip } from "../lib/ui.js";
 import { CountUp, PALETTE, axis, barFill, chartBase, useChart, valueAxis } from "../lib/charts.js";
 import { openTxn, openVoucher } from "../dialogs/txn.js";
 import { openDue } from "../dialogs/more.js";
-import { catEmoji } from "../lib/caticon.js";
+import { CatIcon } from "../lib/caticon.js";
 import { EventRow, openForecast, openHealth, openMonthClose, openReminders, openYearAssist } from "../dialogs/tools.js";
-import { Btn, ask, errorBox } from "../lib/ui.js";
+import { Btn, ask, errorBox, openMenu } from "../lib/ui.js";
 import { changed } from "../lib/core.js";
 
 async function clearSample() {
@@ -42,10 +42,9 @@ function HeroCard({ d, savings, prefsKey }) {
   }), [d, prefsKey, flat]);
   return html`<div class="card hero2 rise">
     <div class="aurora"></div>
-    <div class="t"><span class="badge-ic"><${Icon} name="scale" /></span>淨資產（業主權益）
-      ${!flat && html`<span class="glass pill2">${change >= 0 ? "▲" : "▼"} ${money(Math.abs(change))}　近 12 個月</span>`}</div>
-    <div class="v"><${CountUp} value=${d.net} format=${(v) => money(v)} /></div>
-    <div class="s">資產總計 − 負債總計</div>
+    <div class="hl"><div class="t"><span class="badge-ic"><${Icon} name="scale" /></span>淨資產（業主權益）</div>
+      <div class="v"><${CountUp} value=${d.net} format=${(v) => money(v)} /></div>
+      <div class="s">${flat ? "資產總計 − 負債總計" : html`<b class="glass pill2">${change >= 0 ? "▲" : "▼"} ${money(Math.abs(change))}</b>近 12 個月`}</div></div>
     ${flat ? html`<div class="hero-empty"><${Icon} name="trend_up" />開始記帳後，這裡會畫出每個月淨資產的變化</div>`
       : html`<div class="hero-chart" ref=${ref}></div>`}
     <div class="hero-foot">
@@ -97,10 +96,10 @@ function MiniBars({ months, values, color }) {
 
 // ------------------------------------------------------------------ 本月洞察、支出排行
 function Insights({ items, go }) {
-  return html`<div class="card rise insights" style="animation-delay:280ms"><h3><${Icon} name="eye" />本月洞察<small>系統幫您留意的事</small></h3>
+  return html`<div class="card rise insights" style="animation-delay:280ms"><h3><${Icon} name="insight" />本月洞察<small>系統幫您留意的事</small></h3>
     ${items.length === 0 ? html`<div class="muted">記帳一段時間後，這裡會用白話整理出值得注意的事，例如支出變化、超出預算的分類。</div>`
       : html`<div class="ilist">${items.map((x, i) => html`<div class=${"insight " + x.tone} style=${`animation-delay:${320 + i * 60}ms`}>
-          <span class="i-ic">${x.category ? catEmoji(x.category, "expense") : html`<${Icon} name=${x.icon} />`}</span>
+          <span class="i-ic">${x.category ? html`<${CatIcon} name=${x.category} kind="expense" />` : html`<${Icon} name=${x.icon} />`}</span>
           <div><b>${x.text}</b>${x.sub && html`<small>${x.sub}</small>`}</div></div>`)}</div>`}
   </div>`;
 }
@@ -111,7 +110,7 @@ function Ranking({ rows }) {
     ${rows.length === 0 ? html`<div class="muted">本月還沒有支出紀錄。</div>` : rows.map((r, i) => {
       const d = r.prev ? (r.total - r.prev) / r.prev : null;
       return html`<div class="rk" style=${`animation-delay:${360 + i * 50}ms`}>
-        <span class="rk-emo">${catEmoji(r.name, "expense")}</span>
+        <${CatIcon} name=${r.name} kind="expense" boxed />
         <div class="rk-main"><div class="rk-top"><b>${r.name}</b><span class="num">${money(r.total)}</span></div>
           <div class="rk-bar"><i style=${`width:${Math.max(3, (r.total / max) * 100)}%`}></i></div></div>
         <span class=${"rk-d " + (d == null || Math.abs(d) < 0.005 ? "" : d > 0 ? "up" : "down")}>${d == null ? "新" : Math.abs(d) < 0.005 ? "持平" : (d > 0 ? "▲" : "▼") + " " + Math.abs(d * 100).toFixed(0) + "%"}</span>
@@ -188,12 +187,16 @@ function DashboardView({ d, prefsKey, go }) {
   const lCur = r.current_ratio == null ? "good" : level(r.current_ratio, 2, 1);
   const savings = d.month.income ? d.month.net / d.month.income : null;
 
+  const room = Math.max(3, 5 - d.reminders.length);            // 提醒多的時候，行事曆少列幾件，第一個畫面放得下
+  const tools = (e) => { const b = e.currentTarget.getBoundingClientRect(); openMenu({ preventDefault() {}, clientX: b.right - 190, clientY: b.bottom + 6 }, [
+    { label: "管理提醒", icon: "bell", run: () => openReminders().then(() => changed()) }, { label: "月結小幫手", icon: "check", run: () => openMonthClose() },
+    { label: "現金流預測", icon: "trend_up", run: () => openForecast() }, { label: "資料健康檢查", icon: "pulse", run: () => openHealth() }]); };
   return html`
     <div class="head rise">
       <div><h1>${greeting()}，${META.owner || "您好"}</h1>
         <div class="sub">${longDate(d.today)}
           ${d.today_count > 0
-            ? html`<span class="nudge good"><${Icon} name="check" />今天已記 ${d.today_count} 筆${d.streak > 1 ? html`・連續記帳 ${d.streak} 天 🔥` : ""}</span>`
+            ? html`<span class="nudge good"><${Icon} name="check" />今天已記 ${d.today_count} 筆${d.streak > 1 ? html`・連續記帳 ${d.streak} 天` : ""}</span>`
             : html`<span class="nudge" onClick=${() => openTxn({ type: "expense" })}><${Icon} name="plus" />今天還沒有記帳，按這裡記一筆</span>`}</div></div>
       <div class="actions">
         <button class="btn t-expense" onClick=${() => openTxn({ type: "expense" })}><${Icon} name="minus" />記支出</button>
@@ -202,8 +205,8 @@ function DashboardView({ d, prefsKey, go }) {
         <button class="btn primary" onClick=${() => go("investments")}><${Icon} name="refresh" />更新市值</button>
       </div>
     </div>
-    ${META.demo ? html`<div class="banner rise"><${Icon} name="eye" />這是範例帳本（不會讀取或修改您的帳本），可以放心試用每一項功能。</div>`
-      : d.sample && html`<div class="banner rise"><${Icon} name="eye" /><span class="grow">目前顯示的是範例資料，試用完畢後可以一鍵清除，開始記錄您自己的帳。</span>
+    ${META.demo ? html`<div class="banner rise"><${Icon} name="info" />這是範例帳本（不會讀取或修改您的帳本），可以放心試用每一項功能。</div>`
+      : d.sample && html`<div class="banner rise"><${Icon} name="info" /><span class="grow">目前顯示的是範例資料，試用完畢後可以一鍵清除，開始記錄您自己的帳。</span>
           <${Btn} kind="primary" onClick=${clearSample}>清除範例資料，開始正式記帳</${Btn}></div>`}
 
     <div class="kgrid">
@@ -220,8 +223,40 @@ function DashboardView({ d, prefsKey, go }) {
         <${MiniBars} months=${d.months} values=${d.monthly.map((x) => x.expense)} color="--expense" /></${StatCard}>
     </div>
 
+    <div class="grid firstrow">
+      <div class="card soon rise" style="animation-delay:260ms">
+        <h3><${Icon} name="bell" />提醒與近期行事曆<button class="link" onClick=${tools}>小幫手<${Icon} name="chevron_down" /></button></h3>
+        ${d.reminders.length > 0 && html`<div class="remind">${d.reminders.map((x) => x.kind === "forecast"
+        ? html`<div class="ritem urgent"><span class="badge-ic"><${Icon} name="trend_down" /></span>
+                 <div class="txt"><b>${x.name} 預計在 ${ymd(x.date)}${x.reason ? `（${x.reason}）` : ""}${x.negative ? "變成負數" : "低於 " + money(x.low)}</b>
+                 <small>最低約 ${money(x.min, x.currency)}，可以提早轉入資金或調整付款帳戶。</small></div>
+                 <button class="btn primary" onClick=${() => openForecast()}>${x.action}</button></div>`
+        : x.kind === "event"
+        ? html`<div class=${"ritem" + (x.event.days_left <= 3 ? " urgent" : "")}><span class="badge-ic"><${Icon} name=${x.event.kind === "maturity" ? "bank" : "calendar"} /></span>
+                 <div class="txt"><b>${x.event.title}：${ymd(x.event.date)}（${x.event.when}）</b>
+                 <small>${x.event.amount ? `金額 ${money(x.event.amount, x.event.currency)}　` : ""}${x.event.sub}</small></div></div>`
+        : html`<div class="ritem"><span class="badge-ic"><${Icon} name=${{ due: "bell", backup: "save", monthclose: "check", yearclose: "lock" }[x.kind]} /></span><div class="txt"><b>${x.text}</b></div>
+                 <button class="btn primary" onClick=${() => (x.kind === "due" ? openDue() : x.kind === "monthclose" ? openMonthClose(x.ym) : x.kind === "yearclose" ? openYearAssist(x.year) : backupNow())}>${x.action}</button></div>`)}</div>`}
+        ${d.calendar.length ? html`<div class="cal-list">${d.calendar.slice(0, room).map((e) => html`<${EventRow} e=${e} />`)}</div>
+            ${d.calendar.length > room && html`<button class="link more" onClick=${() => openReminders().then(() => changed())}>還有 ${d.calendar.length - room} 件事（60 天內）→</button>`}`
+          : html`<div class="empty-mini">接下來 60 天沒有排定的事。保費、信用卡繳款、除息日都可以按「小幫手 → 管理提醒」新增，時間到了會在這裡提醒您。</div>`}
+      </div>
+      <div class="card recent rise" style="animation-delay:300ms"><h3><${Icon} name="list" />最近的紀錄<button class="link" onClick=${() => go("transactions")}>全部紀錄 →</button></h3>
+        ${d.recent.length === 0 ? html`<div class="empty-mini">還沒有紀錄，按右上角「記支出」開始。</div>` : d.recent.map((t) => html`<button class="rec" onClick=${() => openVoucher(t.id)} title=${`${t.voucher}　${t.type_label}　${t.account}　按一下開啟傳票`}>
+          <span class="rec-d num">${+t.date.slice(5, 7)}/${+t.date.slice(8)}</span>
+          ${t.type === "income" || t.type === "expense" ? html`<${CatIcon} name=${t.category} kind=${t.type} boxed />` : html`<span class="cat-ic boxed" style="--t:var(--tone-slate)"><${Icon} name=${{ transfer: "transfer", journal: "book", adjust: "refresh" }[t.type] || "list"} /></span>`}
+          <span class="rec-t"><b>${t.note || t.category}</b><small>${t.note ? t.category + "・" : ""}${t.account}</small></span>
+          <span class=${"rec-a num c-" + t.type}>${money(t.amount, t.currency, t.signed)}</span></button>`)}
+      </div>
+    </div>
+
+    <div class="grid insights-row">
+      <${Insights} items=${d.insights} go=${go} />
+      <${Ranking} rows=${d.ranking} />
+    </div>
+
     <div class="card rise" style="animation-delay:260ms">
-      <h3><${Icon} name="heart" />財務健康指標<small>以今天為基準日</small></h3>
+      <h3><${Icon} name="pulse" />財務健康指標<small>以今天為基準日</small></h3>
       <div class="grid health">
         <${Metric} name="負債比率" value=${pct(r.debt_ratio)} hint="負債 ÷ 資產，30% 以下為佳" level=${lDebt}
                    fill=${r.debt_ratio || 0} color=${colorOf(lDebt)} />
@@ -234,36 +269,6 @@ function DashboardView({ d, prefsKey, go }) {
         <${Metric} name="近 12 月儲蓄率" value=${pct(r.savings_rate)} hint="（收入－支出）÷ 收入，20% 以上為佳"
                    level=${lSav} bad="偏低" fill=${Math.max(0, r.savings_rate || 0)} color=${colorOf(lSav)} />
       </div>
-    </div>
-
-    <div class="grid insights-row">
-      <${Insights} items=${d.insights} go=${go} />
-      <${Ranking} rows=${d.ranking} />
-    </div>
-
-    ${d.reminders.length > 0 && html`<div class="card remind rise" style="animation-delay:300ms">
-      <h3><${Icon} name="bell" />提醒事項</h3>
-      ${d.reminders.map((x) => x.kind === "forecast"
-        ? html`<div class="ritem urgent"><span class="badge-ic"><${Icon} name="trend_down" /></span>
-                 <div class="txt"><b>${x.name} 預計在 ${ymd(x.date)}${x.reason ? `（${x.reason}）` : ""}${x.negative ? "變成負數" : "低於 " + money(x.low)}</b>
-                 <small>最低約 ${money(x.min, x.currency)}，可以提早轉入資金或調整付款帳戶。</small></div>
-                 <button class="btn primary" onClick=${() => openForecast()}>${x.action}</button></div>`
-        : x.kind === "event"
-        ? html`<div class=${"ritem" + (x.event.days_left <= 3 ? " urgent" : "")}><span class="badge-ic"><${Icon} name=${x.event.kind === "maturity" ? "bank" : "calendar"} /></span>
-                 <div class="txt"><b>${x.event.title}：${ymd(x.event.date)}（${x.event.when}）</b>
-                 <small>${x.event.amount ? `金額 ${money(x.event.amount, x.event.currency)}　` : ""}${x.event.sub}</small></div></div>`
-        : html`<div class="ritem"><span class="badge-ic"><${Icon} name=${{ due: "bell", backup: "save", monthclose: "check", yearclose: "lock" }[x.kind]} /></span><div class="txt"><b>${x.text}</b></div>
-                 <button class="btn primary" onClick=${() => (x.kind === "due" ? openDue() : x.kind === "monthclose" ? openMonthClose(x.ym) : x.kind === "yearclose" ? openYearAssist(x.year) : backupNow())}>${x.action}</button></div>`)}
-    </div>`}
-
-    <div class="card cal rise" style="animation-delay:320ms">
-      <h3><${Icon} name="calendar" />近期行事曆<small>接下來 60 天</small>
-        <div class="cal-acts"><button class="link" onClick=${() => openMonthClose()}><${Icon} name="check" />月結小幫手</button>
-          <button class="link" onClick=${() => openForecast()}><${Icon} name="trend_up" />現金流預測</button>
-          <button class="link" onClick=${() => openHealth()}><${Icon} name="heart" />健康檢查</button>
-          <button class="link" onClick=${() => openReminders().then(() => changed())}><${Icon} name="bell" />管理提醒</button></div></h3>
-      ${d.calendar.length ? html`<div class="cal-list">${d.calendar.map((e) => html`<${EventRow} e=${e} />`)}</div>`
-        : html`<div class="empty-mini">接下來 60 天沒有排定的事。保費、信用卡繳款、除息日都可以按「管理提醒」新增，時間到了會在這裡提醒您。</div>`}
     </div>
 
     <div class="grid wide">
@@ -288,15 +293,6 @@ function DashboardView({ d, prefsKey, go }) {
                 <div class="meter"><i style=${`width:${Math.min(100, k * 100)}%;background:${col}`}></i></div></div>`;
             })}</div>`}
       </div>
-    </div>
-
-    <div class="card rise" style="animation-delay:500ms"><h3><${Icon} name="list" />最近的紀錄<small>按一下可開啟傳票</small><button class="link" onClick=${() => go("transactions")}>全部紀錄 →</button></h3>
-      <table class="list"><thead><tr><th>日期</th><th>傳票號碼</th><th>類型</th><th>分類</th><th>帳戶</th><th>說明</th><th class="r">金額</th></tr></thead>
-        <tbody>${d.recent.map((t) => html`<tr onClick=${() => openVoucher(t.id)}>
-          <td class="num">${ymd(t.date)}</td><td class="muted num">${t.voucher}</td>
-          <td><span class=${"type b-" + t.type}>${t.type_label}</span></td><td>${t.type === "income" || t.type === "expense" ? html`<span class="emo">${catEmoji(t.category, t.type)}</span>` : ""}${t.category}</td><td>${t.account}</td>
-          <td class="note" title=${t.note}>${t.note}${t.tags.map((g) => html`<span class="tag">#${g}</span>`)}</td>
-          <td class=${"r num c-" + t.type}><b>${money(t.amount, t.currency, t.signed)}</b></td></tr>`)}</tbody></table>
     </div>`;
 }
 

@@ -114,6 +114,13 @@ def main() -> int:
     def farewell():
         steps = ["今天的紀錄都已寫入帳本"]
         try:
+            if win.evaluate_js("!!(window.__unsaved && window.__unsaved())"):      # 有打到一半的傳票：先問，不直接關掉
+                state["closing"] = False
+                win.evaluate_js("setTimeout(window.__askQuit, 0)")
+                return
+        except Exception:  # noqa: BLE001 — 畫面沒有回應時照常關閉
+            pass
+        try:
             win.evaluate_js(f"window.__farewell({json.dumps(steps, ensure_ascii=False)}, false)")
             if not demo and dbt.run(lambda: db.conn is not None and db.conn.total_changes != start_changes):
                 from core import backup

@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+<!-- 小尺寸（24 像素以下）的簡化版：只留帳本、走勢線與金幣。 -->
+<defs>
+<linearGradient id="bg" x1=".12" y1="0" x2=".88" y2="1">
+<stop offset="0" stop-color="#2A3BB0"/>
+<stop offset=".48" stop-color="#3D3DBD"/>
+<stop offset="1" stop-color="#5E35B8"/>
+</linearGradient>
+<radialGradient id="gc" cx=".1" cy=".06" r=".85">
+<stop offset="0" stop-color="#46D4FF" stop-opacity=".72"/>
+<stop offset=".45" stop-color="#4C9CFF" stop-opacity=".22"/>
+<stop offset="1" stop-color="#4C9CFF" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="gv" cx=".96" cy="1" r=".8">
+<stop offset="0" stop-color="#C768FF" stop-opacity=".62"/>
+<stop offset="1" stop-color="#A855F7" stop-opacity="0"/>
+</radialGradient>
+<linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#fff" stop-opacity=".6"/>
+<stop offset=".35" stop-color="#fff" stop-opacity=".06"/>
+<stop offset="1" stop-color="#fff" stop-opacity=".16"/>
+</linearGradient>
+<linearGradient id="pl" x1=".1" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#FFFFFF"/>
+<stop offset=".6" stop-color="#EAF1FF"/>
+<stop offset="1" stop-color="#A9C2FA"/>
+</linearGradient>
+<linearGradient id="pr" x1=".9" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#FFFFFF"/>
+<stop offset=".6" stop-color="#F2EEFF"/>
+<stop offset="1" stop-color="#BFB0F5"/>
+</linearGradient>
+<linearGradient id="rise" x1="0" y1="1" x2="1" y2="0">
+<stop offset="0" stop-color="#19B8E6"/>
+<stop offset=".45" stop-color="#4C7DF2"/>
+<stop offset=".72" stop-color="#FFC04A"/>
+<stop offset="1" stop-color="#FFE09A"/>
+</linearGradient>
+<linearGradient id="gold" x1=".2" y1="0" x2=".8" y2="1">
+<stop offset="0" stop-color="#FFF1C4"/>
+<stop offset=".5" stop-color="#FFCB55"/>
+<stop offset="1" stop-color="#F09A14"/>
+</linearGradient>
+<radialGradient id="halo">
+<stop offset=".3" stop-color="#FFE3A3" stop-opacity=".62"/>
+<stop offset="1" stop-color="#FFD479" stop-opacity="0"/>
+</radialGradient>
+<linearGradient id="riseS" gradientUnits="userSpaceOnUse" x1="54" y1="164" x2="190" y2="66">
+<stop offset="0" stop-color="#1E9BE8"/>
+<stop offset=".5" stop-color="#3D66E8"/>
+<stop offset=".62" stop-color="#FFB83A"/>
+<stop offset="1" stop-color="#FFCB55"/>
+</linearGradient>
+</defs>
+<path d="M80 4H176C226 4 252 30 252 80V176C252 226 226 252 176 252H80C30 252 4 226 4 176V80C4 30 30 4 80 4Z" fill="url(#bg)"/>
+<path d="M80 4H176C226 4 252 30 252 80V176C252 226 226 252 176 252H80C30 252 4 226 4 176V80C4 30 30 4 80 4Z" fill="url(#gc)"/>
+<path d="M80 4H176C226 4 252 30 252 80V176C252 226 226 252 176 252H80C30 252 4 226 4 176V80C4 30 30 4 80 4Z" fill="url(#gv)"/>
+<path d="M128 226C104 204 70 198 20 206V112C70 104 106 114 128 140Z" fill="#FFFFFF"/>
+<path d="M 128 226 C 152 204 186 198 236 206 V 144 C 186 104 150 114 128 140 Z" fill="#E2DBFF"/>
+<path d="M54 164C104 168 124 122 178 78" fill="none" stroke="url(#riseS)" stroke-width="24" stroke-linecap="round"/>
+<circle cx="190" cy="66" r="38" fill="#FFCB55"/>
+</svg>

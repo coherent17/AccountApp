@@ -17,10 +17,10 @@ const blank = (p = {}) => ({ id: ++rid, key: "", debit: null, credit: null, memo
 export async function openJournal(opts = {}) {
   let f;
   try { f = await api("journal_form", opts.tid || null); } catch (e) { return errorBox(e.message); }
-  return openModal((close) => html`<${JournalDialog} f0=${f} opts=${opts} close=${close} />`);
+  return openModal((close, modal) => html`<${JournalDialog} f0=${f} opts=${opts} close=${close} modal=${modal} />`);
 }
 
-function JournalDialog({ f0, opts, close }) {
+function JournalDialog({ f0, opts, close, modal }) {
   const [f, setF] = useState(f0);
   const t = f.txn;
   const ro = !!(t && t.readonly);
@@ -163,6 +163,7 @@ function JournalDialog({ f0, opts, close }) {
   const hint = untouched && !reused && f.history && note.trim() ? f.history.last[noteKey(note)] : null;
   // 複製成新傳票（日期今天）
   async function copyNew() {
+    if (!(await modal.canClose())) return;
     try { const p = await api("txn_copy", t.id); close(); openJournal({ prefill: p.lines, note: p.note, tags: p.tags }); } catch (e) { setMsg(e.message); }
   }
   const outLines = () => rows.map((r) => ({ key: r.key, debit: r.debit, credit: r.credit, memo: r.memo, orig: kindOf(r).fx ? r.orig : null,
@@ -237,11 +238,12 @@ function JournalDialog({ f0, opts, close }) {
     ${t && !t.source && html`<${Btn} kind="link" icon="copy" onClick=${copyNew} title="以相同內容開一張新傳票，日期為今天">複製成新傳票</${Btn}>`}
     ${(!t || !t.source) && !opts.draft && !opts.recurring && html`<${Btn} kind="link" icon="restore" onClick=${makeRecurring} title="每月、每季或每年固定的分錄，到期時提醒您一鍵入帳">設為定期…</${Btn}>`}
     <div class="grow"></div>
-    <${Btn} onClick=${() => close()}>${ro ? "關閉" : "取消"}</${Btn}>
+    <${Btn} onClick=${() => modal.tryClose()}>${ro ? "關閉" : "取消"}</${Btn}>
     ${!ro && html`<${Btn} kind="primary" icon="check" disabled=${busy} onClick=${() => save(false)}>${opts.draft ? "確定" : opts.recurring ? "入帳" : "儲存"}</${Btn}>`}`;
 
   const freq = untouched && !reused && !note.trim() && f.history ? f.history.frequent : [];
-  return html`<${Dialog} title=${title} icon="book" width="90rem" onClose=${() => close()} footer=${footer} cls="journal listdlg">
+  return html`<${Dialog} title=${title} icon="book" width="90rem" onClose=${() => close()} footer=${footer} cls="journal listdlg"
+      guard=${ro ? undefined : [date, note, tags, rows.filter((r) => r.key || r.debit || r.credit || r.memo).map((r) => [r.key, r.debit, r.credit, r.memo, r.security_id, r.shares, r.price, r.orig, r.rate])]}>
     ${freq.length > 0 && html`<div class="quick jq"><span class="quick-lbl"><${Icon} name="restore" />常用分錄</span>
       ${freq.map((h) => html`<button type="button" class="qchip" onClick=${() => reuse(h)} title=${`帶入 ${h.date.replace(/-/g, "/")} 的分錄（近兩年記了 ${h.count} 次）`}>${h.note}</button>`)}</div>`}
     ${hint && html`<div class="quick jq"><span class="quick-lbl"><${Icon} name="restore" />上次「${hint.note}」</span>
@@ -268,10 +270,10 @@ function JournalDialog({ f0, opts, close }) {
           <td><${AmountInput} value=${r.credit} onChange=${(v) => upd(r.id, { credit: v, auto: null })} placeholder=${r.want === "credit" ? "請輸入" : ""} /></td>
           <td>${k.fx ? html`<div class="row nowrap"><span class="cur">${k.c.currency}</span>
                 <${AmountInput} value=${r.orig} onChange=${(v) => { const n = { ...r, orig: v }; upd(r.id, { orig: v }); fxAmount(n); }} code=${k.c.currency} placeholder="原幣金額" />
-                <div style="width:7rem"><${AmountInput} value=${r.rate} onChange=${(v) => { const n = { ...r, rate: v }; upd(r.id, { rate: v }); fxAmount(n); }} decimals=${6} placeholder="匯率" /></div></div>`
+                <div style="width:7rem"><${AmountInput} value=${r.rate} onChange=${(v) => { const n = { ...r, rate: v }; upd(r.id, { rate: v }); fxAmount(n); }} decimals=${6} trim placeholder="匯率" /></div></div>`
             : k.sec ? html`<div class="row nowrap"><div style="flex:1;min-width:0"><${Select} value=${r.security_id} onChange=${(v) => setSec(r, v)} options=${secOptions(r)} disabled=${ro} /></div>
-                <div style="width:5.5rem"><${AmountInput} value=${r.shares} decimals=${4} placeholder="股數" onChange=${(v) => { const n = { ...r, shares: v }; upd(r.id, { shares: v }); autoAmount(n); }} /></div>
-                <div style="width:6rem"><${AmountInput} value=${r.price} decimals=${3} placeholder=${k.div ? "每股股利" : "單價"} onChange=${(v) => { const n = { ...r, price: v }; upd(r.id, { price: v }); autoAmount(n); }} /></div></div>`
+                <div style="width:5.5rem"><${AmountInput} value=${r.shares} decimals=${4} trim placeholder="股數" onChange=${(v) => { const n = { ...r, shares: v }; upd(r.id, { shares: v }); autoAmount(n); }} /></div>
+                <div style="width:6rem"><${AmountInput} value=${r.price} decimals=${3} trim placeholder=${k.div ? "每股股利" : "單價"} onChange=${(v) => { const n = { ...r, price: v }; upd(r.id, { price: v }); autoAmount(n); }} /></div></div>`
             : html`<span class="muted">—</span>`}</td>
           <td><${TextInput} value=${r.memo} onInput=${(v) => upd(r.id, { memo: v })} /></td></tr>`;
       })}</tbody></table>${ro && html`<div class="ro-cover"></div>`}</div>
@@ -304,7 +306,7 @@ function TemplatesDlg({ close }) {
   if (!items) return null;
   const move = (d) => { const j = sel + d; if (j < 0 || j >= items.length) return; const a = [...items]; [a[sel], a[j]] = [a[j], a[sel]]; setItems(a); setSel(j); };
   async function save() { try { await api("template_save_all", items); toast("已儲存範本"); close(true); } catch (e) { setMsg(e.message); } }
-  return html`<${Dialog} title="管理分錄範本" icon="list" width="40rem" onClose=${() => close()}
+  return html`<${Dialog} title="管理分錄範本" icon="list" width="40rem" guard=${items} onClose=${() => close()}
       footer=${html`<${Btn} icon="up" onClick=${() => move(-1)}>上移</${Btn}><${Btn} icon="down" onClick=${() => move(1)}>下移</${Btn}>
         <${Btn} kind="danger" icon="trash" disabled=${!items.length} onClick=${() => { setItems(items.filter((_, i) => i !== sel)); setSel(0); }}>刪除</${Btn}>
         <div class="grow"></div><${Btn} onClick=${() => close()}>取消</${Btn}><${Btn} kind="primary" onClick=${save}>儲存</${Btn}>`}>

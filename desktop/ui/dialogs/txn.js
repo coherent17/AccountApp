@@ -4,7 +4,7 @@ import { META, TYPE_LABELS, api, changed, cur, html, isoToday, money, num, toast
 import { openJournal } from "./journal.js";
 import { printVoucher } from "./print.js";
 import { flashRow } from "../lib/ui.js";
-import { catEmoji } from "../lib/caticon.js";
+import { CatIcon } from "../lib/caticon.js";
 import { AmountInput, Btn, Chips, DataTable, DateInput, Dialog, Field, Icon, Segmented, Select, TagInput, TextInput,
          ask, errorBox, info, openModal } from "../lib/ui.js";
 
@@ -15,7 +15,7 @@ const ICON = { expense: "minus", income: "plus", transfer: "transfer", adjust: "
 export async function openTxn(opts = {}) {
   let form;
   try { form = await api("txn_form", opts.tid || null); } catch (e) { errorBox(e.message); return false; }
-  return openModal((close) => html`<${TxnDialog} form=${form} opts=${opts} close=${close} />`);
+  return openModal((close, modal) => html`<${TxnDialog} modal=${modal} form=${form} opts=${opts} close=${close} />`);
 }
 
 /** 依傳票類型開啟：一般傳票開編輯視窗，分錄與系統傳票開傳票檢視，已作廢的提示如何恢復。 */
@@ -35,7 +35,7 @@ function accLabel(a) {
   return `${a.name}　（${a.kind === "liability" ? "欠款 " : ""}${money(a.balance, a.currency)}）`;
 }
 
-function TxnDialog({ form, opts, close }) {
+function TxnDialog({ form, opts, close, modal }) {
   const t = form.txn;
   const editing = !!t;
   const src = t || opts.prefill || {};
@@ -126,6 +126,7 @@ function TxnDialog({ form, opts, close }) {
   }
 
   async function copyNew() {
+    if (!(await modal.canClose())) return;
     try { const p = await api("txn_copy", t.id); close(savedAny); openTxn({ prefill: p }); } catch (e) { setMsg({ bad: true, text: e.message }); }
   }
 
@@ -162,17 +163,18 @@ function TxnDialog({ form, opts, close }) {
       ${!t.system && html`<${Btn} kind="link" icon="copy" onClick=${copyNew} title="以相同內容再記一筆，日期為今天">複製成新的一筆</${Btn}>`}`}
     ${!t && type !== "adjust" && html`<${Btn} kind="link" icon="split" onClick=${toJournal} title="一筆付款分攤到多個分類，或需要自行輸入借貸時使用">改用複式分錄（分割多個科目）</${Btn}>`}
     <div class="grow"></div>
-    <${Btn} onClick=${() => close(savedAny)}>取消</${Btn}>
+    <${Btn} onClick=${() => modal.tryClose(savedAny)}>取消</${Btn}>
     ${!t && html`<${Btn} onClick=${() => save(true)} disabled=${busy}>儲存並再記一筆</${Btn}>`}
     <${Btn} kind="primary" icon="check" onClick=${() => save(false)} disabled=${busy || locked}>儲存</${Btn}>`;
 
-  return html`<${Dialog} title=${title} icon=${ICON[type]} accent=${ACCENT[type]} width="44rem" onClose=${() => close(savedAny)} footer=${footer}>
+  return html`<${Dialog} title=${title} icon=${ICON[type]} accent=${ACCENT[type]} width="44rem" onClose=${() => close(savedAny)} footer=${footer}
+      guard=${locked ? undefined : editing ? [type, date, amount, account, toAccount, toAmount, category, note, tags] : [amount, toAmount, note, tags, pending]}>
     <form class="form" onSubmit=${(e) => { e.preventDefault(); save(false); }}>
       ${!editing && !opts.prefill && type !== "adjust" && form.quick && form.quick.length > 0 && html`<div class="quick">
           <span class="quick-lbl"><${Icon} name="restore" />常記</span>
           ${form.quick.map((q) => html`<button type="button" class=${"qchip k-" + q.type} onClick=${() => applyQuick(q)}
               title=${`${q.category}・${money(q.amount, c1)}（近半年記了 ${q.count} 次）`}>
-            <span class="emo">${catEmoji(q.category, q.type)}</span>${q.note}<small class="num">${money(q.amount, c1)}</small></button>`)}</div>`}
+            <${CatIcon} name=${q.category} kind=${q.type} />${q.note}<small class="num">${money(q.amount, c1)}</small></button>`)}</div>`}
       ${type === "adjust"
         ? html`<div class="section-title" style="color:var(--adjust)">餘額／市值調整</div>`
         : html`<${Segmented} cls="types" value=${type} onChange=${(k) => { setType(k); if (k !== type) setCategory(null); }}
@@ -284,7 +286,7 @@ function AuditDlg({ tid, close }) {
       const [kw, setKw] = useState("");
       const [rows, setRows] = useState(null);
       useEffect(() => { api("audit", tid, kw.trim()).then(setRows); }, [kw]);
-      return html`<${Dialog} title=${tid ? `修改紀錄　V${String(tid).padStart(6, "0")}` : "修改紀錄（稽核軌跡）"} icon="eye" width="64rem" cls="listdlg" onClose=${() => close()}
+      return html`<${Dialog} title=${tid ? `修改紀錄　V${String(tid).padStart(6, "0")}` : "修改紀錄（稽核軌跡）"} icon="restore" width="64rem" cls="listdlg" onClose=${() => close()}
           footer=${html`<span class="hint">修改紀錄由系統自動保存，無法刪除或修改，可作為帳務稽核之依據。</span><div class="grow"></div><${Btn} kind="primary" onClick=${() => close()}>關閉</${Btn}>`}>
         ${!tid && html`<div class="row" style="margin-bottom:.7rem"><${TextInput} icon="search" value=${kw} onInput=${setKw} placeholder="搜尋傳票號碼、動作或內容…" /></div>`}
         ${rows == null ? html`<div class="muted">讀取中…</div>` : html`<${DataTable} rows=${rows} maxHeight="60vh" empty="沒有修改紀錄"
