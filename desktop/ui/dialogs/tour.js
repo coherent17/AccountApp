@@ -1,4 +1,4 @@
-// 新介面導覽：第一次使用新介面時，用三張卡片介紹最常用的地方（之後可在「設定」重新觀看）。
+// 歡迎導覽：第一次使用時，用三張卡片介紹最常用的地方；最後可以「帶我看一圈」（之後可在「操作導覽」重看）。
 import { useState } from "preact/hooks";
 import { api, html } from "../lib/core.js";
 import { Btn, Icon, openModal } from "../lib/ui.js";
@@ -21,7 +21,7 @@ function Tour({ close }) {
   const [i, setI] = useState(0);
   const s = SLIDES[i];
   const last = i === SLIDES.length - 1;
-  const finish = () => { api("tour_done"); close(true); };
+  const finish = (v = true) => { api("tour_done"); close(v); };
   return html`<div class="dialog tour" style="width:min(36rem, calc(100vw - 3rem))" role="dialog">
     <div class="tour-art" style=${`--c:${s.color}`} key=${i}>
       <div class="tour-ic"><${Icon} name=${s.icon} size="2.4rem" /></div>
@@ -33,7 +33,8 @@ function Tour({ close }) {
     <div class="dfoot">
       <div class="dots">${SLIDES.map((_, j) => html`<i class=${j === i ? "on" : ""} onClick=${() => setI(j)}></i>`)}</div>
       <div class="grow"></div>
-      ${i > 0 ? html`<${Btn} onClick=${() => setI(i - 1)}>上一步</${Btn}>` : html`<${Btn} kind="link" onClick=${finish}>略過</${Btn}>`}
+      ${i > 0 ? html`<${Btn} onClick=${() => setI(i - 1)}>上一步</${Btn}>` : html`<${Btn} kind="link" onClick=${() => finish()}>略過</${Btn}>`}
+      ${last && html`<${Btn} icon="help" onClick=${() => finish("walk")}>帶我看一圈</${Btn}>`}
       <${Btn} kind="primary" icon=${last ? "check" : null} onClick=${() => (last ? finish() : setI(i + 1))}>${last ? "開始使用" : "下一步"}</${Btn}>
     </div>
   </div>`;

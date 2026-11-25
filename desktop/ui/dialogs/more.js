@@ -1,5 +1,6 @@
 // 定期交易、到期提醒、銀行對帳、匯入 Excel／CSV、全域搜尋、歡迎畫面。
 import { useEffect, useRef, useState } from "preact/hooks";
+import { guides, startGuide } from "../lib/guide.js";
 import { META, api, changed, cur, html, isoToday, money, num, toast, ymd } from "../lib/core.js";
 import { AmountInput, Btn, Check, DataTable, DateInput, Dialog, Field, Icon, Segmented, Select, TextInput, TypeBadge, ask,
          errorBox, info, openModal } from "../lib/ui.js";
@@ -31,7 +32,7 @@ function RecurringManager({ close }) {
     { key: "next", title: "下次日期", align: "c", render: (r) => html`<span class="num">${r.next ? ymd(r.next) : "—"}</span>` },
     { key: "st", title: "狀態", align: "c", render: (r) => html`<span class=${"type " + (r.active ? "b-income" : "b-void")}>${r.active ? "啟用" : "停用"}</span>` },
   ];
-  return html`<${Dialog} title="定期交易" icon="restore" width="66rem" cls="listdlg" onClose=${() => close()}
+  return html`<${Dialog} title="定期交易" icon="restore" width="66rem" help="recurring" cls="listdlg" onClose=${() => close()}
       footer=${html`<${Btn} kind="primary" icon="plus" onClick=${() => edit(null)}>新增</${Btn}>
         <${Btn} icon="edit" disabled=${!cur_} onClick=${() => edit(cur_)}>編輯</${Btn}>
         <${Btn} icon="power" disabled=${!cur_} onClick=${async () => { await api("recurring_toggle", cur_.id); changed(); load(); }}>啟用／停用</${Btn}>
@@ -178,7 +179,7 @@ function Reconcile({ aid0, close }) {
       setTimeout(() => document.querySelector("table.recon tr.auto")?.scrollIntoView({ block: "center" }), 80);   // 捲到自動勾選的紀錄
     } catch (e) { errorBox(e.message); }
   }
-  return html`<${Dialog} title="銀行對帳" icon="list" width="64rem" cls="listdlg" guard=${[...checked].sort((a, b) => a - b)} onClose=${() => close()}
+  return html`<${Dialog} title="銀行對帳" icon="list" width="64rem" help="recon" cls="listdlg" guard=${[...checked].sort((a, b) => a - b)} onClose=${() => close()}
       footer=${html`<${Btn} icon="list" onClick=${() => setHist(!hist)}>${hist ? "回到對帳" : "對帳紀錄"}</${Btn}>
         ${!hist && html`<${Btn} icon="upload" onClick=${smartMatch} title="選擇網路銀行下載的交易明細，自動勾選帳上對應的紀錄">匯入銀行明細自動勾選</${Btn}>`}<div class="grow"></div>
         <${Btn} onClick=${() => close()}>取消</${Btn}><${Btn} kind="primary" icon="check" onClick=${finish}>完成對帳</${Btn}>`}>
@@ -279,10 +280,14 @@ function SearchDialog({ go, close }) {
     { key: "detail", title: "內容", render: (r) => html`<span class="muted">${r.detail}</span>`, elide: true, cls: () => "grow" },
     { key: "amt", title: "金額", align: "r", render: (r) => (r.amount == null ? "" : html`<span class="num">${money(r.amount, r.currency || META.base)}</span>`) },
   ];
-  return html`<${Dialog} title="全域搜尋" icon="search" width="72rem" cls="listdlg" onClose=${() => close()}
+  const q = text.trim().split(/\s+/).filter(Boolean);
+  const tips = q.length ? Object.entries(guides()).filter(([, g]) => q.every((w) => (g.title + g.desc + g.steps.map((s) => s.title).join()).includes(w))).slice(0, 4) : [];
+  return html`<${Dialog} title="全域搜尋" icon="search" width="72rem" help="search" cls="listdlg" onClose=${() => close()}
       footer=${html`<span class="hint">可輸入多個關鍵字（空白分隔，全部符合才列出）：傳票號碼 V000123、日期 2025-03 或 114/3/5、金額、代號，或說明、科目、標的、附件名稱。按兩下開啟。</span>
         <div class="grow"></div><${Btn} onClick=${() => close()}>關閉</${Btn}>`}>
     <${TextInput} icon="search" value=${text} onInput=${setText} placeholder="搜尋傳票、科目、投資標的、定期交易…" autofocus cls="big-search" />
+    ${tips.length > 0 && html`<div class="quick gquick"><span class="quick-lbl"><${Icon} name="help" />操作導覽</span>${tips.map(([id, g]) => html`<button type="button" class="qchip"
+        title=${g.desc} onClick=${() => { close(); setTimeout(() => startGuide(id), 60); }}><${Icon} name=${g.icon} />${g.title}</button>`)}</div>`}
     ${res && html`<div class="muted small" style="margin:.6rem 0">${res.rows.length ? `找到 ${res.rows.length} 筆` : "沒有符合的結果"}${res.truncated ? `（傳票共 ${res.total} 筆，只顯示前 300 筆，請加上更多關鍵字）` : ""}</div>`}
     ${res && res.rows.length > 0 && html`<${DataTable} columns=${cols} rows=${res.rows} rowKey=${(r) => r.kind + r.id + r.ref} selected=${sel} onSelect=${setSel}
       onActivate=${open} maxHeight="55vh" />`}

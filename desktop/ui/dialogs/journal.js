@@ -242,7 +242,7 @@ function JournalDialog({ f0, opts, close, modal }) {
     ${!ro && html`<${Btn} kind="primary" icon="check" disabled=${busy} onClick=${() => save(false)}>${opts.draft ? "確定" : opts.recurring ? "入帳" : "儲存"}</${Btn}>`}`;
 
   const freq = untouched && !reused && !note.trim() && f.history ? f.history.frequent : [];
-  return html`<${Dialog} title=${title} icon="book" width="90rem" onClose=${() => close()} footer=${footer} cls="journal listdlg"
+  return html`<${Dialog} title=${title} icon="book" width="90rem" help="journal" onClose=${() => close()} footer=${footer} cls="journal listdlg"
       guard=${ro ? undefined : [date, note, tags, rows.filter((r) => r.key || r.debit || r.credit || r.memo).map((r) => [r.key, r.debit, r.credit, r.memo, r.security_id, r.shares, r.price, r.orig, r.rate])]}>
     ${freq.length > 0 && html`<div class="quick jq"><span class="quick-lbl"><${Icon} name="restore" />常用分錄</span>
       ${freq.map((h) => html`<button type="button" class="qchip" onClick=${() => reuse(h)} title=${`帶入 ${h.date.replace(/-/g, "/")} 的分錄（近兩年記了 ${h.count} 次）`}>${h.note}</button>`)}</div>`}

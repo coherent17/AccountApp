@@ -189,11 +189,11 @@ function DashboardView({ d, prefsKey, go }) {
 
   const room = Math.max(3, 5 - d.reminders.length);            // 提醒多的時候，行事曆少列幾件，第一個畫面放得下
   const tools = (e) => { const b = e.currentTarget.getBoundingClientRect(); openMenu({ preventDefault() {}, clientX: b.right - 190, clientY: b.bottom + 6 }, [
-    { label: "管理提醒", icon: "bell", run: () => openReminders().then(() => changed()) }, { label: "月結小幫手", icon: "check", run: () => openMonthClose() },
+    { label: "管理提醒", icon: "bell", run: () => openReminders().then(() => changed()) }, { label: "月結小幫手", icon: "check", run: () => openMonthClose() }, { label: "年度結帳小幫手", icon: "lock", run: () => openYearAssist() },
     { label: "現金流預測", icon: "trend_up", run: () => openForecast() }, { label: "資料健康檢查", icon: "pulse", run: () => openHealth() }]); };
   return html`
     <div class="head rise">
-      <div><h1>${greeting()}，${META.owner || "您好"}</h1>
+      <div><h1>${greeting()}，${META.owner || "您好"}<button type="button" class="helpbtn" title="這一頁怎麼用（F1）" onClick=${() => window.__help("dashboard")}><${Icon} name="help" /></button></h1>
         <div class="sub">${longDate(d.today)}
           ${d.today_count > 0
             ? html`<span class="nudge good"><${Icon} name="check" />今天已記 ${d.today_count} 筆${d.streak > 1 ? html`・連續記帳 ${d.streak} 天` : ""}</span>`

@@ -39,7 +39,7 @@ export function Reports({ go }) {
   const P = { bs: BalanceSheet, is: IncomeStatement, cf: CashFlow, monthly: Monthly, cats: Categories, tags: Tags,
               journal: Journal, ledger: Ledger, tb: TrialBalance, tax: Tax }[tab];
   return html`<div class="page-fill">
-    <${PageHead} icon="report" color="var(--gold)" title="財務報表" sub="資產負債表、收支損益表、分類帳與試算表">
+    <${PageHead} icon="report" color="var(--gold)" title="財務報表" help="reports" sub="資產負債表、收支損益表、分類帳與試算表">
       <${Btn} kind="income" icon="download" big onClick=${() => openExport(start, end)}>匯出 Excel 報表</${Btn}>
       <${Btn} icon="print" big onClick=${() => openPrint(start, end)}>列印／PDF</${Btn}>
       <${Btn} icon="calendar" big onClick=${() => openMonthly()} title="一頁看完一個月：收支、預算、淨資產、投資與接下來的提醒">月報</${Btn}>

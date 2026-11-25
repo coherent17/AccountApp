@@ -45,7 +45,7 @@ function ReminderCenter({ close }) {
     groups[groups.length - 1][1].push(e);
   }
   const freqName = (f) => (d.freqs.find((x) => x[0] === f) || [, ""])[1];
-  return html`<${Dialog} title="到期提醒中心" icon="calendar" width="58rem" cls="listdlg" onClose=${() => close()}
+  return html`<${Dialog} title="到期提醒中心" icon="calendar" width="58rem" help="reminders" cls="listdlg" onClose=${() => close()}
       footer=${html`<span class="hint">定存到期、定期交易與 5 月報稅會自動列出；保費、信用卡繳款等可以自己新增。</span><div class="grow"></div>
         <${Btn} onClick=${() => close()}>關閉</${Btn}><${Btn} kind="primary" icon="plus" onClick=${() => edit(null)}>新增提醒</${Btn}>`}>
     ${!d ? html`<div class="muted">讀取中…</div>` : html`<div class="tablewrap remind-scroll">
@@ -118,7 +118,7 @@ function Health({ close }) {
   }
   const tone = !r ? "run" : r.bad ? "bad" : r.warn ? "warn" : "ok";
   const label = { backup: "設定備份", backup2: "設定備份", due: "確認入帳", recon: "去對帳", prices: "市價評價", yearclose: "到財務報表", restore: "還原備份" };
-  return html`<${Dialog} title="資料健康檢查" icon="pulse" width="50rem" cls="listdlg" onClose=${() => close(!!r)}
+  return html`<${Dialog} title="資料健康檢查" icon="pulse" width="50rem" help="health" cls="listdlg" onClose=${() => close(!!r)}
       footer=${html`<div class="grow"></div><${Btn} icon="refresh" onClick=${run} disabled=${!r}>重新檢查</${Btn}>
         <${Btn} icon="print" onClick=${async () => openPreview(await api("health_html"), "帳務健康檢查報告")} disabled=${!r}>列印報告</${Btn}>
         <${Btn} kind="primary" onClick=${() => close(!!r)}>完成</${Btn}>`}>
@@ -193,7 +193,7 @@ function MonthClose({ ym0, close }) {
         <h2>${s.label}的帳已經收好了！</h2><p class="muted">辛苦了。下個月初會再提醒您，一樣一步一步完成。</p></div>
     </${Dialog}>`;
   }
-  return html`<${Dialog} title="月結小幫手" icon="calendar" width="54rem" cls="listdlg" onClose=${() => close()}
+  return html`<${Dialog} title="月結小幫手" icon="calendar" width="54rem" help="month" cls="listdlg" onClose=${() => close()}
       footer=${html`<${Btn} onClick=${() => close()}>稍後再說</${Btn}><div class="grow"></div>
         <${Btn} kind="primary" icon="check" onClick=${finish}>完成 ${s.label}月結</${Btn}>`}>
     <div class="mc-head">
@@ -234,7 +234,7 @@ function YearAssist({ y0, close }) {
       if (left.length && !(await ask(`還有 ${left.length} 個步驟沒有完成：\n${left.join("\n")}\n\n仍要繼續結帳嗎？（結帳前會自動備份，之後也可以到「設定」解除結帳）`, { yes: "繼續" }))) return;
       after(openYearClose(s.year)); }}>年度結帳…</${Btn}>`,
   };
-  return html`<${Dialog} title="年度結帳小幫手" icon="lock" width="54rem" cls="listdlg" onClose=${() => close()}
+  return html`<${Dialog} title="年度結帳小幫手" icon="lock" width="54rem" cls="listdlg" help="year" onClose=${() => close()}
       footer=${html`<span class="hint">進度會記住，可以分幾天完成。結帳前會自動備份帳本。</span><div class="grow"></div><${Btn} kind="primary" onClick=${() => close()}>${s.closed ? "完成" : "先到這裡"}</${Btn}>`}>
     <div class="mc-head">
       <div class="mc-ring" style=${`--p:${Math.round((s.done / s.total) * 100)}`}><b>${s.done}<small>/${s.total}</small></b></div>
@@ -278,7 +278,7 @@ function Forecast({ close }) {
     try { await api("set_forecast_low", low); toast("已更新低水位"); load(); changed(); } catch (e) { errorBox(e.message); }
   }
   const evs = d ? d.events.filter((e) => !only || e.account_id === only) : [];
-  return html`<${Dialog} title="現金流預測" icon="trend_up" width="74rem" cls="listdlg forecast" onClose=${() => close()}
+  return html`<${Dialog} title="現金流預測" icon="trend_up" width="74rem" help="forecast" cls="listdlg forecast" onClose=${() => close()}
       footer=${html`<span class="hint">依定期交易與指定了帳戶的提醒推算；定存到期、臨時支出不會自動計入。</span><div class="grow"></div>
         <${Btn} icon="bell" onClick=${async () => { await openReminders(); load(); }}>管理提醒</${Btn}><${Btn} kind="primary" onClick=${() => close()}>關閉</${Btn}>`}>
     <div class="row wrap fc-bar">
@@ -457,7 +457,7 @@ function Feedback({ shot: shot0, items0, close }) {
         <p class="muted small">${res.path}</p></div>
     </${Dialog}>`;
   }
-  return html`<${Dialog} title="意見回饋" icon="chat" width="62rem" guard=${[note]} onClose=${() => close()}
+  return html`<${Dialog} title="意見回饋" icon="chat" width="62rem" help="feedback" guard=${[note]} onClose=${() => close()}
       footer=${html`<span class="hint">不會自動上傳；產生的 PDF 存在「意見回饋」資料夾，由您傳給我們。</span><div class="grow"></div>
         <${Btn} onClick=${() => close()}>關閉</${Btn}>
         <${Btn} icon="plus" disabled=${!dirty || busy} onClick=${add}>加入清單</${Btn}>

@@ -34,7 +34,7 @@ export function Investments({ go }) {
   const showEvents = (sid) => { setEvSec(sid); setTab("events"); };
 
   return html`<div class="page-fill">
-    <${PageHead} icon="chart" color="var(--adjust)" title="投資管理" sub="投資明細帳：持股、平均成本、已實現與未實現損益、股利">
+    <${PageHead} icon="chart" color="var(--adjust)" title="投資管理" help="investments" sub="投資明細帳：持股、平均成本、已實現與未實現損益、股利">
       <${Btn} kind="expense" icon="plus" big onClick=${() => trade("buy")}>買進</${Btn}>
       <${Btn} kind="income" icon="minus" big onClick=${() => trade("sell")}>賣出</${Btn}>
       <${MenuButton} label="股利" icon="gift" kind="adjust" items=${[

@@ -12,6 +12,9 @@ import { Reports } from "./pages/reports.js";
 import { Settings } from "./pages/settings.js";
 import { checkUpdates, openUpdate, showWhatsNew, startUpdateTimer, useAvailableUpdate } from "./dialogs/update.js";
 import { openTour } from "./dialogs/tour.js";
+import { openGuides } from "./dialogs/guides.js";
+import { GuideHost, GuideNudge, findTargets, guides, guidesReady, loadGuides, markGuide, registerGuides, resetGuides, startGuide, unseen } from "./lib/guide.js";
+import { GUIDES } from "./guides.js";
 import { openYearAssist, openFeedback, useFeedbackCount, openForecast, openHealth, openMonthClose, openMonthly, openReminders, previewMonthly } from "./dialogs/tools.js";
 import { openChart, openSubject, openYearClose } from "./dialogs/chart.js";
 import { openJournal } from "./dialogs/journal.js";
@@ -23,6 +26,11 @@ import { openAccount, openAdjust } from "./dialogs/account.js";
 import { openPrices, openRates, openSecurity, openSecurityList, openTrade } from "./dialogs/invest.js";
 import { openAnnual, openPrint } from "./dialogs/print.js";
 import { openExport } from "./dialogs/data.js";
+
+registerGuides(GUIDES);
+window.__help = (id) => startGuide(id);
+window.__guideUnseen = unseen;
+window.__guideMark = markGuide;
 
 const NAV = [["dashboard", "總覽", "home"], ["transactions", "收支明細", "list"], ["accounts", "帳戶管理", "wallet"],
              ["investments", "投資管理", "chart"], ["reports", "財務報表", "report"], ["settings", "設定", "settings"]];
@@ -77,7 +85,7 @@ window.__t = {
     if (m && m.scrollHeight > m.clientHeight + 4) out.push(`整頁可上下捲動（${m.scrollHeight}/${m.clientHeight}px）`);
     return out.join("；") || "（沒有表格）";
   },
-  closeTop, openTour, openUpdateFake: (v) => { window.__fakeUpdate(v); },
+  closeTop, openGuides, startGuide, guides, findTargets, guidesReady, resetGuides, openTour, openUpdateFake: (v) => { window.__fakeUpdate(v); },
   openUserJournal: async () => openJournal({ tid: (await api("txn_list", { ...ALL, type: "journal" })).rows.find((r) => !r.source).id }),
   journalTemplate: (name) => { const s = document.querySelector(".journal .jtop select"); const i = [...s.options].findIndex((o) => o.text === name); s.value = i; s.dispatchEvent(new Event("change", { bubbles: true })); },
   tab: (label) => [...document.querySelectorAll(".tabs button")].find((b) => b.textContent.includes(label)).click(), openVoucher, openAudit, askVoid: () => askVoidReason(2),
@@ -150,9 +158,10 @@ function SideBar({ page, go, setPref }) {
     ${upd && html`<button class="update-pill" onClick=${openUpdate} title="按一下查看更新內容並更新"><span class="pulse"></span>
       <div><b>有新版本 ${upd.version}</b><small>按這裡更新</small></div><${Icon} name="download" /></button>`}
     <div class="section-label"><span>快速功能</span><button class="iconbtn side-toggle" title=${(mini ? "展開" : "收合") + "側邊欄（Ctrl+B），表格會有更多空間"} onClick=${() => window.__toggleSide()}><${Icon} name=${mini ? "sidebar_open" : "sidebar"} /></button></div>
-    <button class="nav" title="記一筆（Ctrl+N）" onClick=${() => openTxn({ type: "expense" })}><${Icon} name="plus" /><span>記一筆</span><kbd>Ctrl+N</kbd></button>
-    <button class="nav" title="搜尋（Ctrl+F）" onClick=${() => openSearch(go)}><${Icon} name="search" /><span>搜尋</span><kbd>Ctrl+F</kbd></button>
-    <button class="nav" title="復原上一步（Ctrl+Z）" onClick=${undo}><${Icon} name="undo" /><span>復原</span><kbd>Ctrl+Z</kbd></button>
+    <button class="nav" data-g="new" title="記一筆（Ctrl+N）" onClick=${() => openTxn({ type: "expense" })}><${Icon} name="plus" /><span>記一筆</span><kbd>Ctrl+N</kbd></button>
+    <button class="nav" data-g="search" title="搜尋（Ctrl+F）" onClick=${() => openSearch(go)}><${Icon} name="search" /><span>搜尋</span><kbd>Ctrl+F</kbd></button>
+    <button class="nav" data-g="undo" title="復原上一步（Ctrl+Z）" onClick=${undo}><${Icon} name="undo" /><span>復原</span><kbd>Ctrl+Z</kbd></button>
+    <button class="nav" data-g="help" title="操作導覽（F1）：每一頁、每個常用視窗怎麼用" onClick=${openGuides}><${Icon} name="help" /><span>操作導覽</span><kbd>F1</kbd></button>
     <div class="prefs">
       <div class="seg mini" title="外觀：切換後立即生效">
         <button class=${r.dataset.theme === "light" ? "on" : ""} onClick=${() => setPref("light", null)}><${Icon} name="sun" />淺色</button>
@@ -175,11 +184,19 @@ function App() {
   const [, force] = useState(0);
   const go = (p) => setPage(p);
   window.__go = go;
+  window.__pageId = page;
   window.__showTransactions = (f) => showTransactions(go, f);
   window.__showSecurity = (sid) => showSecurity(go, sid);
 
   useEffect(() => {
     const onKey = (e) => {
+      if (window.__guideOpen) return;
+      if (e.key === "F1") {                          // 視窗開著：這個視窗的導覽；否則開啟操作導覽
+        e.preventDefault();
+        const top = window.__helpStack.slice(-1)[0];
+        if (top) startGuide(top); else if (!window.__modalOpen) openGuides();
+        return;
+      }
       if (window.__modalOpen) return;
       if (e.ctrlKey && e.key >= "1" && e.key <= "6") { go(NAV[+e.key - 1][0]); e.preventDefault(); }
       else if (e.ctrlKey && (e.key === "b" || e.key === "B")) { e.preventDefault(); window.__toggleSide(); }
@@ -208,7 +225,7 @@ function App() {
     <main class="main"><div class=${"page" + (FILL.includes(page) ? " fill" : "")}>
       <div class="pagefx" key=${page}><${Page} go=${go} /></div>
     </div></main>
-    <${ModalHost} /><${MenuHost} /><${Toasts} />
+    <${ModalHost} /><${MenuHost} /><${GuideNudge} page=${page} /><${GuideHost} /><${Toasts} />
   </div>`;
 }
 
@@ -216,6 +233,7 @@ async function boot() {
   try { sessionStorage.removeItem("retry"); } catch (_) { /* 沒有也沒關係 */ }
   try {
     setMeta(await api("meta"));
+    await loadGuides().catch(() => {});
   window.__folder = META.folder;
   } catch (e) {
     document.getElementById("splash")?.remove();
@@ -232,12 +250,13 @@ async function boot() {
     await new Promise((r) => setTimeout(r, 500));                           // 等啟動畫面淡出
     if (await api("first_run")) await openWelcome();                       // 第一次開啟：稱呼、基本帳戶或範例資料
     else await showWhatsNew();                                             // 剛更新：「已更新到…」與更新內容
-    if (await api("tour_status")) await openTour();                        // 第一次使用新介面：三張卡片的導覽
+    if (await api("tour_status") && (await openTour()) === "walk") await startGuide("screen");      // 第一次使用：三張卡片的導覽，之後可以帶她看一圈
     setTimeout(() => checkUpdates(true).catch(() => {}), 4000);            // 檢查新版本（開啟時，之後每 4 小時）
     startUpdateTimer();
     await openDue().catch(() => {});                                       // 定期交易到期提醒
     const ym = await api("month_close_prompt").catch(() => "");            // 月初：上個月的月結還沒完成就提醒一次
-    if (ym) openMonthClose(ym);
+    if (ym) await openMonthClose(ym);
+    guidesReady();
   }
 }
 

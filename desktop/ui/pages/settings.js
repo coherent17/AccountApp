@@ -5,7 +5,8 @@ import { AmountInput, Btn, Card, Check, DataTable, DateInput, Dialog, Field, Ico
          errorBox, info, openMenu, openModal, Skeleton } from "../lib/ui.js";
 import { openChart, openSubject, openYearClose } from "../dialogs/chart.js";
 import { checkUpdates } from "../dialogs/update.js";
-import { openTour } from "../dialogs/tour.js";
+import { openGuides } from "../dialogs/guides.js";
+import { setGuideOff, useGuideState } from "../lib/guide.js";
 import { openFeedback, openForecast, openHealth, openMonthClose, openReminders, openYearAssist } from "../dialogs/tools.js";
 
 export const resolveTheme = (mode) => (mode === "dark" || (mode === "system" && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light");
@@ -19,7 +20,7 @@ export function Settings() {
   if (!d) return html`<${Skeleton} />`;
   const go = (t) => { lastTab = t; setTab(t); };
   return html`
-    <${PageHead} icon="settings" color="var(--transfer)" title="設定" sub="個人資料、收支分類與預算、結帳、備份與還原" />
+    <${PageHead} icon="settings" color="var(--transfer)" title="設定" help="settings" sub="個人資料、收支分類與預算、結帳、備份與還原" />
     <${Tabs} value=${tab} onChange=${go} tabs=${TABS} />
     ${tab === "me" && html`<${Personal} d=${d} reload=${reload} />`}
     ${tab === "cats" && html`<${Categories} d=${d} />`}
@@ -33,6 +34,7 @@ export function Settings() {
 
 // ------------------------------------------------------------------ 個人設定
 function Personal({ d, reload }) {
+  const gs = useGuideState();
   const [name, setName] = useState(d.owner);
   const r = document.documentElement;
   const [, force] = useState(0);
@@ -56,7 +58,8 @@ function Personal({ d, reload }) {
       <${Segmented} value=${META.theme} onChange=${theme} options=${[["light", "淺色", "sun"], ["dark", "深色", "moon"], ["system", "跟隨 Windows 設定", "monitor"]]} /></${Field}>
     <${Field} label="動畫效果" hint="若電腦較舊、覺得畫面不夠流暢，或偏好簡潔畫面，可以關閉。">
       <${Check} checked=${d.animations} onChange=${anim}>開啟動畫效果（畫面轉場、數字滾動、圖表動畫）</${Check}></${Field}>
-    <${Field} label="新功能導覽"><div class="row"><${Btn} icon="insight" onClick=${openTour}>重新觀看導覽</${Btn}><span class="muted small">介紹記一筆、搜尋、復原與外觀設定</span></div></${Field}>
+    <${Field} label="操作導覽" hint="每一頁標題旁、常用視窗右上角都有 ?；也可以按 F1，或在搜尋輸入想做的事。"><div class="row wrap"><${Btn} icon="help" onClick=${openGuides}>開啟操作導覽</${Btn}>
+      <${Check} checked=${!gs.off} onChange=${(v) => setGuideOff(!v)}>第一次到新的頁面時提示我</${Check}></div></${Field}>
     <${Field} label="本位幣" hint="所有報表與資產合計皆以本位幣表示；外幣帳戶依帳戶中設定的匯率換算。">
       <${Select} value=${d.base} onChange=${base} options=${d.currencies} /></${Field}>
   </div></${Card}>`;

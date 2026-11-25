@@ -2,6 +2,8 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, html, toast, ymd } from "../lib/core.js";
 import { Btn, Dialog, Icon, errorBox, info, openModal } from "../lib/ui.js";
+import { startGuide } from "../lib/guide.js";
+import { NEWS_VERSION } from "../guides.js";
 
 // 有新版本、但她選了「稍後再說」：不再跳出視窗，改在側邊欄顯示「有新版本」，按一下再開啟
 let available = null;
@@ -42,13 +44,15 @@ export function startUpdateTimer() {
 export async function showWhatsNew() {
   const wn = await api("whats_new");
   if (!wn) return false;
-  await openModal((close) => html`<${Dialog} title=${`已更新到 ${wn.version} 版`} icon="gift" accent="var(--income)" width="40rem" onClose=${() => close()}
-      footer=${html`<div class="grow"></div><${Btn} kind="primary" icon="check" onClick=${() => close()}>開始使用</${Btn}>`}>
+  const walk = wn.version.split(".").slice(0, 2).join(".") === NEWS_VERSION;
+  const r = await openModal((close) => html`<${Dialog} title=${`已更新到 ${wn.version} 版`} icon="gift" accent="var(--income)" width="40rem" onClose=${() => close()}
+      footer=${html`<div class="grow"></div>${walk && html`<${Btn} icon="help" onClick=${() => close("walk")}>帶我看看新功能</${Btn}>`}<${Btn} kind="primary" icon="check" onClick=${() => close()}>開始使用</${Btn}>`}>
     <div class="wn-head"><div class="wn-badge"><img src="logo.svg" alt="" /></div>
       <div><b>更新完成，您的帳本資料都在</b><span class="muted">更新前已自動備份一份帳本，放在「自動備份」資料夾。</span></div></div>
     <div class="section-title sm">這個版本的新功能</div>
     <${Notes} text=${wn.notes} />
   </${Dialog}>`);
+  if (r === "walk") await startGuide("news");
   return true;
 }
 

@@ -203,7 +203,7 @@ function TradeDialog({ kind, sid0, close }) {
       changed(); toast(`已登錄${l}，分錄已自動產生（Ctrl+Z 可復原）`); close(true);
     } catch (e) { setMsg(e.message); }
   }
-  return html`<${Dialog} title=${label} icon=${icon} accent=${color} width="42rem" guard=${[shares, amount, note]} onClose=${() => close()}
+  return html`<${Dialog} title=${label} icon=${icon} accent=${color} width="42rem" help=${kind === "buy" || kind === "sell" ? "trade" : undefined} guard=${[shares, amount, note]} onClose=${() => close()}
       footer=${html`<div class="grow"></div><${Btn} onClick=${() => close()}>取消</${Btn}><${Btn} kind="primary" icon="check" onClick=${save}>儲存</${Btn}>`}>
     <form class="form" onSubmit=${(e) => { e.preventDefault(); save(); }}>
       <${Field} label="投資標的" hint=${sid ? `目前持股 ${num(st.shares, null, false, 0)}　平均成本 ${num(st.avg_cost, null, false, 2)}　最近評價市價 ${num(st.price, null, false, 2)}` : "請先新增投資標的"}>
@@ -266,7 +266,7 @@ function PriceDialog({ close }) {
       changed(); toast(`已產生 ${n} 檔評價分錄（Ctrl+Z 可復原）`); close(true);
     } catch (e) { setMsg({ bad: true, text: e.message }); }
   }
-  return html`<${Dialog} title="市價評價" icon="refresh" width="56rem" cls="listdlg" guard=${vals} onClose=${() => close()}
+  return html`<${Dialog} title="市價評價" icon="refresh" width="56rem" help="prices" cls="listdlg" guard=${vals} onClose=${() => close()}
       footer=${html`<div class="grow"></div><${Btn} onClick=${() => close()}>取消</${Btn}><${Btn} kind="primary" icon="check" onClick=${save}>產生評價分錄</${Btn}>`}>
     <div class="row wrap" style="margin-bottom:.8rem"><span class="lbl">評價日期</span><${DateInput} value=${date} onChange=${setDate} />
       <div class="grow"></div><${Btn} icon="clip" onClick=${() => pastePrices()} title="從 Excel 複製代號與價格兩欄，一次貼上">貼上價格…</${Btn}>${META.online && html`<${Btn} icon="download" disabled=${busy} onClick=${fetch}>${busy ? "下載中…" : "從網路取得收盤價"}</${Btn}>`}</div>
