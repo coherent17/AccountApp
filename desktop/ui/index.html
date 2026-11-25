@@ -9,6 +9,11 @@
   <script>
     try { const p = JSON.parse(localStorage.getItem("prefs") || "null"); if (p) { document.documentElement.dataset.theme = p[0]; document.documentElement.dataset.scale = p[1]; } } catch (_) {}
     // 畫面程式的錯誤：留給自動測試檢查，並寫進資料夾的「錯誤紀錄.log」
+    // 保險：萬一有程式檔沒載入成功，自動重新載入（最多 3 次），不會停在啟動畫面
+    window.__retry = () => {
+      let n = 3; try { n = +(sessionStorage.getItem("retry") || 0); sessionStorage.setItem("retry", n + 1); } catch (_) {}
+      if (n < 3) setTimeout(() => location.reload(), 400 + n * 600);
+    };
     window.__errors = [];
     const report = (t) => { window.__errors.push(t); try { window.pywebview.api.log_js_error(t); } catch (_) {} };
     window.addEventListener("error", (e) => /ResizeObserver loop/.test(e.message) || report(String(e.message) + " @ " + e.filename + ":" + e.lineno));
@@ -33,6 +38,6 @@
     <div class="bar"><i></i></div>
   </div></div>
   <div id="app"></div>
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js" onerror="window.__retry()"></script>
 </body>
 </html>

@@ -125,6 +125,10 @@ function TxnDialog({ form, opts, close }) {
     setMsg({ text: `已依上次「${v.trim()}」帶入分類與帳戶，可以再修改。` });
   }
 
+  async function copyNew() {
+    try { const p = await api("txn_copy", t.id); close(savedAny); openTxn({ prefill: p }); } catch (e) { setMsg({ bad: true, text: e.message }); }
+  }
+
   // 把目前輸入的內容帶到複式分錄視窗
   function toJournal() {
     const acc = account ? `account:${account}` : "";
@@ -154,7 +158,8 @@ function TxnDialog({ form, opts, close }) {
   const footer = html`
     ${t && html`<${Btn} kind="danger" icon="trash" onClick=${voidIt} disabled=${locked}>作廢這筆</${Btn}>
       <${Btn} kind="link" icon="print" onClick=${() => printVoucher(t.id)}>列印傳票</${Btn}>
-      <${Btn} kind="link" onClick=${() => openAudit(t.id)}>修改紀錄</${Btn}>`}
+      <${Btn} kind="link" onClick=${() => openAudit(t.id)}>修改紀錄</${Btn}>
+      ${!t.system && html`<${Btn} kind="link" icon="copy" onClick=${copyNew} title="以相同內容再記一筆，日期為今天">複製成新的一筆</${Btn}>`}`}
     ${!t && type !== "adjust" && html`<${Btn} kind="link" icon="split" onClick=${toJournal} title="一筆付款分攤到多個分類，或需要自行輸入借貸時使用">改用複式分錄（分割多個科目）</${Btn}>`}
     <div class="grow"></div>
     <${Btn} onClick=${() => close(savedAny)}>取消</${Btn}>

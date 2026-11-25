@@ -1874,9 +1874,9 @@ class Database:
             " FROM v_acc_post WHERE date BETWEEN ? AND ? GROUP BY account_id", (start, end))}
         rows = []
 
-        def row(code, name, group, open_=0.0, dr=0.0, cr=0.0, close=None):
+        def row(code, name, group, open_=0.0, dr=0.0, cr=0.0, close=None, key=None):
             close = open_ + dr - cr if close is None else close
-            rows.append({"code": code, "name": name, "group": group,
+            rows.append({"code": code, "name": name, "group": group, "key": key,
                          "open_debit": money_round(max(open_, 0)), "open_credit": money_round(max(-open_, 0)),
                          "period_debit": money_round(dr), "period_credit": money_round(cr),
                          "debit": money_round(max(close, 0)), "credit": money_round(max(-close, 0))})
@@ -1891,9 +1891,9 @@ class Database:
             if not (o or dr or cr or acc["base_value"]):
                 continue
             row(acodes[acc["id"]], acc["name"], "資產" if acc["kind"] == "asset" else "負債",
-                money_round(o * rate), dr, cr, acc["base_value"])
+                money_round(o * rate), dr, cr, acc["base_value"], key=("account", acc["id"]))
         equity = self.equity_opening(start, end)
-        row("3101", EQUITY_ACCOUNT, "權益", -equity, close=-equity)
+        row(EQUITY_CODE, EQUITY_ACCOUNT, "權益", -equity, close=-equity, key=("equity", EQUITY_CODE))
         cats = {c["id"]: c for c in self._q("SELECT id, name, kind FROM categories")}
         for r in self._q("SELECT category_id, kind, SUM(CASE WHEN base > 0 THEN base ELSE 0 END) AS pos,"
                          " SUM(CASE WHEN base < 0 THEN -base ELSE 0 END) AS neg FROM v_cat_post"
@@ -1903,15 +1903,15 @@ class Database:
             if not (pos or neg):
                 continue
             if r["kind"] == "expense":
-                row(ccodes[c["id"]], c["name"], "費用", 0.0, pos, neg)
+                row(ccodes[c["id"]], c["name"], "費用", 0.0, pos, neg, key=("category", c["id"]))
             else:
-                row(ccodes[c["id"]], c["name"], "收入", 0.0, neg, pos)
+                row(ccodes[c["id"]], c["name"], "收入", 0.0, neg, pos, key=("category", c["id"]))
         for r in self._q("SELECT special, SUM(CASE WHEN gain > 0 THEN gain ELSE 0 END) AS cr,"
                          " SUM(CASE WHEN gain < 0 THEN -gain ELSE 0 END) AS dr FROM v_special_post"
                          " WHERE date BETWEEN ? AND ? GROUP BY special", (start, end)):
             if r["special"] in SPECIALS and (r["dr"] or r["cr"]):
                 code, name, group = SPECIALS[r["special"]]
-                row(code, name, group, 0.0, r["dr"] or 0, r["cr"] or 0)
+                row(code, name, group, 0.0, r["dr"] or 0, r["cr"] or 0, key=("special", r["special"]))
         rows.sort(key=lambda r: r["code"])
         return rows
 
@@ -2137,7 +2137,23 @@ class Database:
                     out.append((rec, d))
         return sorted(out, key=lambda x: x[1])
 
+    def recurring_journal_data(self, lines: list[dict], note: str = "", tags=None) -> dict:
+        """檢查並整理定期分錄的內容（存在 recurring.data）。
+        已有投資標的的科目每次股數與成本都不同，不能當定期分錄（入帳時不會計入持股）。"""
+        items = self._normalize_lines(lines)
+        for x in items:
+            if x["security_id"]:
+                raise ValueError("定期分錄不能連結投資標的（每次的股數、金額不同），請改用「存成範本」。")
+            if x["account_id"] and self._q1("SELECT 1 AS x FROM securities WHERE account_id = ? LIMIT 1", (x["account_id"],)):
+                raise ValueError(f"「{self.get_account(x['account_id'])['name']}」已有投資標的，不能當定期分錄，請改用「存成範本」。")
+        return {"type": "journal", "amount": money_round(sum(x["debit"] for x in items)), "note": (note or "").strip(),
+                "tags": list(self.parse_tags(tags) or []),
+                "lines": [{k: x[k] for k in ("account_id", "category_id", "special", "debit", "credit", "orig", "memo")}
+                          for x in items]}
+
     def post_recurring(self, rec: dict, date: str, amount: float | None = None) -> int:
+        if rec["data"].get("type") == "journal":
+            return self.post_recurring_journal(rec, date)
         data = dict(rec["data"])
         if amount is not None:
             data["amount"] = amount
@@ -2149,6 +2165,21 @@ class Database:
             self._record("", {"kind": "recurring", "rec_id": rec["id"], "last_date": old["last_date"] if old else ""})
         self.conn.execute("UPDATE recurring SET last_date = ? WHERE id = ? AND last_date < ?",
                           (date, rec["id"], date))
+        self.conn.commit()
+        return tid
+
+    def post_recurring_journal(self, rec: dict, date: str, lines: list[dict] | None = None, note: str | None = None,
+                               tags=None, due: str | None = None) -> int:
+        """定期分錄入帳；lines 為入帳前修改過的內容，due 為到期日（實際入帳日可以不同）。復原時一併改回「上次入帳日」。"""
+        d = rec["data"]
+        old = self._q1("SELECT last_date FROM recurring WHERE id = ?", (rec["id"],))
+        with self.undo_group(f"定期交易入帳「{rec['name']}」"):
+            tid = self.add_journal(date, (d.get("note") or rec["name"]) if note is None else note,
+                                   [dict(x) for x in (d["lines"] if lines is None else lines)], log="定期交易入帳",
+                                   tags=d.get("tags") if tags is None else tags)
+            self._record("", {"kind": "recurring", "rec_id": rec["id"], "last_date": old["last_date"] if old else ""})
+        due = due or date
+        self.conn.execute("UPDATE recurring SET last_date = ? WHERE id = ? AND last_date < ?", (due, rec["id"], due))
         self.conn.commit()
         return tid
 

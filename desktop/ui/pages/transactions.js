@@ -105,6 +105,7 @@ export function Transactions({ go }) {
       ...(r.void ? [{ label: "取消作廢（恢復這筆）", icon: "restore", run: () => unvoid(r) }]
         : [{ label: "開啟／編輯", icon: "edit", run: () => openVoucher(r.id) },
            !sys && { label: "複製一筆（日期改為今天）", icon: "copy", run: () => copy(r) },
+           r.type === "journal" && !r.source && { label: "設為定期分錄…", icon: "restore", run: async () => { try { const p = await api("txn_copy", r.id); openRecurringEdit(null, { ...p, note: (p.note || "").replace(/[（(]?\s*(\d{2,4}\s*年)?\s*\d{1,2}\s*月(份)?\s*[)）]?/g, "").trim() || p.note, type: "journal", lines: p.lines, amount: r.amount, date: r.date }); } catch (e) { errorBox(e.message); } } },
            ["income", "expense", "transfer"].includes(r.type) && !r.source && { label: "設為定期交易…", icon: "restore", run: async () => openRecurringEdit(null, await api("txn_copy", r.id).then((p) => ({ ...p, date: r.date }))) },
            "-",
            !sys && { label: "迴轉（產生反向分錄）", icon: "refresh", run: () => reverse(r) },

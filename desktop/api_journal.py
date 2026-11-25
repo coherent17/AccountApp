@@ -58,7 +58,11 @@ class JournalApi:
         secs = [{"id": s["id"], "label": f"{s['code']} {s['name']}".strip(), "account_id": s["account_id"],
                  "archived": bool(s["archived"])} for s in Investments(db).list_securities(include_archived=True)]
         out = {"chart": chart, "securities": secs, "base": db.base_currency, "templates": self._templates(by_key),
-               "tags": [x["name"] for x in db.all_tags()], "notes": db.recent_notes(), "txn": None}
+               "tags": [x["name"] for x in db.all_tags()], "notes": db.recent_notes(), "txn": None,
+               "history": {"last": {}, "frequent": []}}
+        if not t:
+            from core import quick
+            out["history"] = quick.journals(db)
         if t:
             readonly = ""
             if t["void"]:
@@ -82,6 +86,19 @@ class JournalApi:
         return out
 
     @exposed
+    def journal_reuse(self, tid: int) -> dict:
+        """帶入過去的分錄：科目與金額照舊；投資標的只帶標的，股數、單價與該張的金額都留空，避免沿用舊數字。"""
+        p = self.txn_copy_data(tid)
+        if not p.get("lines"):
+            raise ValueError("這張傳票不是複式分錄")
+        invest = any(ln.get("security_id") for ln in p["lines"])
+        for ln in p["lines"]:
+            ln["want"] = "debit" if ln["debit"] else "credit"
+            if invest:
+                ln.update({"debit": None, "credit": None, "shares": None, "price": None, "orig": None})
+        return {"lines": p["lines"], "note": p["note"], "tags": p["tags"], "voucher": voucher_no(tid), "invest": invest}
+
+    @exposed
     def sec_info(self, sid: int) -> dict:
         inv = Investments(self._db)
         st = inv.replay(sid)
@@ -89,12 +106,10 @@ class JournalApi:
         return {"label": f"{s['code']} {s['name']}".strip(), "currency": s["currency"], "shares": st["shares"],
                 "avg_cost": st["avg_cost"], "cost": st["cost"]}
 
-    @exposed
-    def journal_save(self, d: dict, tid: int | None = None, confirmed: bool = False) -> dict:
-        db = self._db
-        inv = Investments(db)
+    def _parse_lines(self, rows: list[dict]) -> list[dict]:
+        """畫面的分錄行轉為帳務的分錄行（複式分錄、定期分錄共用）。"""
         lines = []
-        for i, ln in enumerate(d["lines"], 1):
+        for i, ln in enumerate(rows, 1):
             dr, cr = ln.get("debit") or 0, ln.get("credit") or 0
             if not ln.get("key") and not dr and not cr:
                 continue
@@ -113,13 +128,27 @@ class JournalApi:
                 if item["shares"] <= 0:
                     raise ValueError(f"第 {i} 行已選擇投資標的，請輸入股數")
             lines.append(item)
+        return lines
+
+    @exposed
+    def journal_save(self, d: dict, tid: int | None = None, confirmed: bool = False) -> dict:
+        """d["recurring"] = {rec_id, date}：定期分錄修改後入帳，一併記下「上次入帳日」。"""
+        db = self._db
+        inv = Investments(db)
+        lines = self._parse_lines(d["lines"])
         if not confirmed:   # 投資科目已有標的、但這一行沒有連結標的：金額不會計入持股
             loose = [db.get_account(x["account_id"])["name"] for x in lines
                      if x.get("account_id") and not x.get("security_id") and inv.list_securities(x["account_id"])]
             if loose:
                 return {"need_confirm": list(dict.fromkeys(loose))}
         tags = d.get("tags") or []
-        if tid:
+        rec = d.get("recurring")
+        if rec and not tid:
+            r = next((x for x in db.list_recurring() if x["id"] == rec["rec_id"]), None)
+            if not r:
+                raise ValueError("找不到這筆定期交易，可能已被刪除")
+            tid = db.post_recurring_journal(r, d["date"], lines, d.get("note") or "", tags, due=rec["date"])
+        elif tid:
             db.update_journal(tid, d["date"], d.get("note") or "", lines, tags=tags)
         else:
             tid = db.add_journal(d["date"], d.get("note") or "", lines, tags=tags)

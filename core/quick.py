@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import re
 
 from .database import Database
 
@@ -47,3 +48,25 @@ def note_hints(db: Database, days: int = 365, today: _dt.date | None = None) -> 
         if r["note"] not in hints:
             hints[r["note"]] = {"type": r["type"], "category_id": r["category_id"], "account_id": r["account_id"]}
     return hints
+
+
+def note_key(note: str) -> str:
+    """摘要去掉日期、月份等數字後的關鍵字：「房貸繳款 10 月」與「房貸繳款 11 月」視為同一種。"""
+    return re.sub(r"[\d０-９/\-.,年月日號第期()（）\s]+", "", note or "")
+
+
+def journals(db: Database, days: int = 730, n: int = 5, today: _dt.date | None = None) -> dict:
+    """複式分錄的建議。frequent：最常用的分錄（同一種摘要至少 2 次）；last：每種摘要最近一張傳票。只看自己輸入、未作廢的。"""
+    since = ((today or _dt.date.today()) - _dt.timedelta(days=days)).isoformat()
+    last: dict[str, dict] = {}
+    for r in db._q("SELECT id, date, note, amount FROM transactions WHERE void = 0 AND source = '' AND type = 'journal'"
+                   " AND TRIM(note) <> '' AND date >= ? ORDER BY date DESC, id DESC", (since,)):
+        k = note_key(r["note"])
+        if not k or k.startswith("迴轉"):
+            continue
+        if k in last:
+            last[k]["count"] += 1
+        else:
+            last[k] = {"id": r["id"], "date": r["date"], "note": r["note"].strip(), "amount": r["amount"], "key": k, "count": 1}
+    freq = sorted((x for x in last.values() if x["count"] >= 2), key=lambda x: (x["count"], x["date"]), reverse=True)
+    return {"last": last, "frequent": freq[:n]}

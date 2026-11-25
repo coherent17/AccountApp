@@ -5,7 +5,8 @@ import { PALETTE, axis, chartBase, shortMoney, useChart, valueAxis } from "../li
 import { AmountInput, Btn, Check, DateInput, Dialog, Field, Icon, Segmented, Select, TextInput, ask, errorBox, openModal } from "../lib/ui.js";
 import { openDue, openReconcile } from "./more.js";
 import { openPrices } from "./invest.js";
-import { openPreview } from "./print.js";
+import { openAnnual, openPreview } from "./print.js";
+import { openYearClose } from "./chart.js";
 
 const KIND_ICON = { insurance: "heart", card: "card", tax: "dollar", dividend: "coins", other: "bell",
                     maturity: "bank", recurring: "restore" };
@@ -207,6 +208,43 @@ function MonthClose({ ym0, close }) {
         <small>${st.key !== "budget" && st.manual ? "已完成" : st.detail}</small>
         ${actions[st.key](st)}</div>
       ${!st.auto && html`<button class="link mtoggle" onClick=${() => mark(st.key, !st.manual)}>${st.manual ? "取消完成" : st.key === "budget" ? "已檢視" : "標記完成"}</button>`}
+    </div>`)}</div>
+  </${Dialog}>`;
+}
+
+// ------------------------------------------------------------------ 年度結帳小幫手
+export const openYearAssist = (year = null) => openModal((close) => html`<${YearAssist} y0=${year} close=${close} />`);
+function YearAssist({ y0, close }) {
+  const [year, setYear] = useState(y0);
+  const [s, setS] = useState(null);
+  const load = (y = year) => api("year_assist", y).then(setS).catch((e) => errorBox(e.message));
+  useEffect(() => { load(year); }, [year]);
+  if (!s) return html`<${Dialog} title="年度結帳小幫手" icon="lock" width="54rem" onClose=${() => close()}><div class="muted">讀取中…</div></${Dialog}>`;
+  const mark = async (key, on = true) => { await api("year_assist_check", s.year, key, on); load(s.year); };
+  const after = async (p) => { const r = await p; changed(); load(s.year); return r; };
+  const acts = {
+    recurring: (st) => st.due_now > 0 && html`<${Btn} kind="primary" onClick=${() => after(openDue())}>確認入帳</${Btn}>`,
+    reconcile: (st) => html`<div class="mc-accts">${st.accounts.map((a) => html`<button class=${"pillbtn" + (a.ok ? " on" : "")}
+        title=${a.last ? `上次對帳單日期 ${ymd(a.last)}` : "還沒有對過帳"} onClick=${() => after(openReconcile(a.id))}>${a.ok ? "✓ " : ""}${a.name}</button>`)}</div>`,
+    valuation: (st) => !st.ok && html`<${Btn} onClick=${() => after(openPrices())}>市價評價</${Btn}>`,
+    health: () => html`<${Btn} onClick=${async () => { if (await openHealth()) mark("health"); }}>開始檢查</${Btn}>`,
+    report: () => html`<${Btn} icon="print" onClick=${async () => { if (await openAnnual(s.years.includes(s.year) ? [s.year, ...s.years.filter((y) => y !== s.year)] : s.years, s.year)) mark("report"); }}>年度財務報告</${Btn}>`,
+    close: (st) => st.can_close && html`<${Btn} kind="primary" icon="lock" onClick=${async () => {
+      const left = s.steps.filter((x) => !x.ok && x.key !== "close").map((x) => x.title);
+      if (left.length && !(await ask(`還有 ${left.length} 個步驟沒有完成：\n${left.join("\n")}\n\n仍要繼續結帳嗎？（結帳前會自動備份，之後也可以到「設定」解除結帳）`, { yes: "繼續" }))) return;
+      after(openYearClose(s.year)); }}>年度結帳…</${Btn}>`,
+  };
+  return html`<${Dialog} title="年度結帳小幫手" icon="lock" width="54rem" cls="listdlg" onClose=${() => close()}
+      footer=${html`<span class="hint">進度會記住，可以分幾天完成。結帳前會自動備份帳本。</span><div class="grow"></div><${Btn} kind="primary" onClick=${() => close()}>${s.closed ? "完成" : "先到這裡"}</${Btn}>`}>
+    <div class="mc-head">
+      <div class="mc-ring" style=${`--p:${Math.round((s.done / s.total) * 100)}`}><b>${s.done}<small>/${s.total}</small></b></div>
+      <div class="grow"><h2>${s.closed ? `${s.year} 年的帳已經結好了！` : `${s.year} 年度結帳`}</h2><p class="muted">${s.closed ? "報表金額不受結帳影響；需要更正時可到「設定」解除結帳。" : "一步一步把一整年的帳收好；能自動確認的步驟會自己打勾。"}</p></div>
+      <${Select} value=${s.year} onChange=${setYear} options=${s.years.map((y) => [y, `${y} 年`])} />
+    </div>
+    <div class="tablewrap mc-steps">${s.steps.map((st, i) => html`<div class=${"mstep" + (st.ok ? " ok" : "")}>
+      <span class="mnum">${st.ok ? html`<${Icon} name="check" />` : i + 1}</span>
+      <div class="mtxt"><b>${st.title}${st.auto ? html`<span class="auto">自動確認</span>` : null}</b><small>${st.manual ? "已完成" : st.detail}</small>${acts[st.key](st)}</div>
+      ${st.can_mark && !st.auto && html`<button class="link mtoggle" onClick=${() => mark(st.key, !st.manual)}>${st.manual ? "取消完成" : "標記完成"}</button>`}
     </div>`)}</div>
   </${Dialog}>`;
 }

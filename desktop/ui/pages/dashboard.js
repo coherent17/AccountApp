@@ -5,7 +5,7 @@ import { CountUp, PALETTE, axis, barFill, chartBase, useChart, valueAxis } from 
 import { openTxn, openVoucher } from "../dialogs/txn.js";
 import { openDue } from "../dialogs/more.js";
 import { catEmoji } from "../lib/caticon.js";
-import { EventRow, openForecast, openHealth, openMonthClose, openReminders } from "../dialogs/tools.js";
+import { EventRow, openForecast, openHealth, openMonthClose, openReminders, openYearAssist } from "../dialogs/tools.js";
 import { Btn, ask, errorBox } from "../lib/ui.js";
 import { changed } from "../lib/core.js";
 
@@ -252,8 +252,8 @@ function DashboardView({ d, prefsKey, go }) {
         ? html`<div class=${"ritem" + (x.event.days_left <= 3 ? " urgent" : "")}><span class="badge-ic"><${Icon} name=${x.event.kind === "maturity" ? "bank" : "calendar"} /></span>
                  <div class="txt"><b>${x.event.title}：${ymd(x.event.date)}（${x.event.when}）</b>
                  <small>${x.event.amount ? `金額 ${money(x.event.amount, x.event.currency)}　` : ""}${x.event.sub}</small></div></div>`
-        : html`<div class="ritem"><span class="badge-ic"><${Icon} name=${{ due: "bell", backup: "save", monthclose: "check" }[x.kind]} /></span><div class="txt"><b>${x.text}</b></div>
-                 <button class="btn primary" onClick=${() => (x.kind === "due" ? openDue() : x.kind === "monthclose" ? openMonthClose(x.ym) : backupNow())}>${x.action}</button></div>`)}
+        : html`<div class="ritem"><span class="badge-ic"><${Icon} name=${{ due: "bell", backup: "save", monthclose: "check", yearclose: "lock" }[x.kind]} /></span><div class="txt"><b>${x.text}</b></div>
+                 <button class="btn primary" onClick=${() => (x.kind === "due" ? openDue() : x.kind === "monthclose" ? openMonthClose(x.ym) : x.kind === "yearclose" ? openYearAssist(x.year) : backupNow())}>${x.action}</button></div>`)}
     </div>`}
 
     <div class="card cal rise" style="animation-delay:320ms">

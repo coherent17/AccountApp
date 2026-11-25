@@ -155,6 +155,8 @@ def _search_recurring(db, toks) -> list[dict]:
         d = r["data"] if isinstance(r["data"], dict) else json.loads(r["data"])
         names = [accs.get(d.get("account_id"), ""), accs.get(d.get("to_account_id"), ""),
                  cats.get(d.get("category_id"), "")]
+        for ln in d.get("lines") or []:          # 定期分錄
+            names.append(accs.get(ln.get("account_id")) or cats.get(ln.get("category_id")) or "")
         hay = " ".join([r["name"], d.get("note", "") or "", *names]).lower()
         nums = [d.get("amount") or 0]
         if all(_text_match(t, hay, numbers=nums) for t in toks):

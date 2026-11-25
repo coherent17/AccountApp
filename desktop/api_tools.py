@@ -8,7 +8,7 @@ import json
 import os
 import tempfile
 
-from core import bankmatch, forecast, health, monthclose, reminders
+from core import bankmatch, forecast, health, monthclose, reminders, yearclose
 from core.database import month_keys
 
 from desktop.rpc import exposed
@@ -194,6 +194,15 @@ class ToolsApi:
         if ym:
             monthclose.mark_prompted(self._db, ym)
         return ym
+
+    # ------------------------------------------------------------------ 年度結帳小幫手
+    @exposed
+    def year_assist(self, year: int | None = None) -> dict:
+        return yearclose.status(self._db, int(year) if year else yearclose.default_year())
+
+    @exposed
+    def year_assist_check(self, year: int, key: str, on: bool = True) -> None:
+        yearclose.check(self._db, int(year), key, on)
 
     # ------------------------------------------------------------------ 健康檢查與月報
     @exposed

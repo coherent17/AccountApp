@@ -28,7 +28,10 @@ def one(exe: str, out: str, name: str, src: str | None) -> tuple[str, bool, str]
     try:
         subprocess.run([exe], env=env, timeout=180, check=False)
     except subprocess.TimeoutExpired:
-        return name, False, "逾時"
+        return name, False, "逾時（視窗沒有關閉）"
+    err = os.path.join(shots, "driver_error.txt")
+    if os.path.exists(err):
+        return name, False, "測試程式出錯：" + open(err, encoding="utf-8").read().strip().splitlines()[-1][:200]
     n = len([f for f in os.listdir(shots) if f.startswith("exe_")]) if os.path.isdir(shots) else 0
     problems = []
     if n != 6:

@@ -56,6 +56,11 @@ class DashboardApi:
             reminders.append({"kind": "monthclose", "ym": ym,
                               "text": f"{monthclose.label(ym)}的月結還沒完成：對帳、評價、檢視預算，一步一步帶您完成。",
                               "action": "開始月結"})
+        from core import yearclose
+        yc = yearclose.reminder(db, today)
+        if yc:
+            reminders.append({"kind": "yearclose", "year": yc, "action": "開啟年度結帳小幫手",
+                              "text": f"{yc} 年的帳還沒有結：對帳、年底評價、年度財務報告，一步一步帶您完成。"})
         recent = []
         for t in db.query_transactions(limit=8):
             signed = -t["amount"] if t["type"] == "expense" else t["amount"]

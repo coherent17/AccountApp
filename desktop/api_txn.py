@@ -197,8 +197,13 @@ class TxnApi:
 
     @exposed
     def txn_copy(self, tid: int) -> dict:
-        """複製一筆：傳回可帶入記一筆視窗的內容（日期改為今天）。"""
+        """複製一筆：傳回可帶入記一筆／複式分錄視窗的內容（日期改為今天）。"""
+        return self.txn_copy_data(tid)
+
+    def txn_copy_data(self, tid: int) -> dict:
         t = self._db.get_transaction(tid)
+        if not t:
+            raise ValueError(f"找不到 {voucher_no(tid)}")
         if t["source"].startswith(("inv:", "close:")):
             raise ValueError("系統自動產生的傳票（投資分錄、年度結帳分錄）不能複製。")
         out = {k: t[k] for k in ("type", "account_id", "to_account_id", "amount", "to_amount", "category_id", "note")}
@@ -208,7 +213,8 @@ class TxnApi:
             out["lines"] = [{"key": f"account:{ln['account_id']}" if ln["account_id"] else
                              f"category:{ln['category_id']}" if ln["category_id"] else f"special:{ln['special']}",
                              "debit": ln["debit"] or None, "credit": ln["credit"] or None, "memo": ln["memo"],
-                             "orig": ln["orig"]} for ln in self._db.get_lines(tid)]
+                             "orig": ln["orig"], "security_id": ln["security_id"], "shares": ln["shares"] or None,
+                             "price": ln["price"] or None} for ln in self._db.get_lines(tid)]
         return out
 
     # ------------------------------------------------------------------ 標籤

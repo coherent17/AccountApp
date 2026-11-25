@@ -3,11 +3,16 @@
 
 from __future__ import annotations
 
+import os
+import re
+
 from core import statements as st
-from core.database import month_keys
+from core.database import EQUITY_CODE, SPECIALS, month_keys
 
 from desktop.rpc import exposed
 
+# 權益變動表的列 → 分類帳科目
+EQUITY_KEYS = {"期初淨值": f"equity:{EQUITY_CODE}", **{v[1]: f"special:{k}" for k, v in SPECIALS.items()}}
 SETTING_KEYS = {"report_compare_bs", "report_compare_is", "print_compare", "annual_sections"}
 
 
@@ -49,7 +54,7 @@ class ReportsApi:
             bad = liab and not r["name"].startswith(("淨資產", "負債及淨值"))
             rows.append({"name": r["name"], "level": r["level"], "style": r["style"], "cur": r["cur"],
                          "prev": r["prev"], "orig": r["orig"], "currency": r["currency"], "share": r["share"],
-                         "change": d, "change_pct": dp, "good": None if not d else (d > 0) != bad,
+                         "key": r.get("key"), "change": d, "change_pct": dp, "good": None if not d else (d > 0) != bad,
                          "net": r["name"].startswith("淨資產")})
         crange = st.compare_range(mode, start, end)
         ratios = [{"name": x["name"], "help": x["help"], "cur": st.fmt_ratio(x["cur"], x["kind"], x["note"]),
@@ -59,7 +64,7 @@ class ReportsApi:
         eq = db.equity_statement(start, end)
         closed = db.year_closings()
         return {"cdate": cdate, "rows": rows, "has_orig": any(r["orig"] is not None for r in rows), "ratios": ratios,
-                "equity": [{"name": n, "value": v} for n, v in eq["rows"]], "equity_closing": eq["closing"],
+                "equity": [{"name": n, "value": v, "key": EQUITY_KEYS.get(n)} for n, v in eq["rows"]], "equity_closing": eq["closing"],
                 "closed_years": [y for y in range(int(start[:4]), int(end[:4]) + 1) if y in closed]}
 
     # ------------------------------------------------------------------ 收支損益表
@@ -70,7 +75,7 @@ class ReportsApi:
         rows = []
         for r in data["rows"]:
             d, dp = st.change(r["cur"], r["prev"]) if r["cur"] is not None else (None, None)
-            rows.append({**{k: r[k] for k in ("name", "level", "style", "cur", "prev", "count", "kind", "share", "code")},
+            rows.append({**{k: r.get(k) for k in ("name", "level", "style", "cur", "prev", "count", "kind", "share", "code", "key")},
                          "change": d, "change_pct": dp,
                          "good": None if not d else (d > 0) != (r["kind"] == "expense")})
         return {"crange": crange, "rows": rows}
@@ -144,7 +149,33 @@ class ReportsApi:
 
     @exposed
     def report_tb(self, start: str, end: str) -> list[dict]:
-        return self._db.trial_balance(start, end)
+        return [{**r, "key": f"{r['key'][0]}:{r['key'][1]}"} for r in self._db.trial_balance(start, end)]
+
+    # ------------------------------------------------------------------ 單一科目的分類帳：列印、匯出
+    @exposed
+    def ledger_html(self, key: str, start: str, end: str) -> str:
+        from core.printing import Report
+        kind, sid = key.split(":", 1)
+        return Report(self._db).build_ledger((kind, sid), start, end)
+
+    @exposed
+    def ledger_export_name(self, key: str, start: str, end: str) -> str:
+        kind, sid = key.split(":", 1)
+        lg = self._db.subject_ledger((kind, sid), start, end)
+        safe = re.sub(r'[\\/:*?"<>|\s]+', "_", f"{lg['code']}_{lg['name']}")
+        return os.path.join(self._folder, "匯出報表", f"分類帳_{safe}_{start.replace('-', '')}-{end.replace('-', '')}.xlsx")
+
+    @exposed
+    def ledger_export(self, key: str, start: str, end: str, path: str) -> str:
+        from core.exporter import export_ledger
+        kind, sid = key.split(":", 1)
+        if not path:
+            raise ValueError("請選擇存檔位置")
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            return export_ledger(self._db, path, (kind, sid), start, end)
+        except PermissionError:
+            raise ValueError("無法寫入檔案，可能檔案正在 Excel 中開啟。請先關閉該檔案後再試一次。") from None
 
     # ------------------------------------------------------------------ 列印（Edge 列印／另存 PDF）
     @exposed

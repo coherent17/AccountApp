@@ -53,6 +53,9 @@ def forecast(db: Database, months: int = 6, today: _dt.date | None = None) -> di
                 move(day, rec["name"], d.get("account_id"), amt, "recurring")
             elif d["type"] == "expense":
                 move(day, rec["name"], d.get("account_id"), -amt, "recurring")
+            elif d["type"] == "journal":       # 定期分錄：每個帳戶行的原幣增減（借方為增）
+                for ln in d.get("lines") or []:
+                    move(day, rec["name"], ln.get("account_id"), ln.get("orig") or 0.0, "recurring")
             elif d["type"] == "transfer":
                 src, dst = accs.get(d.get("account_id")), accs.get(d.get("to_account_id"))
                 move(day, rec["name"], d.get("account_id"), -amt, "recurring")
