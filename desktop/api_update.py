@@ -136,3 +136,38 @@ class UpdateApi:
     @exposed
     def tour_done(self) -> None:
         self._db.set_setting("v3_tour_done", "1")
+
+    # ------------------------------------------------------------------ 操作導覽：看過哪些（設定 guides，只影響提示，不是帳務資料）
+    def _guides(self) -> dict:
+        g = self._db.get_json("guides", {})
+        g = g if isinstance(g, dict) else {}
+        seen, offered = g.get("seen"), g.get("offered")
+        return {"seen": seen if isinstance(seen, dict) else {}, "offered": offered if isinstance(offered, list) else [], "off": bool(g.get("off"))}
+
+    @exposed
+    def guide_state(self) -> dict:
+        return self._guides()
+
+    @exposed
+    def guide_mark(self, gid: str, what: str) -> dict:
+        """what：seen（看完）、offered（提示過或中途結束，不再主動提示）。"""
+        g = self._guides()
+        gid = str(gid)[:40]
+        if what == "seen":
+            g["seen"][gid] = dt.date.today().isoformat()
+        if gid not in g["offered"]:
+            g["offered"].append(gid)
+        self._db.set_json("guides", g)
+        return g
+
+    @exposed
+    def guide_off(self, off: bool) -> dict:
+        g = self._guides()
+        g["off"] = bool(off)
+        self._db.set_json("guides", g)
+        return g
+
+    @exposed
+    def guide_reset(self) -> dict:
+        self._db.set_json("guides", {"seen": {}, "offered": [], "off": False})
+        return self._guides()

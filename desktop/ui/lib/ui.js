@@ -54,7 +54,7 @@ export function ModalHost() {
   modalSet = setList;
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key !== "Escape" || !stack.length) return;
+      if (e.key !== "Escape" || !stack.length || window.__guideOpen) return;
       if (document.querySelector(".menu")) return;                                  // 右鍵選單自己會關
       e.preventDefault(); e.stopPropagation();
       if (document.querySelector(".pop")) { document.activeElement && document.activeElement.blur(); return; }   // 先收起下拉清單，不關對話框
@@ -70,9 +70,30 @@ export function ModalHost() {
     <${ModalCtx.Provider} value=${m}>${m.render(m.close, m)}</${ModalCtx.Provider}></div>`);
 }
 
+// 目前開著的對話框各自的導覽（由下而上；沒有導覽的是 null）：F1 與操作導覽用
+window.__helpStack = [];
+function useHelpStack(help) {
+  const entry = useRef({ help }).current;
+  useEffect(() => {
+    helpEntries.push(entry);
+    return () => { helpEntries.splice(helpEntries.indexOf(entry), 1); syncHelp(); };
+  }, []);
+  useEffect(() => { entry.help = help; syncHelp(); }, [help]);       // 「讀取中」的視窗換成真正的內容時，導覽也跟著換
+}
+const helpEntries = [];
+const syncHelp = () => { window.__helpStack = helpEntries.map((e) => e.help || null); };
+
+/** 「?」：開始這一頁或這個視窗的操作導覽。還沒看過的視窗，第一次開啟時有一個小圓點。 */
+export function HelpBtn({ id, title = "這一頁怎麼用（F1）" }) {
+  const [dot] = useState(() => !!(window.__guideUnseen && window.__guideUnseen(id)));
+  useEffect(() => { if (dot && window.__guideMark) window.__guideMark(id, "offered"); }, []);
+  return html`<button type="button" class=${"helpbtn" + (dot ? " fresh" : "")} title=${title} onClick=${() => window.__help(id)}><${Icon} name="help" /></button>`;
+}
+
 /** 對話框外框：標題列、內容、按鈕列。guard：表單目前的內容（任何可轉成 JSON 的值），使用者改過就算「尚未儲存」。 */
-export function Dialog({ title, icon, accent, width = "38rem", onClose, children, footer, cls = "", guard }) {
+export function Dialog({ title, icon, accent, width = "38rem", onClose, children, footer, cls = "", guard, help }) {
   const ref = useRef(null);
+  useHelpStack(help);
   const m = useContext(ModalCtx);
   const g = useRef({ first: null, touched: false });
   const now = guard === undefined ? null : JSON.stringify(guard);
@@ -85,7 +106,7 @@ export function Dialog({ title, icon, accent, width = "38rem", onClose, children
   }, []);
   return html`<div class=${"dialog " + cls} ref=${ref} style=${`width:min(${width}, calc(100vw - 3rem))`} role="dialog">
     <div class="dhead">${icon && html`<span class="badge-ic" style=${accent ? `background:color-mix(in srgb, ${accent} 14%, transparent);color:${accent}` : ""}><${Icon} name=${icon} /></span>`}
-      <h2>${title}</h2><button class="x" onClick=${async () => { if (!m || await m.canClose()) onClose(); }} title="關閉（Esc）"><${Icon} name="close" /></button></div>
+      <h2>${title}</h2>${help && html`<${HelpBtn} id=${help} title="這個視窗怎麼用（F1）" />`}<button class="x" onClick=${async () => { if (!m || await m.canClose()) onClose(); }} title="關閉（Esc）"><${Icon} name="close" /></button></div>
     <div class="dbody" onInput=${touch} onKeyDownCapture=${touch} onMouseDownCapture=${touch}>${children}</div>
     ${footer && html`<div class="dfoot">${footer}</div>`}
   </div>`;
@@ -358,9 +379,9 @@ export const Card = ({ title, icon, extra, children, cls = "", style }) =>
   html`<div class=${"card " + cls} style=${style}>${title && html`<h3>${icon && html`<${Icon} name=${icon} />`}${title}${extra && html`<div class="extra">${extra}</div>`}</h3>`}${children}</div>`;
 
 /** 頁首：彩色圖示方塊＋標題＋說明，右側是這一頁的動作按鈕。 */
-export const PageHead = ({ title, sub, icon, color = "var(--primary)", children }) =>
+export const PageHead = ({ title, sub, icon, color = "var(--primary)", help, children }) =>
   html`<div class="head"><div class="ph">${icon && html`<div class="ph-ic" style=${`--c:${color}`}><${Icon} name=${icon} /></div>`}
-    <div><h1>${title}</h1>${sub && html`<div class="sub">${sub}</div>`}</div></div><div class="actions">${children}</div></div>`;
+    <div><h1>${title}${help && html`<button type="button" class="helpbtn" title="這一頁怎麼用（F1）" onClick=${() => window.__help(help)}><${Icon} name="help" /></button>`}</h1>${sub && html`<div class="sub">${sub}</div>`}</div></div><div class="actions">${children}</div></div>`;
 
 /** 頁尾的小提示：柔和的說明框（取代一大段灰色小字）。 */
 export const Tip = ({ children }) => html`<div class="tip"><span class="tip-ic"><${Icon} name="info" /></span><div>${children}</div></div>`;

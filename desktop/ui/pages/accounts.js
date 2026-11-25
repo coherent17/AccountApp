@@ -69,7 +69,7 @@ export function Accounts({ go }) {
   </${Card}>`;
 
   return html`
-    <${PageHead} icon="wallet" color="var(--income)" title="帳戶管理" sub="資產與負債科目：銀行、現金、投資、信用卡、貸款等">
+    <${PageHead} icon="wallet" color="var(--income)" title="帳戶管理" help="accounts" sub="資產與負債科目：銀行、現金、投資、信用卡、貸款等">
       <${Btn} icon="list" big onClick=${openChart} title="檢視全部會計科目、新增科目（含自訂代號）">會計科目表</${Btn}>
       <${MenuButton} label="更多功能" items=${[{ label: "銀行對帳（與存摺逐筆核對）", icon: "check", run: () => openReconcile(current ? current.id : null) },
                                             { label: "更新匯率", icon: "refresh", run: openRates },

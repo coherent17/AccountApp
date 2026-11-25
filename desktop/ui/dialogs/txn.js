@@ -167,7 +167,7 @@ function TxnDialog({ form, opts, close, modal }) {
     ${!t && html`<${Btn} onClick=${() => save(true)} disabled=${busy}>儲存並再記一筆</${Btn}>`}
     <${Btn} kind="primary" icon="check" onClick=${() => save(false)} disabled=${busy || locked}>儲存</${Btn}>`;
 
-  return html`<${Dialog} title=${title} icon=${ICON[type]} accent=${ACCENT[type]} width="44rem" onClose=${() => close(savedAny)} footer=${footer}
+  return html`<${Dialog} title=${title} icon=${ICON[type]} accent=${ACCENT[type]} width="44rem" help="txn" onClose=${() => close(savedAny)} footer=${footer}
       guard=${locked ? undefined : editing ? [type, date, amount, account, toAccount, toAmount, category, note, tags] : [amount, toAmount, note, tags, pending]}>
     <form class="form" onSubmit=${(e) => { e.preventDefault(); save(false); }}>
       ${!editing && !opts.prefill && type !== "adjust" && form.quick && form.quick.length > 0 && html`<div class="quick">

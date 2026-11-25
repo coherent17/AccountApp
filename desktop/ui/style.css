@@ -1404,3 +1404,48 @@ tr.jump td { background: var(--gold-soft); }
 @media (max-width: 900px) { .hero2 .hero-chart { display: none; } .kgrid > .hero2 { grid-template-columns: 1fr auto; gap: .8rem; } .head h1 { white-space: nowrap; } .grid.kpis { grid-template-columns: 1fr 1fr; } .kpis .hero { grid-column: 1 / -1; } }
 @media (max-width: 1100px) { [data-scale="xlarge"] .hero2 .hero-chart { display: none; } [data-scale="xlarge"] .kgrid > .hero2 { grid-template-columns: 1fr auto; } }
 @media (max-width: 640px) { .kgrid > .hero2 { grid-template-columns: 1fr; } }
+
+/* ---------- 3.10 操作導覽 ---------- */
+.helpbtn { border: 0; background: none; color: var(--text-3); cursor: pointer; padding: .2rem; border-radius: 50%; display: inline-grid; place-items: center; position: relative; flex: none; }
+.helpbtn .ic { width: 1.25rem; height: 1.25rem; }
+.helpbtn:hover { color: var(--primary); background: var(--primary-soft); }
+.helpbtn.fresh::after { content: ""; position: absolute; top: .1rem; right: .1rem; width: .5rem; height: .5rem; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 2px var(--surface); }
+html.animate .helpbtn.fresh::after { animation: g-pulse 1.8s ease-out 4; }
+@keyframes g-pulse { 0% { box-shadow: 0 0 0 2px var(--surface), 0 0 0 2px color-mix(in srgb, var(--primary) 60%, transparent); } 100% { box-shadow: 0 0 0 2px var(--surface), 0 0 0 .7rem transparent; } }
+.head h1 .helpbtn { margin-left: .35rem; vertical-align: .05em; }
+.dhead .helpbtn { margin-right: -.2rem; } .dhead .helpbtn .ic { width: 1.3rem; height: 1.3rem; }
+
+.guide { position: fixed; inset: 0; z-index: 400; cursor: default; }
+.g-dim { position: absolute; inset: 0; background: rgba(12, 16, 38, .62); }
+.g-hole { position: absolute; border-radius: 16px; box-shadow: 0 0 0 200vmax rgba(12, 16, 38, .62), 0 0 0 2px #fff, 0 0 0 5px color-mix(in srgb, var(--primary) 80%, transparent), 0 0 28px 6px color-mix(in srgb, var(--primary-2) 55%, transparent); pointer-events: none; }
+.guide { overflow: hidden; }
+.g-card { position: absolute; width: min(23rem, calc(100vw - 20px)); max-height: calc(100vh - 20px); overflow: visible; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow-lg); padding: .9rem 1.1rem .8rem; }
+html.animate .g-hole { transition: left .32s cubic-bezier(.2, .8, .2, 1), top .32s cubic-bezier(.2, .8, .2, 1), width .32s cubic-bezier(.2, .8, .2, 1), height .32s cubic-bezier(.2, .8, .2, 1); }
+html.animate .g-card { transition: left .32s cubic-bezier(.2, .8, .2, 1), top .32s cubic-bezier(.2, .8, .2, 1); animation: rise .35s cubic-bezier(.2, .8, .2, 1) both; }
+.g-caret { position: absolute; width: 14px; height: 14px; background: var(--surface); border: 1px solid var(--line); transform: rotate(45deg); }
+.g-card.below .g-caret { top: -8px; border-right: 0; border-bottom: 0; } .g-card.above .g-caret { bottom: -8px; border-left: 0; border-top: 0; }
+.g-card.right .g-caret { left: -8px; border-right: 0; border-top: 0; } .g-card.left .g-caret { right: -8px; border-left: 0; border-bottom: 0; }
+.g-top { display: flex; align-items: center; gap: .55rem; color: var(--text-3); } .g-top .badge-ic { width: 1.8rem; height: 1.8rem; border-radius: .6rem; background: var(--primary-soft); color: var(--primary); } .g-top .grow { flex: 1; }
+.g-card h3 { margin: .5rem 0 .2rem; font-size: 1.15rem; font-weight: 800; }
+.g-card p { margin: 0; line-height: 1.65; color: var(--text-2); } .g-card p b { color: var(--text); }
+.g-card kbd, .g-again kbd { font: .85em var(--num-font); border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: .35rem; padding: 0 .35rem; background: var(--surface-2); color: var(--text); white-space: nowrap; }
+.g-again { display: flex; align-items: center; flex-wrap: wrap; gap: .3rem; margin-top: .5rem !important; font-size: .86rem; color: var(--text-3) !important; }
+.g-bar { height: 4px; border-radius: 99px; background: var(--surface-3); margin: .7rem 0 .6rem; overflow: hidden; } .g-bar i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--primary), var(--primary-2)); transition: width .3s; }
+.g-foot { display: flex; align-items: center; gap: .5rem; } .g-foot .grow { flex: 1; } .g-foot .link { color: var(--text-3); padding-left: 0; }
+
+.nudge-card { position: fixed; right: 1.2rem; bottom: 1.2rem; z-index: 40; width: min(25rem, calc(100vw - 2rem)); display: flex; gap: .8rem; padding: .9rem 1rem; background: var(--surface); border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--line)); border-radius: 18px; box-shadow: var(--shadow-lg); }
+html.animate .nudge-card { animation: rise .4s cubic-bezier(.2, .8, .2, 1) both; }
+.nudge-card .badge-ic { background: var(--primary-soft); color: var(--primary); flex: none; } .nudge-card b { display: block; } .nudge-card small { display: block; color: var(--text-2); margin: .15rem 0 .55rem; line-height: 1.5; }
+.nudge-card .row { gap: .4rem; } .nudge-card .grow { flex: 1; }
+
+.dialog.guides .gtabs { margin-bottom: .5rem; align-self: flex-start; }
+.glist { padding: 2px 4px 6px; } .gsec { font-weight: 750; color: var(--text-2); margin: .8rem .2rem .4rem; font-size: .95rem; } .glist > .gsec:first-child { margin-top: .1rem; }
+.ggrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr)); gap: .5rem; }
+.gitem { display: flex; align-items: center; gap: .7rem; width: 100%; text-align: left; font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: .5rem .7rem; cursor: pointer; }
+.gitem:hover { border-color: var(--primary); box-shadow: 0 0 0 3px var(--ring); }
+.gitem .badge-ic { flex: none; background: var(--primary-soft); color: var(--primary); } .gtxt { flex: 1; min-width: 0; } .gtxt b { display: block; } .gtxt small { display: block; color: var(--text-3); font-size: .84rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gn { color: var(--text-3); font-size: .82rem; white-space: nowrap; } .gseen { width: 1.5rem; height: 1.5rem; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--income-soft); color: var(--income); }
+.gitem.hi { background: var(--primary-soft); border-color: color-mix(in srgb, var(--primary) 35%, transparent); } .gitem.hi .badge-ic { background: var(--surface); }
+.quick.gquick { margin-top: .5rem; flex: none; }
+@media (max-height: 640px) { .gitem { padding: .32rem .6rem; } .gsec { margin: .5rem .2rem .25rem; } .g-card { padding: .7rem 1rem .65rem; } [data-scale="large"] .nav, [data-scale="xlarge"] .nav { padding-top: .28rem; padding-bottom: .28rem; } }
+[data-theme="dark"] .g-card { border-color: color-mix(in srgb, var(--primary) 45%, var(--line)); background: var(--surface-2); } [data-theme="dark"] .g-caret { background: var(--surface-2); border-color: color-mix(in srgb, var(--primary) 45%, var(--line)); }

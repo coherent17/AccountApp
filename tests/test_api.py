@@ -264,6 +264,41 @@ def test_sample_ledger_read():
         lg.close()
 
 
+def test_guides():
+    """操作導覽的紀錄只是設定：看過、提示過、關閉、重新開始都不動帳務；壞掉的設定值也不會出錯。畫面上每個 ? 都有對應的導覽。"""
+    import re
+    lg = Ledger(sample=True)
+    try:
+        a, db = lg.api, lg.db
+        before = lg.dbt.run(db._q, "SELECT COUNT(*) n, MAX(id) m FROM transactions")
+        assert ok(a.guide_state()) == {"seen": {}, "offered": [], "off": False}
+        g = ok(a.guide_mark("reports", "offered"))
+        assert g["offered"] == ["reports"] and not g["seen"]
+        g = ok(a.guide_mark("reports", "seen"))
+        assert g["offered"] == ["reports"] and g["seen"]["reports"] == dt.date.today().isoformat()
+        assert ok(a.guide_off(True))["off"] is True and ok(a.guide_state())["seen"]
+        assert ok(a.guide_reset()) == {"seen": {}, "offered": [], "off": False}
+        for bad in ("[]", "壞掉", '{"seen": 3, "offered": "x"}'):
+            lg.dbt.run(db.set_setting, "guides", bad)
+            assert ok(a.guide_state())["offered"] == [] and ok(a.guide_mark("x", "seen"))["seen"]["x"]
+        assert lg.dbt.run(db._q, "SELECT COUNT(*) n, MAX(id) m FROM transactions") == before
+    finally:
+        lg.close()
+    ui = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "desktop", "ui")
+    def read(*p):
+        with open(os.path.join(ui, *p), encoding="utf-8") as f:
+            return f.read()
+    src = read("guides.js")
+    ids = set(re.findall(r"^  (\w+): \{ group:", src, re.M))
+    used = set()
+    for sub in ("dialogs", "pages"):
+        for name in os.listdir(os.path.join(ui, sub)):
+            used |= set(re.findall(r'help="(\w+)"', read(sub, name)))
+    assert used and used <= ids, used - ids
+    icons = set(re.findall(r"^  (\w+): `", read("icons.js"), re.M))
+    assert set(re.findall(r'icon: "(\w+)"', src)) <= icons
+
+
 def test_dashboard_ranking_is_this_month():
     """本月支出排行與洞察要是「本月」的數字（v3.5.0～v3.8.0 誤用上個月）：合計等於本月支出，上月欄等於上月。"""
     lg = Ledger(sample=True)

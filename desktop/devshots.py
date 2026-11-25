@@ -229,6 +229,103 @@ def _guard_check(win, out: str) -> None:
     print("GUARD", "ALL PASSED" if not bad else f"{bad} FAILED", flush=True)
 
 
+# 3.10：每一個操作導覽都走一遍：目標都找得到、打亮的框與說明卡都在畫面內、說明卡不蓋住打亮的地方（MY_LEDGER_SCENES=guide）
+def _guide_check(win, out: str) -> None:
+    bad, total = 0, 0
+    ids = json.loads(win.evaluate_js("JSON.stringify(Object.keys(__t.guides()))"))
+    # 打到一半的分錄：F1 看這個視窗的導覽，按 Enter、Esc、↑ 都不會動到分錄；看完內容還在
+    key = "window.dispatchEvent(new KeyboardEvent('keydown', {{key: '{}', bubbles: true, cancelable: true}}))"
+    val = f"(document.querySelector('.dialog.journal {_JN}') || {{}}).value"
+    where = "[window.__guideOpen || '', window.__guideStep ? window.__guideStep.i : '', document.querySelectorAll('.dialog').length].join('|')"
+    win.evaluate_js("__t.openJournal()")
+    time.sleep(1.5)
+    win.evaluate_js(_TYPE.format(_JN, "還沒存的分錄"))
+    time.sleep(0.5)
+    win.evaluate_js(key.format("F1"))
+    time.sleep(2)
+    for k, want in (("", "journal|"), ("Enter", "journal|"), ("ArrowLeft", "journal|"), ("Escape", "||1")):
+        if k:
+            win.evaluate_js(key.format(k))
+            time.sleep(1.3)
+        got = win.evaluate_js(where)
+        ok = (got.startswith(want) and got.endswith("|1")) and win.evaluate_js(val) == "還沒存的分錄"
+        bad += not ok
+        print(("OK  " if ok else "BAD ") + f"分錄打到一半看導覽，按 {k or 'F1'} → {got}", flush=True)
+    win.evaluate_js(REAL_ESC)
+    time.sleep(0.6)
+    got = win.evaluate_js(_TITLES)
+    print(("OK  " if got.endswith("尚未儲存") else "BAD ") + f"看完再按 Esc 仍會問 → {got}", flush=True)
+    bad += not got.endswith("尚未儲存")
+    win.evaluate_js(_TOPBTN.format("放棄"))
+    time.sleep(0.6)
+    win.evaluate_js(key.format("F1"))
+    time.sleep(1)
+    got = win.evaluate_js(_TITLES)
+    print(("OK  " if got == "操作導覽" else "BAD ") + f"沒有視窗時按 F1 → {got}", flush=True)
+    bad += got != "操作導覽"
+    win.evaluate_js(ESC)
+    for scale, mini in (("normal", False), ("large", False), ("normal", True))[:1 if os.environ.get("MY_LEDGER_DATA_DIR") else 3]:
+        win.evaluate_js(f"__t.prefs('light', '{scale}'); __t.side({str(mini).lower()}); __t.go('dashboard')")
+        time.sleep(1.5)
+        for gid in ids:
+            win.evaluate_js(f"__t.startGuide('{gid}'); 0")
+            prev, shots = None, 0
+            for _ in range(20):
+                for _ in range(45):          # 等這一步的畫面出來
+                    time.sleep(0.15)
+                    st = json.loads(win.evaluate_js("JSON.stringify({s: window.__guideStep, open: window.__guideOpen || null, miss: window.__guideMissing || '', w: innerWidth, h: innerHeight,"
+                                                    " c: (() => { const c = document.querySelector('.g-card'); if (!c || c.style.visibility === 'hidden') return null; const r = c.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; })()})"))
+                    if not st["open"] or (st["s"] and st["c"] and st["s"]["i"] != prev and (st["s"]["hole"] or st["miss"])):
+                        break
+                if not st["open"] or not st["s"] or st["s"]["i"] == prev:
+                    break
+                time.sleep(0.45)             # 移動動畫結束
+                st = json.loads(win.evaluate_js("JSON.stringify({s: window.__guideStep, w: innerWidth, h: innerHeight, miss: window.__guideMissing || '', c: (() => { const r = document.querySelector('.g-card').getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; })()})"))
+                s, c, total = st["s"], st["c"], total + 1
+                prev, h = s["i"], s["hole"]
+                why = []
+                if not h:
+                    why.append("找不到要打亮的地方")
+                else:
+                    if h["w"] < 12 or h["h"] < 12 or h["x"] < 0 or h["y"] < 0 or h["x"] + h["w"] > st["w"] + 1 or h["y"] + h["h"] > st["h"] + 1:
+                        why.append(f"打亮的框超出畫面 {h}")
+                    if s["pos"]["side"] != "none" and c[0] < h["x"] + h["w"] - 1 and c[2] > h["x"] + 1 and c[1] < h["y"] + h["h"] - 1 and c[3] > h["y"] + 1:
+                        why.append("說明卡蓋住打亮的地方")
+                if c[0] < 0 or c[1] < 0 or c[2] > st["w"] + 1 or c[3] > st["h"] + 1:
+                    why.append(f"說明卡超出畫面 {c}")
+                if why:
+                    bad += 1
+                    print(f"BAD {scale}{' mini' if mini else ''} {gid} 第 {s['i'] + 1} 步「{s['title']}」：{'；'.join(why)}", flush=True)
+                if scale == "normal" and not mini or why or (shots < 2 and scale == "large"):
+                    _grab(win, os.path.join(out, f"guide_{scale}{'_mini' if mini else ''}_{gid}_{s['i'] + 1}.png"))
+                    shots += 1
+                win.evaluate_js("window.__guideMove(1)")
+            left = win.evaluate_js("[window.__guideOpen || '', document.querySelectorAll('.dialog').length].join('|')")
+            if prev is None and "請先新增帳戶" in (win.evaluate_js("document.body.innerText") or ""):
+                print(f"略過 {gid}：還沒有帳戶，畫面說明「請先新增帳戶」", flush=True)
+                win.evaluate_js(ESC)
+                continue
+            if left != "|0":
+                bad += 1
+                print(f"BAD {scale} {gid} 結束後還留著：{left}", flush=True)
+                win.evaluate_js("window.__guideOpen = null; " + ESC)
+            if prev is None:
+                bad += 1
+                print(f"BAD {scale} {gid} 沒有開始", flush=True)
+    seen = json.loads(win.evaluate_js("JSON.stringify(Object.keys(__t.guides()).length)"))
+    print(f"導覽 {seen} 個，共走了 {total} 步", flush=True)
+    print("GUIDE", "ALL PASSED" if not bad else f"{bad} FAILED", flush=True)
+    for name, js, w in [("center", "__t.side(false); __t.prefs('light', 'normal'); __t.go('reports'); setTimeout(() => __t.openGuides(), 1500)", 3),
+                        ("center_large", ESC + "; __t.prefs('light', 'large'); __t.openGuides()", 1.5), ("center_dark", "__t.prefs('dark', 'normal')", 1),
+                        ("search", ESC + "; __t.prefs('light', 'normal'); __t.openSearch(); setTimeout(() => { const i = document.querySelector('.dialog input'); i.value = '對帳'; i.dispatchEvent(new Event('input', {bubbles: true})); }, 600)", 2.5),
+                        ("nudge", ESC + "; __t.resetGuides().then(() => { __t.guidesReady(); })", 1), ("nudge2", "__t.go('transactions')", 3.5), ("nudge_again", "__t.go('accounts'); setTimeout(() => __t.go('transactions'), 500)", 4), ("fresh", "__t.openJournal()", 2),
+                        ("settings", ESC + "; __t.go('settings'); setTimeout(() => __t.tab('個人與外觀'), 1200)", 2.5), ("tour", "__t.openTour()", 1.5), ("tour3", "for (const k of [1, 2]) setTimeout(() => document.querySelector('.tour .btn.primary').click(), k * 300)", 1.5),
+                        ("dark_step", ESC + "; __t.prefs('dark', 'large'); __t.startGuide('dashboard'); 0", 2.5)]:
+        win.evaluate_js(js)
+        time.sleep(w)
+        _grab(win, os.path.join(out, f"g_{name}.png"))
+
+
 # README 用的截圖（MY_LEDGER_SCENES=readme）：淺色、大字，範例帳本
 README = [
     ("readme_dashboard", "__t.prefs('light', 'large'); __t.go('dashboard')", 3.5),
@@ -402,8 +499,8 @@ def run(win, out: str) -> None:
     only = [s for s in os.environ.get("MY_LEDGER_SCENES", "").split(",") if s]
     time.sleep(5)
     errors = []
-    scenes = {"readme": README, "mom": MOM, "audit": AUDIT, "features": FEATURES, "flow": FLOW, "xl": XL, "guard": [("guard", _guard_check, 0.5)]}.get(only[0] if len(only) == 1 else "", SCENES)
-    if only in (["mom"], ["audit"], ["features"], ["flow"], ["guard"]) or (only and os.environ.get("MY_LEDGER_VIEW")):
+    scenes = {"readme": README, "mom": MOM, "audit": AUDIT, "features": FEATURES, "flow": FLOW, "xl": XL, "guard": [("guard", _guard_check, 0.5)], "guide": [("guide", _guide_check, 0.5)]}.get(only[0] if len(only) == 1 else "", SCENES)
+    if only in (["mom"], ["audit"], ["features"], ["flow"], ["guard"], ["guide"]) or (only and os.environ.get("MY_LEDGER_VIEW")):
         view = os.environ.get("MY_LEDGER_VIEW")
         if view:          # 畫面可用範圍（CSS 像素）× 放大倍率 ＋ 視窗外框
             size, scale = view.split("@")
@@ -447,6 +544,38 @@ def closing(win, out: str) -> None:
     os.makedirs(out, exist_ok=True)
     time.sleep(4)
     _grab(win, os.path.join(out, "before_close.png"))
+    if os.environ.get("MY_LEDGER_CLOSE_DIRTY") == "boot":     # 真正的開啟流程：更新說明 → 帶我看看新功能 → 歡迎導覽 → 帶我看一圈 → 第一次的提示
+        st = "JSON.stringify([window.__guideOpen || '', window.__guideStep ? window.__guideStep.title : '', [...document.querySelectorAll('.dialog h2')].map(x => x.textContent).join(' > '), (document.querySelector('.nudge-card b') || {}).textContent || ''])"
+        def say(label, js=None, wait=2.0):
+            if js:
+                win.evaluate_js(js)
+            time.sleep(wait)
+            print(label, win.evaluate_js(st), flush=True)
+            _grab(win, os.path.join(out, f"boot_{label}.png"))
+        say("1_更新說明")
+        say("2_看新功能", _TOPBTN.format("帶我看看新功能"), 2.5)
+        for _ in range(4):
+            win.evaluate_js("window.__guideOpen && window.__guideMove(1)")
+            time.sleep(2)
+        say("3_看完", None, 1)
+        for _ in range(2):
+            win.evaluate_js("(document.querySelector('.tour .btn.primary') || {click() {}}).click()")
+            time.sleep(0.6)
+        say("4_歡迎導覽", None, 0.5)
+        say("5_帶我看一圈", "([...document.querySelectorAll('.tour .btn')].find(b => b.textContent.includes('帶我看一圈')) || {click() {}}).click()", 2.5)
+        for _ in range(6):
+            win.evaluate_js("window.__guideOpen && window.__guideMove(1)")
+            time.sleep(1.2)
+        say("6_看完", None, 2)
+        for _ in range(3):
+            win.evaluate_js(ESC)
+        say("7_提示", None, 3)
+        win.evaluate_js("__t.go('reports')")
+        time.sleep(22)
+        say("8_換頁", "__t.go('transactions')", 3)
+        print("紀錄", win.evaluate_js("pywebview.api.guide_state().then(s => { window.__gs = JSON.stringify(s); }); 1") and (time.sleep(0.5) or win.evaluate_js("window.__gs")), flush=True)
+        threading.Thread(target=win.destroy, daemon=True).start()
+        return
     if os.environ.get("MY_LEDGER_CLOSE_DIRTY"):        # 有打到一半的傳票時關視窗：先問；繼續編輯後內容還在；放棄才結束
         win.evaluate_js("__t.openJournal()")
         time.sleep(1.5)

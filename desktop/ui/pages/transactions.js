@@ -136,7 +136,7 @@ export function Transactions({ go }) {
   const setDate = (i, d) => set({ period: "自訂期間", start: i === 0 ? d : range[0], end: i === 1 ? d : range[1] });
 
   return html`<div class="page-fill">
-    <${PageHead} icon="list" color="var(--primary)" title="收支明細" sub="日記帳：逐筆記錄收入、支出、轉帳與分錄傳票">
+    <${PageHead} icon="list" color="var(--primary)" title="收支明細" help="transactions" sub="日記帳：逐筆記錄收入、支出、轉帳與分錄傳票">
       <${Btn} kind="expense" icon="minus" big onClick=${() => openTxn({ type: "expense", accountId: f.account })}>記支出</${Btn}>
       <${Btn} kind="income" icon="plus" big onClick=${() => openTxn({ type: "income", accountId: f.account })}>記收入</${Btn}>
       <${Btn} kind="transfer" icon="transfer" big onClick=${() => openTxn({ type: "transfer", accountId: f.account })}>轉帳</${Btn}>
