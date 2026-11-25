@@ -425,7 +425,7 @@ export function Combo({ value, onChange, options, placeholder = "輸入代號或
       onFocus=${() => openList()}
       onMouseDown=${() => { if (text == null && document.activeElement === boxRef.current.querySelector("input")) openList(); }}
       onBlur=${() => setTimeout(() => setText(null), 150)}
-      onInput=${(e) => { setText(e.target.value); setHi(0); }}
+      onInput=${(e) => { if (text == null || !pos) place(); setText(e.target.value); setHi(0); }}
       onKeyDown=${(e) => {
         if (e.key === "ArrowDown") { e.preventDefault(); setHi(Math.min(shown.length - 1, hi + 1)); }
         else if (e.key === "ArrowUp") { e.preventDefault(); setHi(Math.max(0, hi - 1)); }

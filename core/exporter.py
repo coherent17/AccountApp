@@ -795,23 +795,23 @@ def export_workbook(db: Database, path: str, start: str, end: str, sheets=None) 
 
 
 def _ledger_sheet(db: Database, ws, start: str, end: str, sub: str, acodes: dict) -> None:
-    """分類帳：每個帳戶一段，期初餘額、逐筆借貸、以公式累計餘額，並與帳上期末餘額核對。"""
+    """分類帳：每個會計科目一段，期初餘額、逐筆借貸、以公式累計餘額，並與帳上期末餘額核對。"""
     s = _Sheet(ws)
-    r = s.title("分類帳", sub + "　｜　金額為各帳戶原幣", 8)
+    r = s.title("分類帳", sub + "　｜　資產、負債科目為原幣，其餘為本位幣", 8)
     s.header(r, ["日期", "傳票號碼", "摘要", "對方科目", "借方", "貸方", "餘額", "核對"])
     hdr = r
     n = 0
-    for acc in sorted(db.list_accounts(include_archived=True), key=lambda a: acodes[a["id"]]):
-        lg = db.ledger(acc["id"], start, end)
+    for subj in db.ledger_subjects():
+        lg = db.subject_ledger(subj["key"], start, end)
         if not lg["rows"] and not lg["opening"] and not lg["closing"]:
             continue
         n += 1
-        fmt = _num_fmt(acc["currency"])
+        fmt = _num_fmt(lg["currency"])
         debit_side = lg["normal_side"] == "借"
         r += 2 if n > 1 else 1
-        s.cell(r, 1, f"{acodes[acc['id']]}　{acc['name']}", bold=True, fill=FILL_SUB, color=NAVY)
+        s.cell(r, 1, f"{lg['code']}　{lg['name']}", bold=True, fill=FILL_SUB, color=NAVY)
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
-        s.cell(r, 5, f"{acc['category']}　{acc['currency']}　正常餘額：{lg['normal_side']}方",
+        s.cell(r, 5, f"{lg['label']}　{lg['currency']}　正常餘額：{lg['normal_side']}方",
                fill=FILL_SUB, color="64748B")
         ws.merge_cells(start_row=r, start_column=5, end_row=r, end_column=8)
         r += 1
@@ -840,11 +840,11 @@ def _ledger_sheet(db: Database, ws, start: str, end: str, sub: str, acodes: dict
         s.cell(r, 5, f"=SUM(E{first}:E{last})" if last >= first else 0, fmt, bold=True, fill=FILL_TOTAL)
         s.cell(r, 6, f"=SUM(F{first}:F{last})" if last >= first else 0, fmt, bold=True, fill=FILL_TOTAL)
         s.cell(r, 7, f"=G{last}", fmt, bold=True, fill=FILL_TOTAL)
-        s.cell(r, 8, f'=IF(ROUND(G{r}-{lg["closing"]},2)=0,"✓ 相符","✗ 不符")', bold=True,
+        s.cell(r, 8, f'=IF(ROUND(G{r}-({lg["closing"]}),2)=0,"✓ 相符","✗ 不符")', bold=True,
                fill=FILL_TOTAL, align="center")
         s.total_border(r, 1, 8)
     if not n:
-        s.cell(r + 1, 1, "本期間沒有任何帳戶紀錄", border=False)
+        s.cell(r + 1, 1, "本期間沒有任何紀錄", border=False)
     s.widths([14, 11, 28, 26, 15, 15, 16, 10])
     s.print_setup(hdr, landscape=True)
     ws.freeze_panes = f"A{hdr + 1}"

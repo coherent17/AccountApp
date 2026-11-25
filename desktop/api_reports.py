@@ -23,7 +23,10 @@ class ReportsApi:
                 "compare_is": db.get_setting("report_compare_is", "none"),
                 "years": list(range(int(hi[:4]), int(lo[:4]) - 1, -1)),
                 "accounts": [{"id": a["id"], "label": f"{codes[a['id']]}　{a['name']}", "code": codes[a["id"]]}
-                             for a in sorted(db.list_accounts(include_archived=True), key=lambda a: codes[a["id"]])]}
+                             for a in sorted(db.list_accounts(include_archived=True), key=lambda a: codes[a["id"]])],
+                "subjects": [{"key": f"{s['key'][0]}:{s['key'][1]}",
+                              "label": f"{s['code']}　{s['name']}（{s['group']}）" + ("（已封存）" if s["archived"] else "")}
+                             for s in db.ledger_subjects()]}
 
     @exposed
     def set_setting(self, key: str, value: str) -> None:
@@ -130,9 +133,11 @@ class ReportsApi:
                 for e in entries]
 
     @exposed
-    def report_ledger(self, aid: int, start: str, end: str) -> dict:
-        lg = self._db.ledger(aid, start, end)
-        return {"currency": lg["account"]["currency"], "opening": lg["opening"], "closing": lg["closing"],
+    def report_ledger(self, key, start: str, end: str) -> dict:
+        """key：「account:3」「category:5」「special:adjust」「equity:3101」；只給數字時視為帳戶。"""
+        kind, sid = key.split(":", 1) if isinstance(key, str) and ":" in key else ("account", key)
+        lg = self._db.subject_ledger((kind, sid), start, end)
+        return {"currency": lg["currency"], "label": lg["label"], "opening": lg["opening"], "closing": lg["closing"],
                 "debit_total": lg["debit_total"], "credit_total": lg["credit_total"], "side": lg["normal_side"],
                 "rows": [{k: r.get(k) for k in ("id", "date", "voucher", "summary", "counter", "debit", "credit",
                                                 "balance")} for r in lg["rows"]]}

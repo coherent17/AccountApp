@@ -76,6 +76,9 @@ def main() -> int:
     if shot or smoke or close_test:
         # 自動截圖時視窗放在螢幕外、不搶焦點，不打擾正在使用電腦的人；關閉 Edge 的遮蔽偵測，螢幕外也照常繪製
         os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = "--disable-features=CalculateNativeWinOcclusion"
+        view = os.environ.get("MY_LEDGER_VIEW")      # 例如 1024x528@1.875：模擬她的電腦（Windows 縮放 × 文字大小）
+        if view:
+            os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] += f" --force-device-scale-factor={view.split('@')[1]}"
     import webview
     dbt = DbThread()
     try:
