@@ -1741,11 +1741,12 @@ class Database:
             t = self.get_transaction(p["txn_id"])
             others = [ln["name"] for ln in self.txn_lines_of(t, live=False)
                       if not (ln["kind"] == "account" and ln["id"] == account_id)]
+            memo = "、".join(dict.fromkeys(m for _, m in self._line_memos(p["txn_id"], "account", account_id) if m))
             delta = p["delta"]
             running += delta
             rows.append({
                 "id": p["txn_id"], "date": p["date"], "voucher": voucher_no(p["txn_id"]),
-                "summary": p["note"] or TYPE_LABELS[p["type"]], "counter": "、".join(dict.fromkeys(others)),
+                "summary": p["note"] or TYPE_LABELS[p["type"]], "counter": "、".join(dict.fromkeys(others)), "memo": memo,
                 "debit": money_round(delta) if delta > 0 else 0.0,
                 "credit": money_round(-delta) if delta < 0 else 0.0,
                 "balance": money_round(running * sign), "type": p["type"],
@@ -1759,6 +1760,21 @@ class Database:
             "rows": rows,
             "normal_side": "借" if acc["kind"] == "asset" else "貸",
         }
+
+    def _line_memos(self, txn_id: int, kind: str, sid) -> list[list]:
+        """傳票上這個科目各行的 [金額, 行備註]（依行序；金額的正負與 v_acc_post／v_cat_post／v_special_post 相同）。
+        只有分錄傳票有行備註；一般收支、轉帳傳票傳回空清單。"""
+        if kind == "account":
+            q = ("SELECT debit - credit AS amt, memo FROM txn_lines WHERE txn_id = ? AND account_id = ? ORDER BY seq, id", int(sid))
+        elif kind == "category":
+            q = ("SELECT CASE c.kind WHEN 'expense' THEN l.debit - l.credit ELSE l.credit - l.debit END AS amt, l.memo"
+                 " FROM txn_lines l JOIN categories c ON c.id = l.category_id WHERE l.txn_id = ? AND l.category_id = ?"
+                 " ORDER BY l.seq, l.id", int(sid))
+        elif kind == "special":
+            q = ("SELECT credit - debit AS amt, memo FROM txn_lines WHERE txn_id = ? AND special = ? ORDER BY seq, id", sid)
+        else:
+            return []
+        return [[r["amt"] or 0.0, (r["memo"] or "").strip()] for r in self._q(q[0], (txn_id, q[1]))]
 
     def ledger_subjects(self) -> list[dict]:
         """分類帳可選的全部會計科目（資產、負債、權益、收入、費用、業外損益），含已封存，依代號排序。"""
@@ -1808,6 +1824,7 @@ class Database:
             raise ValueError("科目不存在")
         running = opening
         cache: dict[int, str] = {}
+        memos: dict[int, list] = {}
         for p in posts:
             amt = p["amt"] or 0.0
             if abs(amt) < 0.005:
@@ -1822,9 +1839,16 @@ class Database:
                         ln["name"] for ln in self.txn_lines_of(t, live=False)
                         if not (ln["kind"] == kind and str(ln["id"]) == str(sid))))
                 counter = cache[p["txn_id"]]
+            memo = ""
+            if p["txn_id"]:       # 這一行在傳票上的行備註：同一張傳票有幾行同科目時，依金額對到那一行
+                left = memos.setdefault(p["txn_id"], self._line_memos(p["txn_id"], kind, sid))
+                hit = next((x for x in left if abs(x[0] - amt) < 0.005), None) or (left[0] if len(left) == 1 else None)
+                if hit:
+                    left.remove(hit)
+                    memo = hit[1]
             rows.append({"id": p["txn_id"], "date": p["date"],
                          "voucher": voucher_no(p["txn_id"]) if p["txn_id"] else "開帳",
-                         "summary": p["note"] or TYPE_LABELS.get(p["type"], ""), "counter": counter,
+                         "summary": p["note"] or TYPE_LABELS.get(p["type"], ""), "counter": counter, "memo": memo,
                          "debit": 0.0 if credit else money_round(abs(amt)),
                          "credit": money_round(abs(amt)) if credit else 0.0,
                          "balance": money_round(running), "type": p["type"]})

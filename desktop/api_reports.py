@@ -13,7 +13,7 @@ from desktop.rpc import exposed
 
 # 權益變動表的列 → 分類帳科目
 EQUITY_KEYS = {"期初淨值": f"equity:{EQUITY_CODE}", **{v[1]: f"special:{k}" for k, v in SPECIALS.items()}}
-SETTING_KEYS = {"report_compare_bs", "report_compare_is", "print_compare", "annual_sections"}
+SETTING_KEYS = {"report_compare_bs", "report_compare_is", "print_compare", "annual_sections", st.CUSTOM_KEY}
 
 
 class ReportsApi:
@@ -26,6 +26,7 @@ class ReportsApi:
                 "compare_modes": st.COMPARE_MODES,
                 "compare_bs": db.get_setting("report_compare_bs", "none"),
                 "compare_is": db.get_setting("report_compare_is", "none"),
+                "compare_custom": db.get_json(st.CUSTOM_KEY, {}) or {},
                 "years": list(range(int(hi[:4]), int(lo[:4]) - 1, -1)),
                 "accounts": [{"id": a["id"], "label": f"{codes[a['id']]}　{a['name']}", "code": codes[a["id"]]}
                              for a in sorted(db.list_accounts(include_archived=True), key=lambda a: codes[a["id"]])],
@@ -41,9 +42,10 @@ class ReportsApi:
 
     # ------------------------------------------------------------------ 資產負債表
     @exposed
-    def report_bs(self, start: str, end: str, mode: str) -> dict:
+    def report_bs(self, start: str, end: str, mode: str, custom: dict | None = None) -> dict:
         db = self._db
-        cdate = st.compare_date(mode, start, end)
+        custom = custom if custom is not None else db.get_json(st.CUSTOM_KEY, {})
+        cdate = st.compare_date(mode, start, end, custom)
         data = st.balance_sheet(db, end, cdate)
         rows, liab = [], False
         for r in data["rows"]:
@@ -56,7 +58,7 @@ class ReportsApi:
                          "prev": r["prev"], "orig": r["orig"], "currency": r["currency"], "share": r["share"],
                          "key": r.get("key"), "change": d, "change_pct": dp, "good": None if not d else (d > 0) != bad,
                          "net": r["name"].startswith("淨資產")})
-        crange = st.compare_range(mode, start, end)
+        crange = st.ratio_range(mode, start, end, custom)
         ratios = [{"name": x["name"], "help": x["help"], "cur": st.fmt_ratio(x["cur"], x["kind"], x["note"]),
                    "prev": st.fmt_ratio(x["prev"], x["kind"]) if cdate else "",
                    "change": st.fmt_ratio_change(x["cur"], x["prev"], x["kind"]) if cdate else ""}
@@ -69,8 +71,9 @@ class ReportsApi:
 
     # ------------------------------------------------------------------ 收支損益表
     @exposed
-    def report_is(self, start: str, end: str, mode: str) -> dict:
-        crange = st.compare_range(mode, start, end)
+    def report_is(self, start: str, end: str, mode: str, custom: dict | None = None) -> dict:
+        custom = custom if custom is not None else self._db.get_json(st.CUSTOM_KEY, {})
+        crange = st.compare_range(mode, start, end, custom)
         data = st.income_statement(self._db, start, end, crange)
         rows = []
         for r in data["rows"]:
@@ -132,9 +135,9 @@ class ReportsApi:
         kw = (kw or "").strip()
         if kw:
             entries = [e for e in entries if kw in e["summary"] or kw in e["voucher"]
-                       or any(kw in ln["name"] or kw in ln["code"] for ln in e["lines"])]
+                       or any(kw in ln["name"] or kw in ln["code"] or kw in (ln.get("memo") or "") for ln in e["lines"])]
         return [{"id": e["id"], "date": e["date"], "voucher": e["voucher"], "summary": e["summary"],
-                 "lines": [{k: ln[k] for k in ("code", "name", "debit", "credit")} for ln in e["lines"]]}
+                 "lines": [{k: ln.get(k) or ("" if k == "memo" else ln.get(k)) for k in ("code", "name", "debit", "credit", "memo")} for ln in e["lines"]]}
                 for e in entries]
 
     @exposed
@@ -144,7 +147,7 @@ class ReportsApi:
         lg = self._db.subject_ledger((kind, sid), start, end)
         return {"currency": lg["currency"], "label": lg["label"], "opening": lg["opening"], "closing": lg["closing"],
                 "debit_total": lg["debit_total"], "credit_total": lg["credit_total"], "side": lg["normal_side"],
-                "rows": [{k: r.get(k) for k in ("id", "date", "voucher", "summary", "counter", "debit", "credit",
+                "rows": [{k: r.get(k) for k in ("id", "date", "voucher", "summary", "memo", "debit", "credit",
                                                 "balance")} for r in lg["rows"]]}
 
     @exposed

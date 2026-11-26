@@ -264,6 +264,70 @@ def test_sample_ledger_read():
         lg.close()
 
 
+def test_memo_and_custom_compare():
+    """1151126 意見：分類帳列行備註（取代對方科目）、日記帳加行備註、收支損益表不列筆數、自訂比較期間（畫面與列印）。"""
+    lg = Ledger(sample=True)
+    try:
+        a, db = lg.api, lg.db
+        today = dt.date.today().isoformat()
+        chart = ok(a.journal_form(None))["chart"]
+        exp = next(c["key"] for c in chart if c["kind"] == "expense")
+        bank = next(c["key"] for c in chart if c["key"].startswith("account:") and c.get("group") == "資產" and not c.get("investment")
+                    and (not c.get("currency") or c["currency"] == "TWD"))
+        # 和她的 V000428 一樣：同一張傳票有三行同一個費用科目，各有自己的行備註；銀行一行
+        lines = [{"key": exp, "debit": 2930, "memo": "玉山信用卡費"}, {"key": exp, "debit": 9223, "memo": "星展信用卡費"},
+                 {"key": exp, "debit": 167, "memo": "1151101-1151122"}, {"key": bank, "credit": 12320, "memo": "台銀活存"}]
+        r = ok(a.journal_save({"date": today, "note": "信用卡費彙整", "lines": lines, "tags": []}, None))
+        tid = r["id"] if isinstance(r, dict) else r
+        year = (today[:4] + "-01-01", today[:4] + "-12-31")
+        lgr = ok(a.report_ledger(exp, *year))
+        mine = sorted((x["debit"], x["memo"]) for x in lgr["rows"] if x["id"] == tid)
+        assert mine == [(167, "1151101-1151122"), (2930, "玉山信用卡費"), (9223, "星展信用卡費")], mine
+        assert all("counter" not in x for x in lgr["rows"])
+        assert [x["memo"] for x in ok(a.report_ledger(bank, *year))["rows"] if x["id"] == tid] == ["台銀活存"]
+        assert all(x["memo"] == "" for x in lgr["rows"] if x["id"] != tid and not x["id"]), "期初、開帳列沒有行備註"
+        jn = next(e for e in ok(a.report_journal(*year, "")) if e["id"] == tid)
+        assert sorted(ln["memo"] for ln in jn["lines"]) == sorted(x["memo"] for x in lines)
+        assert [e["id"] for e in ok(a.report_journal(*year, "星展信用卡費"))] == [tid]
+        html_ = ok(a.ledger_html(exp, *year))
+        assert "行備註" in html_ and "對方科目" not in html_ and "星展信用卡費" in html_
+        assert "星展信用卡費" in ok(a.print_html(["journal"], *year, "none"))
+        try:
+            import openpyxl
+        except ImportError:
+            openpyxl = None
+        if openpyxl:      # Excel：分類帳 D 欄、日記簿 I 欄是行備註（附加在最後，不會移動任何公式）
+            path = os.path.join(lg.dir, "memo.xlsx")
+            ok(a.export_excel(*year, [k for k, *_ in ok(a.export_form())["sheets"]], path))
+            wb = openpyxl.load_workbook(path)
+            def cells(ws):
+                return [str(c.value) for row in ws.iter_rows() for c in row if c.value is not None]
+            led, jnl = wb["分類帳"], wb["日記簿"]
+            assert "行備註" in cells(led) and "對方科目" not in cells(led) and "星展信用卡費" in cells(led)
+            hdr = next(r for r in jnl.iter_rows() if any(c.value == "科目代號" for c in r))
+            assert hdr[8].value == "行備註" and "星展信用卡費" in cells(jnl)
+        # 自訂比較期間：資產負債表比較日、收支損益表比較期間；填錯就用上一期
+        c = {"date": f"{int(today[:4]) - 1}-06-30", "start": f"{int(today[:4]) - 1}-03-01", "end": f"{int(today[:4]) - 1}-05-31"}
+        bs = ok(a.report_bs(*year, "custom", c))
+        assert bs["cdate"] == c["date"] and all(x["prev"] is not None for x in bs["rows"] if x["cur"] is not None)
+        isr = ok(a.report_is(*year, "custom", c))
+        assert isr["crange"] == [c["start"], c["end"]] or isr["crange"] == (c["start"], c["end"])
+        swapped = ok(a.report_is(*year, "custom", {"start": c["end"], "end": c["start"]}))["crange"]
+        assert list(swapped) == [c["start"], c["end"]]
+        prev = ok(a.report_is(*year, "prior_period"))["crange"]
+        assert list(ok(a.report_is(*year, "custom", {"start": "壞掉", "end": ""}))["crange"]) == list(prev)
+        assert ok(a.report_bs(*year, "custom", {}))["cdate"] == ok(a.report_bs(*year, "prior_period"))["cdate"]
+        # 存起來之後，畫面不帶參數與列印都用同一組日期
+        ok(a.set_setting("report_compare_custom", json.dumps(c)))
+        assert ok(a.report_bs(*year, "custom"))["cdate"] == c["date"]
+        assert ok(a.reports_meta())["compare_custom"] == c
+        ph = ok(a.print_html(["bs", "is", "ratios"], *year, "custom"))
+        assert c["date"].replace("-", "/") in ph and c["start"].replace("-", "/") in ph and c["end"].replace("-", "/") in ph
+        lg.run(check_books, db, "memo and custom compare")
+    finally:
+        lg.close()
+
+
 def test_guides():
     """操作導覽的紀錄只是設定：看過、提示過、關閉、重新開始都不動帳務；壞掉的設定值也不會出錯。畫面上每個 ? 都有對應的導覽。"""
     import re

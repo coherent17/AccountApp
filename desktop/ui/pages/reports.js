@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import { META, api, changed, css, html, money, num, pct, toast, useLoad, ymd } from "../lib/core.js";
 import { PALETTE, axis, barFill, chartBase, donutCenter, shortMoney, useChart, valueAxis } from "../lib/charts.js";
 import { CatIcon } from "../lib/caticon.js";
-import { Btn, Card, Combo, DataTable, Dialog, Field, Icon, PageHead, PeriodPicker, Segmented, Select, Tabs, TextInput, ask, errorBox,
+import { Btn, Card, Combo, DataTable, DateInput, Dialog, Field, Icon, PageHead, PeriodPicker, Segmented, Select, Tabs, TextInput, ask, errorBox,
          openModal, usePeriod, Skeleton, Tip } from "../lib/ui.js";
 import { openVoucher } from "../dialogs/txn.js";
 import { openJournal } from "../dialogs/journal.js";
@@ -64,14 +64,25 @@ function Statement({ heads, rows, cls = "", onOpen }) {
   </table></div></div>`;
 }
 
-function CompareBar({ title, value, onChange, modes }) {
-  return html`<div class="row wrap"><span class="muted grow">${title}</span><span class="lbl">比較</span>
-    <${Select} value=${value} onChange=${onChange} options=${modes} title="與上一期比較：資產負債表比較本期期初，收支損益表比較長度相同的前一期（例如本月比上月、今年比去年）。與去年同期比較：日期往前推一年。" /></div>`;
+function CompareBar({ title, value, onChange, modes, children }) {
+  return html`<div class="row wrap cmpbar"><span class="muted grow">${title}</span><span class="lbl">比較</span>
+    <${Select} value=${value} onChange=${onChange} options=${modes} title="與上一期比較：資產負債表比較本期期初，收支損益表比較長度相同的前一期（例如本月比上月、今年比去年）。與去年同期比較：日期往前推一年。自訂比較期間：自己選比較的日期。" />
+    ${value === "custom" && children}</div>`;
+}
+
+// 自訂比較期間：資產負債表的比較日、收支損益表的比較期間，兩張報表共用，記在帳本設定（列印也用同一組日期）
+let custom = null;
+function useCustom(meta) {
+  if (!custom) custom = { ...(meta.compare_custom || {}) };
+  const [c, setC] = useState(custom);
+  const set = (patch) => { custom = { ...custom, ...patch }; setC(custom); api("set_setting", "report_compare_custom", JSON.stringify(custom)); };
+  return [c, set];
 }
 
 function BalanceSheet({ start, end, meta, toLedger }) {
   const [mode, setMode] = useState(meta.compare_bs);
-  const [d] = useLoad(() => api("report_bs", start, end, mode), [start, end, mode]);
+  const [cc, setCc] = useCustom(meta);
+  const [d] = useLoad(() => api("report_bs", start, end, mode, cc), [start, end, mode, cc.date]);
   const change = (m) => { setMode(m); api("set_setting", "report_compare_bs", m); };
   if (!d) return html`<${Skeleton} kind="block" />`;
   const cmp = !!d.cdate;
@@ -96,29 +107,33 @@ function BalanceSheet({ start, end, meta, toLedger }) {
   rows.push({ style: "total", level: 0, cells: ["期末淨值", ...(d.has_orig ? [""] : []), num(d.equity_closing), "", ...(cmp ? ["", "", ""] : [])],
               cls: [, ...(d.has_orig ? [""] : []), "c-primary"] });
   if (d.closed_years.length) rows.push({ level: 1, cells: [`已辦理年度結帳：${d.closed_years.join("、")} 年（本期損益已結轉累積淨值）`], span: n });
-  return html`<${CompareBar} title=${`基準日：${ymd(end)}（報表期間的最後一天）` + (cmp ? `　｜　比較日：${ymd(d.cdate)}` : "")}
-      value=${mode} onChange=${change} modes=${meta.compare_modes} />
+  return html`<${CompareBar} title=${`基準日：${ymd(end)}（報表期間的最後一天）` + (cmp && mode !== "custom" ? `　｜　比較日：${ymd(d.cdate)}` : "")}
+      value=${mode} onChange=${change} modes=${meta.compare_modes}>
+      <span class="lbl">比較日</span><${DateInput} value=${d.cdate} onChange=${(v) => setCc({ date: v })} /></${CompareBar}>
     <${Statement} heads=${heads} rows=${rows} onOpen=${toLedger} />`;
 }
 
 function IncomeStatement({ start, end, meta, toLedger }) {
   const [mode, setMode] = useState(meta.compare_is);
-  const [d] = useLoad(() => api("report_is", start, end, mode), [start, end, mode]);
+  const [cc, setCc] = useCustom(meta);
+  const [d] = useLoad(() => api("report_is", start, end, mode, cc), [start, end, mode, cc.start, cc.end]);
   const change = (m) => { setMode(m); api("set_setting", "report_compare_is", m); };
   if (!d) return html`<${Skeleton} kind="block" />`;
   const cmp = !!d.crange;
-  const heads = ["會計科目", "筆數", `本期金額（${META.base}）`, "占收入比", ...(cmp ? [`${ymd(d.crange[0])}～${ymd(d.crange[1])}`, "增減金額", "增減 %"] : [])];
+  const heads = ["會計科目", `本期金額（${META.base}）`, "占收入比", ...(cmp ? [`${ymd(d.crange[0])}～${ymd(d.crange[1])}`, "增減金額", "增減 %"] : [])];
   const rows = d.rows.map((r) => {
     if (r.style === "section") return { style: "section", level: 0, cells: [r.name], span: heads.length };
     const g = r.good == null ? "" : r.good ? "c-income" : "c-expense";
     const tone = r.style === "subtotal" ? (r.kind === "income" ? "c-income" : "c-expense") : r.style === "grand" ? (r.cur >= 0 ? "c-primary" : "c-expense") : "";
     return { style: r.style, level: r.level, key: r.key,
-             cells: [r.code ? html`<span class="muted num code">${r.code}</span>${r.name}` : r.name, r.count, num(r.cur), pctOrBlank(r.share),
+             cells: [r.code ? html`<span class="muted num code">${r.code}</span>${r.name}` : r.name, num(r.cur), pctOrBlank(r.share),
                      ...(cmp ? [num(r.prev), r.change ? num(r.change, null, true) : "", r.change_pct == null ? (r.change ? "—" : "") : pct(r.change_pct)] : [])],
-             cls: ["", "muted", tone, "", "", g, g] };
+             cls: ["", tone, "", "", g, g] };
   });
-  return html`<${CompareBar} title=${`期間：${ymd(start)}～${ymd(end)}` + (cmp ? `　｜　比較：${ymd(d.crange[0])}～${ymd(d.crange[1])}` : "")}
-      value=${mode} onChange=${change} modes=${meta.compare_modes} />
+  return html`<${CompareBar} title=${`期間：${ymd(start)}～${ymd(end)}` + (cmp && mode !== "custom" ? `　｜　比較：${ymd(d.crange[0])}～${ymd(d.crange[1])}` : "")}
+      value=${mode} onChange=${change} modes=${meta.compare_modes}>
+      <span class="drange"><${DateInput} value=${d.crange ? d.crange[0] : start} onChange=${(v) => setCc({ start: v, end: d.crange[1] })} /><span>～</span>
+        <${DateInput} value=${d.crange ? d.crange[1] : end} onChange=${(v) => setCc({ start: d.crange[0], end: v })} /></span></${CompareBar}>
     <${Statement} heads=${heads} rows=${rows} onOpen=${toLedger} />`;
 }
 
@@ -266,32 +281,32 @@ function Journal({ start, end }) {
   const cols = [
     { key: "date", title: "日期", render: (r) => (r.first ? html`<span class="num">${ymd(r.date)}</span>` : ""), nowrap: true },
     { key: "v", title: "傳票號碼", align: "c", render: (r) => (r.first ? html`<span class="muted num">${r.voucher}</span>` : "") },
-    { key: "s", title: "摘要", elide: true, render: (r) => (r.first ? r.summary : "") },
-    { key: "code", title: "科目代號", align: "c", render: (r) => html`<span class="muted num">${r.code}</span>` },
-    { key: "name", title: "會計科目", render: (r) => html`<span class=${r.credit && !r.debit ? "indent" : ""}>${r.name}</span>`, nowrap: true },
+    { key: "s", title: "摘要", elide: true, cls: () => "jsum", tip: (r) => r.summary, render: (r) => (r.first ? r.summary : "") },
+    { key: "name", title: "會計科目", render: (r) => html`<span class=${r.credit && !r.debit ? "indent" : ""}><span class="muted num code">${r.code}</span>${r.name}</span>`, nowrap: true },
     { key: "dr", title: "借方金額", align: "r", render: (r) => (r.debit ? html`<span class="num c-income">${num(r.debit)}</span>` : "") },
     { key: "cr", title: "貸方金額", align: "r", render: (r) => (r.credit ? html`<span class="num c-expense">${num(r.credit)}</span>` : "") },
+    { key: "memo", title: "行備註", elide: true, cls: () => "jmemo", render: (r) => r.memo || "" },
   ];
-  return html`<div class="row wrap"><${TextInput} icon="search" value=${kw} onInput=${setKw} placeholder="搜尋摘要或會計科目…" />
+  return html`<div class="row wrap"><${TextInput} icon="search" value=${kw} onInput=${setKw} placeholder="搜尋摘要、會計科目或行備註…" />
       <${Btn} kind="primary" icon="plus" onClick=${() => openJournal()}>新增分錄</${Btn}>
       <div class="grow"></div>${entries && html`<b class=${ok ? "c-income" : "c-expense"}>傳票 ${entries.length} 張　｜　借方合計 ${money(d)}　｜　貸方合計 ${money(c)}　${ok ? "✓ 借貸平衡" : `✗ 差額 ${money(d - c)}`}</b>`}</div>
     <div class="card table-card"><${DataTable} columns=${cols} rows=${rows} rowKey=${(r) => r.key} rowCls=${(r) => (r.odd ? "band" : "") + (r.first ? " first" : "")}
       onActivate=${(r) => openVoucher(r.id)} empty=${entries ? "這個期間沒有傳票" : "讀取中…"} /></div>
-    <${Tip}>依日期列出每張傳票的借貸分錄（以本位幣表示，貸方科目內縮）。按兩下可開啟傳票；系統自動產生的投資分錄也會列在這裡。</${Tip}>`;
+    <${Tip}>依日期列出每張傳票的借貸分錄（以本位幣表示，貸方科目內縮），最右邊是傳票上每一行的行備註。按兩下可開啟傳票；系統自動產生的投資分錄也會列在這裡。</${Tip}>`;
 }
 
 function Ledger({ start, end, meta, pending, drill, back }) {
   const [key, setKey] = useState(drill ? drill.key : pending.account ? `account:${pending.account}` : (meta.accounts[0] ? `account:${meta.accounts[0].id}` : meta.subjects[0]?.key));
   const [lg] = useLoad(() => (key ? api("report_ledger", key, start, end) : null), [key, start, end]);
   const c = lg ? lg.currency : META.base;
-  const rows = lg ? [{ key: "o", date: start, voucher: "", summary: "期初餘額（上期結轉）", counter: "", debit: 0, credit: 0, balance: lg.opening, _total: true },
+  const rows = lg ? [{ key: "o", date: start, voucher: "", summary: "期初餘額（上期結轉）", memo: "", debit: 0, credit: 0, balance: lg.opening, _total: true },
                      ...lg.rows.map((r, i) => ({ ...r, key: i })),
-                     { key: "t", date: end, voucher: "", summary: "本期合計", counter: "", debit: lg.debit_total, credit: lg.credit_total, balance: lg.closing, _total: true }] : [];
+                     { key: "t", date: end, voucher: "", summary: "本期合計", memo: "", debit: lg.debit_total, credit: lg.credit_total, balance: lg.closing, _total: true }] : [];
   const cols = [
     { key: "date", title: "日期", render: (r) => html`<span class="num">${ymd(r.date)}</span>`, nowrap: true },
     { key: "v", title: "傳票號碼", align: "c", render: (r) => html`<span class="muted num">${r.voucher}</span>` },
     { key: "s", title: "摘要", elide: true, cls: () => "grow", render: (r) => r.summary },
-    { key: "c", title: "對方科目", elide: true, render: (r) => r.counter },
+    { key: "m", title: "行備註", elide: true, render: (r) => r.memo || "" },
     { key: "dr", title: "借方", align: "r", render: (r) => (r.debit ? html`<span class="num c-income">${num(r.debit, c)}</span>` : "") },
     { key: "cr", title: "貸方", align: "r", render: (r) => (r.credit ? html`<span class="num c-expense">${num(r.credit, c)}</span>` : "") },
     { key: "b", title: "餘額", align: "r", render: (r) => html`<b class="num">${num(r.balance, c)}</b>` },

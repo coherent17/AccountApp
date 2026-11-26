@@ -13,16 +13,16 @@ const act = (label) => [".head .actions .btn", label];
 const foot = (label) => [".dfoot .btn", label];
 const field = (label) => [".field > label", label, "up"];        // 框住整個欄位，不會被說明文字裡的同名字樣誤認
 
-export const NEWS_VERSION = "3.10";          // 「已更新到」視窗在這一版會多一個「帶我看看新功能」
+export const NEWS_VERSION = "3.10";          // 3.10.x 都顯示（版本號前兩段相同）          // 「已更新到」視窗在這一版會多一個「帶我看看新功能」
 export const GROUPS = [["news", "這一版的新功能"], ["flow", "一步一步怎麼做"], ["page", "認識每一頁"], ["dialog", "常用視窗"]];
 
 export const GUIDES = {
   // ================================================================ 這一版的新功能
-  news: { group: "news", title: "3.10 版的新功能", icon: "gift", desc: "操作導覽在哪裡、怎麼再看一次", steps: [
-    { t: ".side [data-g=help]", title: "操作導覽都在這裡", text: "所有的導覽都收在「操作導覽」，隨時可以重看；也可以按 [[F1]]。" },
-    { go: "reports", t: ".ph .helpbtn", title: "每一頁標題旁都有 ?", text: "按一下，就會在這一頁上一步一步帶您看。" },
-    { t: ".side [data-g=search]", title: "也可以用搜尋找", text: "在搜尋輸入「對帳」、「評價」，會一併列出相關的導覽。" },
-    { go: "settings", before: tab("個人與外觀"), t: field("操作導覽"), title: "不想看到提示？", text: "第一次到某一頁時，右下角只會輕輕提示一次。這裡可以關掉，或讓所有提示重新出現。" },
+  news: { group: "news", title: "3.10.1 版的新功能", icon: "gift", desc: "行備註、自訂比較期間", steps: [
+    { go: "reports", before: tab("分類帳"), t: [".page-fill thead th", "行備註"], title: "分類帳顯示行備註", text: "原本的「對方科目」改為傳票上這一行的**行備註**；列印與匯出 Excel 也一樣。" },
+    { before: tab("日記帳"), t: [".page-fill thead th", "行備註"], title: "日記帳多了行備註", text: "每個科目右邊列出它在傳票上的行備註；上方的搜尋也找得到行備註。" },
+    { before: tab("收支損益表"), t: [".page-fill > .row .lbl", "比較", "up"], title: "自訂比較期間", text: "「比較」選**自訂比較期間**，就能自己選比較的期間；資產負債表則是選比較日。列印時也可以用同一組日期。收支損益表的「筆數」欄已拿掉。" },
+    { t: ".side [data-g=help]", title: "忘記了隨時再看", text: "所有導覽都在「操作導覽」，也可以按 [[F1]]。" },
   ] },
 
   // ================================================================ 一步一步怎麼做
@@ -107,7 +107,7 @@ export const GUIDES = {
   reports: { group: "page", page: "reports", title: "財務報表", icon: "report", desc: "十種報表、期間、比較、列印與匯出", steps: [
     { t: ".filters .pchips", title: "報表期間", text: "選一次，所有報表都用同一個期間。" },
     { t: ".tabs", title: "十種報表", text: "四大報表與收支分析、帳簿（日記帳、分類帳、試算表）、報稅彙總，以細線分組。" },
-    { before: tab("資產負債表"), t: [".page-fill > .row .lbl", "比較", "up"], optional: true, title: "比較兩期", text: "與上一期或去年同期比較，會多出增減金額與百分比。" },
+    { before: tab("資產負債表"), t: [".page-fill > .row .lbl", "比較", "up"], optional: true, title: "比較兩期", text: "與上一期、去年同期，或**自訂比較期間**比較，會多出增減金額與百分比。" },
     { t: ".table-card", title: "點科目看分類帳", text: "**點一下科目**會開啟同一期間的分類帳，再按兩下開啟傳票。" },
     { t: act("列印"), title: "列印與 PDF", text: "勾選要印的報表，會先預覽；印表機選「另存為 PDF」就能存檔。" },
     { t: act("匯出 Excel"), title: "匯出 Excel", text: "合計都是公式，可以自己選要哪些工作表。" },

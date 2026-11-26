@@ -63,7 +63,7 @@ function PrintDialog({ o, start, end, close }) {
     <p class="muted">期間：${ymd(start)} 至 ${ymd(end)}（依財務報表頁上方的期間）</p>
     <div class="checks">${o.reports.map(([k, name]) => html`<${Check} checked=${keys.has(k)} onChange=${(v) => toggle(k, v)}>${name}</${Check}>`)}</div>
     <div class="form" style="margin-top:1rem">
-      <${Field} label="比較方式" hint="資產負債表、收支損益表與財務比率的比較欄"><${Select} value=${cmp} onChange=${setCmp} options=${[["none", "不比較"], ["prior_period", "與上一期比較"], ["prior_year", "與去年同期比較"]]} /></${Field}>
+      <${Field} label="比較方式" hint="資產負債表、收支損益表與財務比率的比較欄"><${Select} value=${cmp} onChange=${setCmp} options=${[["none", "不比較"], ["prior_period", "與上一期比較"], ["prior_year", "與去年同期比較"], ["custom", "自訂比較期間（與財務報表頁相同的日期）"]]} /></${Field}>
     </div>
     <${Check} checked=${landscape} onChange=${setLandscape}>橫向列印（試算表、總分類帳欄位較多時建議使用）</${Check}>
   </${Dialog}>`;

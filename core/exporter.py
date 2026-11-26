@@ -628,9 +628,9 @@ def export_workbook(db: Database, path: str, start: str, end: str, sheets=None) 
 
     # ================================================================ 日記簿
     s = _Sheet(ws_jnl)
-    r = s.title("日記簿（會計分錄）", sub, 8)
+    r = s.title("日記簿（會計分錄）", sub, 9)
     s.header(r, ["日期", "傳票號碼", "摘要", "科目代號", "會計科目", "科目類別",
-                 f"借方金額（{base}）", f"貸方金額（{base}）"])
+                 f"借方金額（{base}）", f"貸方金額（{base}）", "行備註"])
     j_hdr = r
     j_first = r + 1
     for i, e in enumerate(db.journal(start, end)):
@@ -645,6 +645,7 @@ def export_workbook(db: Database, path: str, start: str, end: str, sheets=None) 
             s.cell(r, 6, line_["group"], fill=fill, align="center")
             s.cell(r, 7, line_["debit"] or None, bfmt, fill=fill)
             s.cell(r, 8, line_["credit"] or None, bfmt, fill=fill)
+            s.cell(r, 9, line_.get("memo") or None, fill=fill)
     j_last = max(r, j_first)
     r += 1
     s.cell(r, 5, "借貸合計", bold=True, fill=FILL_TOTAL, align="right")
@@ -654,8 +655,9 @@ def export_workbook(db: Database, path: str, start: str, end: str, sheets=None) 
            align="center")
     s.cell(r, 7, f"=SUM(G{j_first}:G{j_last})", bfmt, bold=True, fill=FILL_TOTAL)
     s.cell(r, 8, f"=SUM(H{j_first}:H{j_last})", bfmt, bold=True, fill=FILL_TOTAL)
-    s.total_border(r, 1, 8, double=True)
-    s.widths([14, 11, 26, 10, 22, 10, 16, 16])
+    s.cell(r, 9, None, fill=FILL_TOTAL)
+    s.total_border(r, 1, 9, double=True)
+    s.widths([14, 11, 26, 10, 22, 10, 16, 16, 22])
     s.print_setup(j_hdr, landscape=True)
     ws_jnl.freeze_panes = f"A{j_hdr + 1}"
 
@@ -811,7 +813,7 @@ def _ledger_sheet(db: Database, ws, start: str, end: str, sub: str, acodes: dict
     """分類帳：每個會計科目一段，期初餘額、逐筆借貸、以公式累計餘額，並與帳上期末餘額核對。"""
     s = _Sheet(ws)
     r = s.title("分類帳", sub + "　｜　資產、負債科目為原幣，其餘為本位幣", 8)
-    s.header(r, ["日期", "傳票號碼", "摘要", "對方科目", "借方", "貸方", "餘額", "核對"])
+    s.header(r, ["日期", "傳票號碼", "摘要", "行備註", "借方", "貸方", "餘額", "核對"])
     hdr = r
     n = 0
     for key in keys or [x["key"] for x in db.ledger_subjects()]:
@@ -840,7 +842,7 @@ def _ledger_sheet(db: Database, ws, start: str, end: str, sub: str, acodes: dict
             s.cell(r, 1, _d(row["date"]), DATE, fill=fill, align="center")
             s.cell(r, 2, row["voucher"], fill=fill, align="center")
             s.cell(r, 3, row["summary"], fill=fill)
-            s.cell(r, 4, row["counter"], fill=fill)
+            s.cell(r, 4, row.get("memo") or "", fill=fill)
             s.cell(r, 5, row["debit"] or None, fmt, fill=fill)
             s.cell(r, 6, row["credit"] or None, fmt, fill=fill)
             s.cell(r, 7, f"=G{r - 1}+E{r}-F{r}" if debit_side else f"=G{r - 1}+F{r}-E{r}", fmt, fill=fill)
