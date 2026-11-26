@@ -83,6 +83,7 @@ class Report:
         name = CURRENCIES.get(self.base, (self.base,))[0]
         self.unit = f"單位：{name}（{self.base}）"
         self.owner = f"編製者：{escape(owner)}"
+        self.custom = db.get_json(st.CUSTOM_KEY, {}) or {}       # 自訂比較期間（與財務報表頁相同）
         self.made = f"列印時間：{dt.datetime.now():%Y/%m/%d %H:%M}"
 
     # ------------------------------------------------------------------ 共用
@@ -167,13 +168,14 @@ class Report:
                                       (escape(e["summary"]) if k == 0 else "", ""),
                                       (escape(ln["code"]), "c"),
                                       (("" if ln["debit"] else "　　") + escape(ln["name"]), ""),
-                                      (_n(ln["debit"], self.base), "r"), (_n(ln["credit"], self.base), "r")]))
+                                      (_n(ln["debit"], self.base), "r"), (_n(ln["credit"], self.base), "r"),
+                                      (escape(ln.get("memo") or ""), "")]))
         ok = "✓ 借貸平衡" if abs(d - c) < 0.5 else "✗ 借貸不平衡"
         rows.append(self._tr([("", ""), ("", ""), ("", ""), ("", ""), (f"借貸合計　{ok}", "r"),
-                              (fmt_num(d, self.base), "r"), (fmt_num(c, self.base), "r")], "tot"))
+                              (fmt_num(d, self.base), "r"), (fmt_num(c, self.base), "r"), ("", "")], "tot"))
         return (self._head("日記簿", f"期間：{fmt_date(start)} 至 {fmt_date(end)}", first)
                 + self._table([("日期", ""), ("傳票號碼", ""), ("摘要", ""), ("代號", ""), ("會計科目", ""),
-                               ("借方", ""), ("貸方", "")], rows, [12, 11, 20, 7, 22, 14, 14]))
+                               ("借方", ""), ("貸方", ""), ("行備註", "")], rows, [11, 10, 17, 6, 19, 12, 12, 13]))
 
     def ledger(self, start: str, end: str, first: bool = True, key: tuple | None = None) -> str:
         """總分類帳；指定 key 時只列那一個會計科目（沒有異動也列出）。"""
@@ -189,7 +191,7 @@ class Report:
                               ("", ""), (fmt_num(lg["opening"], cur), "r")])]
             for r in lg["rows"]:
                 rows.append(self._tr([(fmt_date(r["date"]), "c"), (escape(r["voucher"]), "c"),
-                                      (escape(r["summary"]), ""), (escape(r["counter"]), ""),
+                                      (escape(r["summary"]), ""), (escape(r.get("memo") or ""), ""),
                                       (_n(r["debit"], cur), "r"), (_n(r["credit"], cur), "r"),
                                       (fmt_num(r["balance"], cur), "r")]))
             rows.append(self._tr([("", ""), ("", ""), ("本期合計／期末餘額", "b"), ("", ""),
@@ -198,7 +200,7 @@ class Report:
             out.append(f'<h2>{lg["code"]}　{escape(lg["name"])}'
                        f'<span style="font-size:9pt; font-weight:normal; color:#475569">'
                        f'　（{escape(lg["label"])}，{cur}，正常餘額在{lg["normal_side"]}方）</span></h2>')
-            out.append(self._table([("日期", ""), ("傳票號碼", ""), ("摘要", ""), ("對方科目", ""), ("借方", ""),
+            out.append(self._table([("日期", ""), ("傳票號碼", ""), ("摘要", ""), ("行備註", ""), ("借方", ""),
                                     ("貸方", ""), ("餘額", "")], rows, [12, 11, 21, 20, 12, 12, 12]))
         if not n:
             out.append("<p>本期間沒有任何紀錄。</p>")
@@ -221,7 +223,7 @@ class Report:
                 + '<p class="sub">期初餘額＋本期借貸發生額＝期末餘額；損益科目只有本期發生額。</p>')
 
     def bs(self, start: str, end: str, first: bool = True, compare: str = "none") -> str:
-        cdate = st.compare_date(compare, start, end)
+        cdate = st.compare_date(compare, start, end, self.custom)
         data = st.balance_sheet(self.db, end, cdate)
         cmp = cdate is not None
         rows = []
@@ -251,7 +253,7 @@ class Report:
         return self._head(title, period, first) + self._table(heads, rows, widths)
 
     def income(self, start: str, end: str, first: bool = True, compare: str = "none") -> str:
-        crange = st.compare_range(compare, start, end)
+        crange = st.compare_range(compare, start, end, self.custom)
         data = st.income_statement(self.db, start, end, crange)
         cmp = crange is not None
         rows = []
@@ -286,7 +288,7 @@ class Report:
         return self._head("比較收支損益表" if cmp else "收支損益表", period, first) + self._table(heads, rows, widths)
 
     def ratios(self, start: str, end: str, first: bool = True, compare: str = "none") -> str:
-        crange = st.compare_range(compare, start, end)
+        crange = st.ratio_range(compare, start, end, self.custom)
         cmp = crange is not None
         rows = []
         for r in st.ratios(self.db, start, end, crange):

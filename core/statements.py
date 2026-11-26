@@ -12,7 +12,8 @@ import datetime as _dt
 
 from .database import ADJUST_ACCOUNT, FX_ACCOUNT, REALIZED_ACCOUNT, money_round
 
-COMPARE_MODES = [("none", "不比較"), ("prior_period", "與上一期比較"), ("prior_year", "與去年同期比較")]
+COMPARE_MODES = [("none", "不比較"), ("prior_period", "與上一期比較"), ("prior_year", "與去年同期比較"), ("custom", "自訂比較期間")]
+CUSTOM_KEY = "report_compare_custom"      # 自訂比較期間：{"date": 資產負債表的比較日, "start", "end": 收支損益表的比較期間}
 
 
 def _d(s: str) -> _dt.date:
@@ -43,7 +44,21 @@ def previous_period(start: str, end: str) -> tuple[str, str]:
     return (pe - _dt.timedelta(days=days - 1)).isoformat(), pe.isoformat()
 
 
-def compare_range(mode: str, start: str, end: str) -> tuple[str, str] | None:
+def _iso(v) -> str | None:
+    try:
+        return _d(str(v)).isoformat() if v else None
+    except ValueError:
+        return None
+
+
+def compare_range(mode: str, start: str, end: str, custom: dict | None = None) -> tuple[str, str] | None:
+    """收支損益表的比較期間。custom（自訂）沒有填或填錯時，改用上一期。"""
+    if mode == "custom":
+        c = custom if isinstance(custom, dict) else {}
+        s, e = _iso(c.get("start")), _iso(c.get("end"))
+        if not (s and e):
+            return previous_period(start, end)
+        return (s, e) if s <= e else (e, s)
     if mode == "prior_period":
         return previous_period(start, end)
     if mode == "prior_year":
@@ -51,13 +66,24 @@ def compare_range(mode: str, start: str, end: str) -> tuple[str, str] | None:
     return None
 
 
-def compare_date(mode: str, start: str, end: str) -> str | None:
+def compare_date(mode: str, start: str, end: str, custom: dict | None = None) -> str | None:
     """資產負債表的比較基準日。"""
+    if mode == "custom":
+        c = custom if isinstance(custom, dict) else {}
+        return _iso(c.get("date")) or (_d(start) - _dt.timedelta(days=1)).isoformat()
     if mode == "prior_period":
         return (_d(start) - _dt.timedelta(days=1)).isoformat()
     if mode == "prior_year":
         return shift_year(end)
     return None
+
+
+def ratio_range(mode: str, start: str, end: str, custom: dict | None = None) -> tuple[str, str] | None:
+    """資產負債表頁、列印的財務比率比較期間。自訂時為截至比較日、長度與本期相同的一段。"""
+    if mode != "custom":
+        return compare_range(mode, start, end)
+    e = _d(compare_date(mode, start, end, custom))
+    return (e - (_d(end) - _d(start))).isoformat(), e.isoformat()
 
 
 def change(cur: float | None, prev: float | None) -> tuple[float | None, float | None]:

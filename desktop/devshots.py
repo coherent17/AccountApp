@@ -326,6 +326,30 @@ def _guide_check(win, out: str) -> None:
         _grab(win, os.path.join(out, f"g_{name}.png"))
 
 
+# 3.10.1：她的回饋 1151126（MY_LEDGER_SCENES=fb1126）：分類帳與日記帳的行備註、收支損益表沒有筆數、自訂比較期間
+_MKMEMO = ("(async () => { const f = await pywebview.api.journal_form(null); const k = (n) => f.chart.find(c => c.name === n).key;"
+           " await pywebview.api.journal_save({date: new Date().toISOString().slice(0, 10), note: '1151101-1151122 台銀NT 彙整', tags: [],"
+           " lines: [{key: k('日常用品'), debit: 2930, memo: '玉山信用卡費'}, {key: k('日常用品'), debit: 9223, memo: '星展信用卡費'},"
+           " {key: k('居家水電'), debit: 2442, memo: '電費'}, {key: k('台銀活存'), credit: 14595, memo: '1151101-1151122'}]}); })()")
+_SELCMP = ("(() => {{ const s = [...document.querySelectorAll('.cmpbar select')].pop(); const i = [...s.options].findIndex(o => o.text.includes('{}'));"
+           " s.value = i; s.dispatchEvent(new Event('change', {{bubbles: true}})); }})()")
+FB1126 = []
+for scale in ("normal", "large"):
+    s = f"fb_{scale}_"
+    FB1126 += [(s + "seed", f"__t.prefs('light', '{scale}'); " + (_MKMEMO if scale == "normal" else "0"), 1.5),
+               (s + "ledger", "window.__pendingReport = {tab: 'ledger'}; __t.go('dashboard'); setTimeout(() => __t.go('reports'), 300)", 3),
+               (s + "ledger_pick", "const li = document.querySelector('.ledger-pick input'); li.focus(); li.value = '日常用品';"
+                " li.dispatchEvent(new Event('input', {bubbles: true})); setTimeout(() => document.querySelector('.pop.floating > div').dispatchEvent(new MouseEvent('mousedown', {bubbles: true})), 400)", 2),
+               (s + "ledger_end", "document.querySelector('.page-fill .tablewrap').scrollTop = 99999", 1),
+               (s + "journal", "__t.tab('日記帳')", 2), (s + "journal_kw", "const i = document.querySelector('.page-fill .text input'); i.value = '星展';"
+                " i.dispatchEvent(new Event('input', {bubbles: true}))", 2),
+               (s + "is", "__t.tab('收支損益表')", 2), (s + "is_custom", _SELCMP.format("自訂"), 2),
+               (s + "bs", "__t.tab('資產負債表')", 2), (s + "bs_custom", _SELCMP.format("自訂"), 2),
+               (s + "bs_back", _SELCMP.format("不比較") + "; setTimeout(() => " + _SELCMP.format("不比較").replace("{{", "{").replace("}}", "}") + ", 50)", 1.5),
+               (s + "print", "__t.openPrint && 0", 0.5)]
+FB1126 = [(n, j.replace("{{", "{").replace("}}", "}") if n.endswith(("_custom", "_back")) else j, w) for n, j, w in FB1126]
+
+
 # README 用的截圖（MY_LEDGER_SCENES=readme）：淺色、大字，範例帳本
 README = [
     ("readme_dashboard", "__t.prefs('light', 'large'); __t.go('dashboard')", 3.5),
@@ -499,13 +523,21 @@ def run(win, out: str) -> None:
     only = [s for s in os.environ.get("MY_LEDGER_SCENES", "").split(",") if s]
     time.sleep(5)
     errors = []
-    scenes = {"readme": README, "mom": MOM, "audit": AUDIT, "features": FEATURES, "flow": FLOW, "xl": XL, "guard": [("guard", _guard_check, 0.5)], "guide": [("guide", _guide_check, 0.5)]}.get(only[0] if len(only) == 1 else "", SCENES)
-    if only in (["mom"], ["audit"], ["features"], ["flow"], ["guard"], ["guide"]) or (only and os.environ.get("MY_LEDGER_VIEW")):
+    scenes = {"readme": README, "mom": MOM, "audit": AUDIT, "features": FEATURES, "flow": FLOW, "xl": XL, "fb1126": FB1126, "guard": [("guard", _guard_check, 0.5)], "guide": [("guide", _guide_check, 0.5)]}.get(only[0] if len(only) == 1 else "", SCENES)
+    if only in (["mom"], ["audit"], ["features"], ["flow"], ["guard"], ["guide"], ["fb1126"]) or (only and os.environ.get("MY_LEDGER_VIEW")):
         view = os.environ.get("MY_LEDGER_VIEW")
         if view:          # 畫面可用範圍（CSS 像素）× 放大倍率 ＋ 視窗外框
             size, scale = view.split("@")
-            w, h = (round(int(x) * float(scale)) for x in size.split("x"))
-            win.resize(w + 16, h + 39)
+            tw, th = (int(x) for x in size.split("x"))
+            w, h = round(tw * float(scale)) + 16, round(th * float(scale)) + 39
+            for _ in range(6):        # 視窗大小的單位會隨這台電腦的 Windows 縮放而不同：量畫面內的大小再修正，直到剛好是她的 1024×528
+                win.resize(w, h)
+                time.sleep(0.8)
+                vw, vh = (int(x) for x in win.evaluate_js("innerWidth + 'x' + innerHeight").split("x"))
+                if (vw, vh) == (tw, th):
+                    break
+                w = round(w + (tw - vw) * (w - 16) / max(vw, 1))      # 依目前「視窗單位 ÷ 畫面像素」的比例補差
+                h = round(h + (th - vh) * (h - 39) / max(vh, 1))
         else:
             win.resize(1280, 720)
         time.sleep(1.5)
@@ -523,7 +555,7 @@ def run(win, out: str) -> None:
         time.sleep(wait)
         if name.startswith("mom_") and not name.endswith(("_close", "_combo_open")):
             print(f"{name}: {win.evaluate_js('window.__t.visibleRows()')}", flush=True)
-        if name.startswith(("audit_", "feat_", "flow_")) and not name.endswith(("_close", "_dlg_search")):
+        if name.startswith(("audit_", "feat_", "flow_", "fb_")) and not name.endswith(("_close", "_dlg_search")):
             print(f"{name}: {win.evaluate_js('window.__t.audit()')}", flush=True)
         if name.startswith("flow_"):
             print(f"   對話框：{win.evaluate_js("[...document.querySelectorAll('.dialog h2')].map(x => x.textContent).join(' > ')")}", flush=True)

@@ -96,7 +96,8 @@ def main() -> int:
     api = Api(dbt, db, folder, demo)
     title = "我的理財帳本" + ("（範例帳本）" if demo else "")
     place = {"x": -4000, "y": 40, "focus": False} if (shot or smoke or close_test) else {"maximized": True}
-    win = webview.create_window(title, UI, js_api=api, width=1440, height=900, min_size=(1100, 700),
+    win = webview.create_window(title, UI, js_api=api, width=1440, height=900,
+                          min_size=(400, 300) if shot else (1100, 700),     # 截圖模擬她的螢幕時要能縮到 1024×528（高 DPI 的電腦上 1100 會比她整個畫面還大）
                                 background_color="#F4F5FA", **place)
     api._window = win
     from desktop import devshots
